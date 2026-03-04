@@ -5,6 +5,7 @@ from datetime import timedelta
 from functools import wraps
 from ipaddress import ip_address, ip_network
 from typing import ParamSpec, TypeVar, cast
+from urllib.parse import urlsplit
 
 import bcrypt
 from flask import (
@@ -44,13 +45,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     allowed_networks = tuple(ip_network(cidr, strict=False) for cidr in resolved_settings.allowed_cidrs)
 
     def get_client_ip() -> str:
-        forwarded = request.headers.get("X-Forwarded-For", "")
-        if forwarded:
-            candidate = forwarded.split(",")[0].strip()
-            if candidate:
-                return candidate
-        remote = request.remote_addr or ""
-        return remote
+        return request.remote_addr or ""
 
     def is_allowed_network() -> bool:
         client_ip = get_client_ip()
@@ -88,6 +83,21 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
 
     def api_error(error: ServiceError) -> ResponseReturnValue:
         return jsonify({"error": error.error_code, "message": str(error)}), error.status_code
+
+    def sanitize_next_path(raw_next: str | None) -> str | None:
+        if raw_next is None:
+            return None
+        next_path = raw_next.strip()
+        if not next_path:
+            return None
+        parsed = urlsplit(next_path)
+        if parsed.scheme or parsed.netloc:
+            return None
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            return None
+        if any(c in next_path for c in "\r\n\t\x00"):
+            return None
+        return next_path
 
     def require_approver_session(view: Callable[P, R]) -> Callable[P, R]:
         @wraps(view)
@@ -246,14 +256,18 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
 
     @app.route("/login", methods=["GET", "POST"])
     def ui_login() -> ResponseReturnValue:
+        next_path = sanitize_next_path(request.args.get("next"))
         if request.method == "GET":
-            return Response(render_template("login.html"), 200)
+            return Response(render_template("login.html", next_path=next_path), 200)
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        next_path = sanitize_next_path(request.form.get("next")) or next_path
 
         if username != resolved_settings.ui_username:
             flash("Invalid username or password", "error")
+            if next_path is not None:
+                return redirect(url_for("ui_login", next=next_path))
             return redirect(url_for("ui_login"))
 
         try:
@@ -266,10 +280,14 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
 
         if not valid:
             flash("Invalid username or password", "error")
+            if next_path is not None:
+                return redirect(url_for("ui_login", next=next_path))
             return redirect(url_for("ui_login"))
 
         session["username"] = username
         session["auth_at"] = isoformat_z(utc_now())
+        if next_path is not None:
+            return redirect(next_path)
         return redirect(url_for("ui_tickets"))
 
     @app.post("/logout")
@@ -287,7 +305,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     @app.get("/tickets/<ticket_id>")
     def ui_ticket_detail(ticket_id: str) -> ResponseReturnValue:
         if get_session_user() is None:
-            return redirect(url_for("ui_login"))
+            return redirect(url_for("ui_login", next=request.path))
         ticket = service.get_ticket(ticket_id)
         return Response(render_template("ticket_detail.html", ticket=ticket), 200)
 

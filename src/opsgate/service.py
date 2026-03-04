@@ -16,6 +16,16 @@ from .config import OpsGateSettings, SubmitterPolicy
 
 OPEN_TICKET_STATES = {"pending_approval", "approved", "running"}
 TERMINAL_STATES = {"succeeded", "failed", "rejected", "canceled", "expired"}
+RUNNER_EVENT_TYPES = {
+    "heartbeat",
+    "step_started",
+    "step_finished",
+    "step_failed",
+    "timeout",
+    "failed",
+    "ticket_succeeded",
+    "invalid_plan",
+}
 
 
 class ServiceError(RuntimeError):
@@ -95,12 +105,12 @@ def parse_execution_plan(raw_plan: Any) -> list[dict[str, str]]:
 
 def parse_policy_requirements(raw_policy: Any) -> dict[str, bool]:
     if raw_policy in (None, ""):
-        return {"require_reviewer_step": False}
+        return {}
     if not isinstance(raw_policy, dict):
         raise ServiceError("policy_requirements must be an object", 400, "invalid_policy_requirements")
 
     if "require_reviewer_step" not in raw_policy:
-        return {"require_reviewer_step": False}
+        return {}
 
     require_reviewer_step = raw_policy["require_reviewer_step"]
     if not isinstance(require_reviewer_step, bool):
@@ -118,9 +128,10 @@ def merge_policy_requirements(
     ticket_policy: dict[str, bool],
 ) -> dict[str, bool]:
     floor_requires_reviewer = bool(token_policy_floor.get("require_reviewer_step", False))
+    ticket_has_reviewer_key = "require_reviewer_step" in ticket_policy
     ticket_requires_reviewer = bool(ticket_policy.get("require_reviewer_step", False))
 
-    if floor_requires_reviewer and not ticket_requires_reviewer and ticket_policy.get("require_reviewer_step") is False:
+    if floor_requires_reviewer and ticket_has_reviewer_key and not ticket_requires_reviewer:
         raise ServiceError(
             "Ticket policy cannot weaken submit token policy floor",
             400,
@@ -834,8 +845,12 @@ class OpsGateService:
         user_agent: str | None,
     ) -> dict[str, Any]:
         event_type = str(payload.get("event", "heartbeat")).strip().lower() or "heartbeat"
+        if event_type not in RUNNER_EVENT_TYPES:
+            raise ServiceError("Invalid runner event", 400, "invalid_runner_event")
         new_state_raw = payload.get("state")
+        new_result_raw = payload.get("result")
         result_detail = str(payload.get("result_detail", "")).strip()
+        tmux_sessions_raw = payload.get("tmux_sessions")
 
         with self._connection() as conn:
             row = self._select_ticket(conn, ticket_id)
@@ -849,6 +864,10 @@ class OpsGateService:
                 raise ServiceError("Ticket cannot receive runner status in current state", 409, "invalid_state")
             if new_state_raw is None and previous_state != "running":
                 raise ServiceError("Heartbeat requires running state", 409, "invalid_state")
+            if previous_state == "running":
+                assigned_runner_host = str(row["runner_host"] or "").strip()
+                if assigned_runner_host and assigned_runner_host != runner_host:
+                    raise ServiceError("Runner host does not own this running ticket", 409, "runner_host_mismatch")
 
             now = isoformat_z(utc_now())
 
@@ -877,6 +896,12 @@ class OpsGateService:
                 elif requested_state == "canceled":
                     result_value = "canceled"
 
+            if new_result_raw is not None:
+                requested_result = str(new_result_raw).strip().lower()
+                if requested_result not in {"success", "failure", "timeout", "canceled"}:
+                    raise ServiceError("Invalid runner result", 400, "invalid_runner_result")
+                result_value = requested_result
+
             if result_value is not None:
                 update_fields.append("result = ?")
                 update_values.append(result_value)
@@ -884,6 +909,12 @@ class OpsGateService:
             if result_detail:
                 update_fields.append("result_detail = ?")
                 update_values.append(result_detail)
+
+            if tmux_sessions_raw is not None:
+                if not isinstance(tmux_sessions_raw, list):
+                    raise ServiceError("tmux_sessions must be an array", 400, "invalid_tmux_sessions")
+                update_fields.append("tmux_sessions_json = ?")
+                update_values.append(json.dumps(tmux_sessions_raw, sort_keys=True))
 
             update_values.append(ticket_id)
             conn.execute(

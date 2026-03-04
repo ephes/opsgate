@@ -102,6 +102,80 @@ def create_ticket(
     return response.get_json()["id"]
 
 
+def test_ui_ticket_detail_redirects_to_login_with_next(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Needs approval",
+        summary="Redirect check",
+        task_ref="ui-next-1",
+    )
+    response = client.get(f"/tickets/{ticket_id}", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith(f"/login?next=/tickets/{ticket_id}")
+
+
+def test_login_redirects_to_requested_next_path(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Needs approval",
+        summary="Redirect check",
+        task_ref="ui-next-2",
+    )
+    redirect_to_login = client.get(f"/tickets/{ticket_id}", follow_redirects=False)
+    assert redirect_to_login.status_code == 302
+    login_path = redirect_to_login.headers["Location"]
+
+    login_response = client.post(
+        login_path,
+        data={"username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    assert login_response.headers["Location"] == f"/tickets/{ticket_id}"
+
+
+def test_login_ignores_external_next_path(client: Any) -> None:
+    response = client.post(
+        "/login?next=https://example.com/steal",
+        data={"username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+
+def test_login_ignores_protocol_relative_next_path(client: Any) -> None:
+    response = client.post(
+        "/login?next=//evil.example/steal",
+        data={"username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+
+def test_login_ignores_javascript_next_path(client: Any) -> None:
+    response = client.post(
+        "/login?next=javascript:alert(1)",
+        data={"username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+
+def test_login_ignores_control_chars_in_next_path(client: Any) -> None:
+    response = client.post(
+        "/login?next=/tickets/test%0D%0Ainvalid",
+        data={"username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+
 def test_create_and_get_ticket_submit_token(client: Any) -> None:
     payload = {
         "title": "Investigate disk alert",
@@ -176,6 +250,20 @@ def test_policy_floor_cannot_be_weakened(client: Any) -> None:
     assert response.status_code == 400
     body = response.get_json()
     assert body["error"] == "policy_floor_violation"
+
+
+def test_policy_floor_omitted_ticket_policy_uses_floor(client: Any) -> None:
+    payload = {
+        "title": "Operator task with omitted policy",
+        "summary": "Should inherit floor",
+        "execution_plan": [
+            {"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}
+        ],
+    }
+    response = client.post("/api/v1/tickets", headers=auth_headers("operator-token-00000000000"), json=payload)
+    assert response.status_code == 201
+    body = response.get_json()
+    assert body["policy_requirements"]["require_reviewer_step"] is True
 
 
 def test_lazy_expiry_blocks_approval(client: Any) -> None:
@@ -389,6 +477,171 @@ def test_runner_status_rejects_terminal_state_regression(client: Any) -> None:
     assert heartbeat_after_terminal.get_json()["error"] == "invalid_state"
 
 
+def test_runner_status_accepts_timeout_result_and_tmux_sessions(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Runner timeout result",
+        summary="Timeout result update",
+        task_ref="status-timeout-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert approve.status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+    assert claim.get_json()["ticket"]["state"] == "running"
+
+    tmux_sessions = [
+        {
+            "step_index": 0,
+            "role": "reviewer",
+            "agent": "codex",
+            "session_name": "job-1",
+            "status": "timeout",
+            "attach_command": "sudo -u ops tmux -L remediation attach -t job-1",
+        }
+    ]
+    failed = client.post(
+        f"/api/v1/runner/{ticket_id}/status",
+        headers=runner_headers(),
+        json={
+            "runner_host": "runner-a",
+            "event": "timeout",
+            "state": "failed",
+            "result": "timeout",
+            "result_detail": "max_duration_seconds_exceeded",
+            "tmux_sessions": tmux_sessions,
+        },
+    )
+    assert failed.status_code == 200
+    body = failed.get_json()
+    assert body["state"] == "failed"
+    assert body["result"] == "timeout"
+    assert body["tmux_sessions"] == tmux_sessions
+
+
+def test_runner_status_rejects_invalid_tmux_sessions_payload(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Runner invalid tmux payload",
+        summary="Invalid payload test",
+        task_ref="status-invalid-tmux-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert approve.status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+
+    invalid = client.post(
+        f"/api/v1/runner/{ticket_id}/status",
+        headers=runner_headers(),
+        json={"runner_host": "runner-a", "tmux_sessions": {"bad": "value"}},
+    )
+    assert invalid.status_code == 400
+    assert invalid.get_json()["error"] == "invalid_tmux_sessions"
+
+
+def test_runner_status_rejects_runner_host_mismatch(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Runner host mismatch",
+        summary="Host mismatch update",
+        task_ref="status-host-mismatch-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert approve.status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+
+    mismatch = client.post(
+        f"/api/v1/runner/{ticket_id}/status",
+        headers=runner_headers(),
+        json={"runner_host": "runner-b", "event": "heartbeat"},
+    )
+    assert mismatch.status_code == 409
+    assert mismatch.get_json()["error"] == "runner_host_mismatch"
+
+
+def test_runner_status_rejects_invalid_event_type(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Runner invalid event",
+        summary="Invalid event update",
+        task_ref="status-invalid-event-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert approve.status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+
+    invalid_event = client.post(
+        f"/api/v1/runner/{ticket_id}/status",
+        headers=runner_headers(),
+        json={"runner_host": "runner-a", "event": "ticket_approved"},
+    )
+    assert invalid_event.status_code == 400
+    assert invalid_event.get_json()["error"] == "invalid_runner_event"
+
+
+def test_runner_status_accepts_step_failed_event(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Runner step failed event",
+        summary="Step failed update",
+        task_ref="status-step-failed-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert approve.status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+
+    step_failed = client.post(
+        f"/api/v1/runner/{ticket_id}/status",
+        headers=runner_headers(),
+        json={
+            "runner_host": "runner-a",
+            "event": "step_failed",
+            "state": "failed",
+            "result": "failure",
+            "result_detail": "step_1_exit_code_7",
+        },
+    )
+    assert step_failed.status_code == 200
+    body = step_failed.get_json()
+    assert body["state"] == "failed"
+    assert body["result"] == "failure"
+    assert body["result_detail"] == "step_1_exit_code_7"
+
+
 def test_get_ticket_forbidden_for_other_submitter_source(client: Any) -> None:
     ticket_id = create_ticket(
         client,
@@ -418,7 +671,8 @@ def test_api_rejects_non_tailscale_source_ip(client: Any) -> None:
     }
     response = client.post(
         "/api/v1/tickets",
-        headers={**auth_headers("nyxmon-token-000000000000"), "X-Forwarded-For": "8.8.8.8"},
+        headers=auth_headers("nyxmon-token-000000000000"),
+        environ_overrides={"REMOTE_ADDR": "8.8.8.8"},
         json=payload,
     )
     assert response.status_code == 403

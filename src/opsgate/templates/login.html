@@ -25,6 +25,9 @@
         {% endif %}
       {% endwith %}
       <form method="post" action="{{ url_for('ui_login') }}">
+        {% if next_path %}
+          <input type="hidden" name="next" value="{{ next_path }}" />
+        {% endif %}
         <label for="username">Username</label>
         <input id="username" name="username" type="text" autocomplete="username" required />
 

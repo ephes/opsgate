@@ -12,3 +12,6 @@ lint: _sync
 
 run: _sync
     uv run python -m opsgate serve
+
+run-runner: _sync
+    uv run python -m opsgate runner

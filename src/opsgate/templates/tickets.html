@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpsGate Tickets</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border-bottom: 1px solid #ddd; text-align: left; padding: 0.5rem; }
+      .row-actions { display: flex; gap: 0.5rem; }
+      .flash-error { color: #a00; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>OpsGate Tickets</h1>
+      <form method="post" action="{{ url_for('ui_logout') }}">
+        <button type="submit">Logout</button>
+      </form>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <p class="flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </header>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Source</th>
+          <th>State</th>
+          <th>Title</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ticket in tickets %}
+          <tr>
+            <td><a href="{{ url_for('ui_ticket_detail', ticket_id=ticket.id) }}">{{ ticket.id }}</a></td>
+            <td>{{ ticket.source }}</td>
+            <td>{{ ticket.state }}</td>
+            <td>{{ ticket.title }}</td>
+            <td>{{ ticket.created_at }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </body>
+</html>

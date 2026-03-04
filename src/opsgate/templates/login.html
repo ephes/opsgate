@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpsGate Login</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
+      main { max-width: 480px; margin: 0 auto; }
+      label { display: block; margin-top: 1rem; }
+      input { width: 100%; padding: 0.5rem; }
+      button { margin-top: 1rem; padding: 0.6rem 1rem; }
+      .flash-error { color: #a00; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OpsGate</h1>
+      <p>Approver login (Tailscale-only context in v1).</p>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <p class="flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      <form method="post" action="{{ url_for('ui_login') }}">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" required />
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button type="submit">Login</button>
+      </form>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpsGate Ticket {{ ticket.id }}</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
+      pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }
+      .actions { display: flex; gap: 0.5rem; margin: 1rem 0; }
+      .flash-error { color: #a00; }
+    </style>
+  </head>
+  <body>
+    <p><a href="{{ url_for('ui_tickets') }}">Back to tickets</a></p>
+    <h1>{{ ticket.title }}</h1>
+    <p><strong>ID:</strong> {{ ticket.id }}</p>
+    <p><strong>State:</strong> {{ ticket.state }}</p>
+    <p><strong>Source:</strong> {{ ticket.source }}</p>
+    <p><strong>Task Ref:</strong> {{ ticket.task_ref or 'n/a' }}</p>
+    <p><strong>Summary:</strong> {{ ticket.summary }}</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <p class="flash-{{ category }}">{{ message }}</p>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% if ticket.state == 'pending_approval' %}
+      <div class="actions">
+        <form method="post" action="{{ url_for('ui_ticket_approve', ticket_id=ticket.id) }}">
+          <button type="submit">Approve</button>
+        </form>
+        <form method="post" action="{{ url_for('ui_ticket_reject', ticket_id=ticket.id) }}">
+          <input type="text" name="reason" placeholder="Reject reason (optional)" />
+          <button type="submit">Reject</button>
+        </form>
+      </div>
+    {% endif %}
+
+    {% if ticket.state in ['pending_approval', 'approved', 'running'] %}
+      <form method="post" action="{{ url_for('ui_ticket_cancel', ticket_id=ticket.id) }}">
+        <input type="text" name="reason" placeholder="Cancel reason (optional)" />
+        <button type="submit">Cancel</button>
+      </form>
+    {% endif %}
+
+    <h2>Execution Plan</h2>
+    <pre>{{ ticket.execution_plan | tojson(indent=2) }}</pre>
+
+    <h2>Policy Requirements</h2>
+    <pre>{{ ticket.policy_requirements | tojson(indent=2) }}</pre>
+
+    <h2>Context</h2>
+    <pre>{{ ticket.context | tojson(indent=2) }}</pre>
+  </body>
+</html>

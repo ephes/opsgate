@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hmac
+import json
+import secrets
 from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
 from ipaddress import ip_address, ip_network
-from typing import ParamSpec, TypeVar, cast
+from typing import Any, ParamSpec, TypeVar, cast
 from urllib.parse import urlsplit
 
 import bcrypt
@@ -21,6 +24,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import OpsGateSettings, load_settings
 from .service import OpsGateService, ServiceError, isoformat_z, parse_iso_datetime, utc_now
@@ -36,10 +40,12 @@ class AccessDenied(ServiceError):
 def create_app(settings: OpsGateSettings | None = None) -> Flask:
     resolved_settings = settings or load_settings()
     app = Flask(__name__, template_folder="templates")
+    if resolved_settings.trust_proxy_headers:
+        cast(Any, app).wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config["SECRET_KEY"] = resolved_settings.session_secret
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = False
+    app.config["SESSION_COOKIE_SECURE"] = resolved_settings.session_cookie_secure
 
     service = OpsGateService(resolved_settings)
     allowed_networks = tuple(ip_network(cidr, strict=False) for cidr in resolved_settings.allowed_cidrs)
@@ -99,6 +105,54 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             return None
         return next_path
 
+    def ensure_csrf_token() -> str:
+        token = session.get("csrf_token")
+        if isinstance(token, str) and token:
+            return token
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+        return token
+
+    def build_manual_ticket_payload() -> dict[str, object]:
+        title = request.form.get("title", "").strip()
+        summary = request.form.get("summary", "").strip()
+        task_ref = request.form.get("task_ref", "").strip()
+        step_role = request.form.get("step_role", "investigator").strip() or "investigator"
+        step_agent = request.form.get("step_agent", "codex").strip() or "codex"
+        prompt_markdown = request.form.get("prompt_markdown", "").strip()
+        expires_at = request.form.get("expires_at", "").strip()
+        max_duration_raw = request.form.get("max_duration_seconds", "").strip()
+        context_raw = request.form.get("context_json", "").strip()
+
+        payload: dict[str, object] = {
+            "title": title,
+            "summary": summary,
+            "execution_plan": [
+                {
+                    "role": step_role,
+                    "agent": step_agent,
+                    "prompt_markdown": prompt_markdown,
+                }
+            ],
+        }
+
+        if task_ref:
+            payload["task_ref"] = task_ref
+        if expires_at:
+            payload["expires_at"] = expires_at
+        if max_duration_raw:
+            payload["max_duration_seconds"] = max_duration_raw
+        if context_raw:
+            try:
+                context = json.loads(context_raw)
+            except json.JSONDecodeError as exc:
+                raise ServiceError(f"context_json must be valid JSON: {exc.msg}", 400, "invalid_context_json") from exc
+            if not isinstance(context, dict):
+                raise ServiceError("context_json must decode to an object", 400, "invalid_context_json")
+            payload["context"] = context
+
+        return payload
+
     def require_approver_session(view: Callable[P, R]) -> Callable[P, R]:
         @wraps(view)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -126,6 +180,19 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             return
         if resolved_settings.require_tailscale_context and not is_allowed_network():
             abort(403)
+
+    @app.before_request
+    def enforce_ui_csrf() -> None:
+        if request.method != "POST" or request.path.startswith("/api/"):
+            return
+        session_token = ensure_csrf_token()
+        form_token = request.form.get("csrf_token", "")
+        if not isinstance(form_token, str) or not hmac.compare_digest(session_token, form_token):
+            raise ServiceError("Invalid form token", 400, "invalid_csrf")
+
+    @app.context_processor
+    def inject_template_globals() -> dict[str, str]:
+        return {"csrf_token": ensure_csrf_token()}
 
     @app.errorhandler(ServiceError)
     def handle_service_error(error: ServiceError) -> ResponseReturnValue:
@@ -284,8 +351,10 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
                 return redirect(url_for("ui_login", next=next_path))
             return redirect(url_for("ui_login"))
 
+        session.clear()
         session["username"] = username
         session["auth_at"] = isoformat_z(utc_now())
+        session["csrf_token"] = secrets.token_urlsafe(32)
         if next_path is not None:
             return redirect(next_path)
         return redirect(url_for("ui_tickets"))
@@ -295,12 +364,31 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         session.clear()
         return redirect(url_for("ui_login"))
 
-    @app.get("/tickets")
+    @app.route("/tickets", methods=["GET", "POST"])
     def ui_tickets() -> ResponseReturnValue:
-        if get_session_user() is None:
+        approver = get_session_user()
+        if approver is None:
             return redirect(url_for("ui_login"))
+
+        if request.method == "POST":
+            ticket = service.create_manual_ticket(
+                build_manual_ticket_payload(),
+                creator=approver,
+                source_ip=get_client_ip(),
+                user_agent=request.headers.get("User-Agent"),
+            )
+            flash("Ticket created and queued for approval", "success")
+            return redirect(url_for("ui_ticket_detail", ticket_id=ticket["id"]))
+
         tickets = service.list_tickets(limit=100)
-        return Response(render_template("tickets.html", tickets=tickets), 200)
+        return Response(
+            render_template(
+                "tickets.html",
+                tickets=tickets,
+                operator_requires_reviewer=service.require_reviewer_step_floor_for_source("operator"),
+            ),
+            200,
+        )
 
     @app.get("/tickets/<ticket_id>")
     def ui_ticket_detail(ticket_id: str) -> ResponseReturnValue:

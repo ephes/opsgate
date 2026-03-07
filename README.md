@@ -2,7 +2,7 @@
 
 OpsGate is a unified control service for ticketed privileged execution.
 
-Phase 4A implementation scope in this repository:
+Phase 4B implementation scope in this repository:
 
 - One process provides JSON API endpoints and web UI routes.
 - SQLite storage with WAL mode.
@@ -15,6 +15,7 @@ Phase 4A implementation scope in this repository:
 - Runner supports restart recovery from local runner state files under `{{ execution_data_dir }}/runner-state`.
 - OpenClaw submit token is optional for this slice (Nyxmon producer is primary).
 - Login supports safe deep-link redirect (`/login?next=/tickets/<id>`) for approval-link UX.
+- Authenticated approvers can create manual tickets in the web UI.
 
 ## Runtime model
 
@@ -31,13 +32,15 @@ Required keys:
 - `OPSGATE_UI_USERNAME`
 - `OPSGATE_UI_PASSWORD_BCRYPT`
 - `OPSGATE_SESSION_SECRET`
+- `OPSGATE_TRUST_PROXY_HEADERS` (default `false`; set `true` behind a trusted reverse proxy)
+- `OPSGATE_SESSION_COOKIE_SECURE` (default `false`; set `true` behind HTTPS ingress)
 - `OPSGATE_SUBMIT_TOKEN_NYXMON`
 - `OPSGATE_SUBMIT_TOKEN_OPERATOR`
 - `OPSGATE_RUNNER_TOKEN`
 
 Useful keys:
 
-- `OPSGATE_SUBMIT_TOKEN_OPENCLAW` (optional in Phase 4A)
+- `OPSGATE_SUBMIT_TOKEN_OPENCLAW` (optional in the current slice)
 - `OPSGATE_DB_PATH` (default `/usr/local/var/opsgate/run/opsgate.sqlite3`)
 - `OPSGATE_BIND_HOST` (default `0.0.0.0`)
 - `OPSGATE_BIND_PORT` (default `8711`)
@@ -81,4 +84,5 @@ Default UI routes:
 
 - `GET /login`
 - `GET /tickets`
+- `POST /tickets`
 - `GET /tickets/:id`

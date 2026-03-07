@@ -381,6 +381,18 @@ def test_build_agent_command_quotes_fallback_agent(tmp_path: Path) -> None:
     assert "--prompt-file" in tokens
 
 
+def test_build_agent_command_uses_codex_exec_with_stdin(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("echo hi\n", encoding="utf-8")
+    command = _build_agent_command("codex", prompt_path)
+
+    assert command == (
+        "codex exec --skip-git-repo-check "
+        "--dangerously-bypass-approvals-and-sandbox "
+        f"- < {shlex.quote(str(prompt_path))}"
+    )
+
+
 def test_build_agent_command_expands_prompt_placeholder_safely(tmp_path: Path) -> None:
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text("echo hi\n", encoding="utf-8")

@@ -255,6 +255,13 @@ class OpsGateService:
     def is_runner_token(self, token: str | None) -> bool:
         return bool(token and hmac.compare_digest(token.strip(), self.settings.runner_token))
 
+    def require_reviewer_step_floor_for_source(self, source: str) -> bool:
+        normalized_source = source.strip().lower()
+        for submitter in self.submitters:
+            if submitter.source.strip().lower() == normalized_source:
+                return submitter.require_reviewer_step_floor
+        return False
+
     def _record_audit_event(
         self,
         conn: sqlite3.Connection,
@@ -340,7 +347,7 @@ class OpsGateService:
         context: dict[str, Any],
         expires_at: str | None,
         max_duration_seconds: int,
-    ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
         return {
             "source": source,
             "task_ref": task_ref,
@@ -352,6 +359,154 @@ class OpsGateService:
             "expires_at": expires_at,
             "max_duration_seconds": max_duration_seconds,
         }
+
+    def _normalize_new_ticket(
+        self,
+        payload: dict[str, Any],
+        *,
+        source: str,
+        require_reviewer_step_floor: bool,
+    ) -> dict[str, Any]:
+        raw_source = str(payload.get("source", source)).strip()
+        if raw_source != source:
+            raise ServiceError(
+                "Ticket source must match the authenticated creation path",
+                403,
+                "source_mismatch",
+            )
+
+        title = str(payload.get("title", "")).strip()
+        summary = str(payload.get("summary", "")).strip()
+        if not title or not summary:
+            raise ServiceError("title and summary are required", 400, "invalid_ticket")
+
+        task_ref_raw = payload.get("task_ref")
+        task_ref = None
+        if task_ref_raw is not None:
+            task_ref_value = str(task_ref_raw).strip()
+            task_ref = task_ref_value if task_ref_value else None
+
+        execution_plan = parse_execution_plan(payload.get("execution_plan"))
+        ticket_policy = parse_policy_requirements(payload.get("policy_requirements"))
+        token_floor = {"require_reviewer_step": require_reviewer_step_floor}
+        effective_policy = merge_policy_requirements(token_floor, ticket_policy)
+        enforce_policy_against_plan(effective_policy, execution_plan)
+
+        context = payload.get("context", {})
+        if context is None:
+            context = {}
+        if not isinstance(context, dict):
+            raise ServiceError("context must be an object", 400, "invalid_ticket")
+
+        expires_at_raw = payload.get("expires_at")
+        expires_at: str | None = None
+        if expires_at_raw is not None:
+            try:
+                expires_at = isoformat_z(parse_iso_datetime(str(expires_at_raw)))
+            except ValueError as exc:
+                raise ServiceError(str(exc), 400, "invalid_expires_at") from exc
+
+        max_duration_seconds_raw = payload.get("max_duration_seconds")
+        if max_duration_seconds_raw is None:
+            max_duration_seconds = self.settings.max_duration_seconds_default
+        else:
+            try:
+                max_duration_seconds = int(max_duration_seconds_raw)
+            except (TypeError, ValueError) as exc:
+                raise ServiceError("max_duration_seconds must be an integer", 400, "invalid_ticket") from exc
+
+        if max_duration_seconds <= 0:
+            raise ServiceError("max_duration_seconds must be > 0", 400, "invalid_ticket")
+
+        payload_for_checksum = self._ticket_payload_from_fields(
+            source=raw_source,
+            task_ref=task_ref,
+            title=title,
+            summary=summary,
+            execution_plan=execution_plan,
+            policy_requirements=effective_policy,
+            context=context,
+            expires_at=expires_at,
+            max_duration_seconds=max_duration_seconds,
+        )
+
+        return {
+            "source": raw_source,
+            "task_ref": task_ref,
+            "title": title,
+            "summary": summary,
+            "execution_plan": execution_plan,
+            "policy_requirements": effective_policy,
+            "context": context,
+            "expires_at": expires_at,
+            "max_duration_seconds": max_duration_seconds,
+            "payload_checksum": compute_payload_checksum(payload_for_checksum),
+        }
+
+    def _insert_ticket(
+        self,
+        normalized_ticket: dict[str, Any],
+        *,
+        created_by: str,
+        actor: str,
+        source_ip: str | None,
+        user_agent: str | None,
+    ) -> dict[str, Any]:
+        ticket_id = str(uuid4())
+        created_at = isoformat_z(utc_now())
+
+        with self._connection() as conn:
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO tickets (
+                        id, source, task_ref, title, summary,
+                        execution_plan_json, policy_requirements_json, context_json,
+                        payload_checksum, approved_payload_checksum,
+                        state, created_by, created_at,
+                        expires_at, max_duration_seconds
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending_approval', ?, ?, ?, ?)
+                    """,
+                    (
+                        ticket_id,
+                        normalized_ticket["source"],
+                        normalized_ticket["task_ref"],
+                        normalized_ticket["title"],
+                        normalized_ticket["summary"],
+                        json.dumps(normalized_ticket["execution_plan"], sort_keys=True),
+                        json.dumps(normalized_ticket["policy_requirements"], sort_keys=True),
+                        json.dumps(normalized_ticket["context"], sort_keys=True),
+                        normalized_ticket["payload_checksum"],
+                        created_by,
+                        created_at,
+                        normalized_ticket["expires_at"],
+                        normalized_ticket["max_duration_seconds"],
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ServiceError(
+                    "Duplicate open ticket for source/task_ref",
+                    409,
+                    "duplicate_open_ticket",
+                ) from exc
+
+            self._record_audit_event(
+                conn,
+                ticket_id=ticket_id,
+                event_type="ticket_created",
+                actor=actor,
+                source_ip=source_ip,
+                user_agent=user_agent,
+                previous_state=None,
+                new_state="pending_approval",
+                metadata={"task_ref": normalized_ticket["task_ref"]},
+            )
+            conn.commit()
+
+            row = self._select_ticket(conn, ticket_id)
+            if row is None:
+                raise ServiceError("Ticket creation failed", 500, "db_error")
+            return self._serialize_ticket(row)
 
     def _maybe_expire_ticket(
         self,
@@ -410,125 +565,39 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        raw_source = str(payload.get("source", submitter.source)).strip()
-        if raw_source != submitter.source:
-            raise ServiceError(
-                "Submit token may only create tickets for its bound source",
-                403,
-                "source_mismatch",
-            )
-
-        title = str(payload.get("title", "")).strip()
-        summary = str(payload.get("summary", "")).strip()
-        if not title or not summary:
-            raise ServiceError("title and summary are required", 400, "invalid_ticket")
-
-        task_ref_raw = payload.get("task_ref")
-        task_ref = None
-        if task_ref_raw is not None:
-            task_ref_value = str(task_ref_raw).strip()
-            task_ref = task_ref_value if task_ref_value else None
-
-        execution_plan = parse_execution_plan(payload.get("execution_plan"))
-        ticket_policy = parse_policy_requirements(payload.get("policy_requirements"))
-        token_floor = {"require_reviewer_step": submitter.require_reviewer_step_floor}
-        effective_policy = merge_policy_requirements(token_floor, ticket_policy)
-        enforce_policy_against_plan(effective_policy, execution_plan)
-
-        context = payload.get("context", {})
-        if context is None:
-            context = {}
-        if not isinstance(context, dict):
-            raise ServiceError("context must be an object", 400, "invalid_ticket")
-
-        expires_at_raw = payload.get("expires_at")
-        expires_at: str | None = None
-        if expires_at_raw is not None:
-            try:
-                expires_at = isoformat_z(parse_iso_datetime(str(expires_at_raw)))
-            except ValueError as exc:
-                raise ServiceError(str(exc), 400, "invalid_expires_at") from exc
-
-        max_duration_seconds_raw = payload.get("max_duration_seconds")
-        if max_duration_seconds_raw is None:
-            max_duration_seconds = self.settings.max_duration_seconds_default
-        else:
-            try:
-                max_duration_seconds = int(max_duration_seconds_raw)
-            except (TypeError, ValueError) as exc:
-                raise ServiceError("max_duration_seconds must be an integer", 400, "invalid_ticket") from exc
-
-        if max_duration_seconds <= 0:
-            raise ServiceError("max_duration_seconds must be > 0", 400, "invalid_ticket")
-
-        ticket_id = str(uuid4())
-        created_at = isoformat_z(utc_now())
-
-        payload_for_checksum = self._ticket_payload_from_fields(
-            source=raw_source,
-            task_ref=task_ref,
-            title=title,
-            summary=summary,
-            execution_plan=execution_plan,
-            policy_requirements=effective_policy,
-            context=context,
-            expires_at=expires_at,
-            max_duration_seconds=max_duration_seconds,
+        normalized_ticket = self._normalize_new_ticket(
+            payload,
+            source=submitter.source,
+            require_reviewer_step_floor=submitter.require_reviewer_step_floor,
         )
-        payload_checksum = compute_payload_checksum(payload_for_checksum)
+        return self._insert_ticket(
+            normalized_ticket,
+            created_by=f"submit:{submitter.source}",
+            actor=f"submit:{submitter.source}",
+            source_ip=source_ip,
+            user_agent=user_agent,
+        )
 
-        with self._connection() as conn:
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO tickets (
-                        id, source, task_ref, title, summary,
-                        execution_plan_json, policy_requirements_json, context_json,
-                        payload_checksum, approved_payload_checksum,
-                        state, created_by, created_at,
-                        expires_at, max_duration_seconds
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending_approval', ?, ?, ?, ?)
-                    """,
-                    (
-                        ticket_id,
-                        raw_source,
-                        task_ref,
-                        title,
-                        summary,
-                        json.dumps(execution_plan, sort_keys=True),
-                        json.dumps(effective_policy, sort_keys=True),
-                        json.dumps(context, sort_keys=True),
-                        payload_checksum,
-                        f"submit:{submitter.source}",
-                        created_at,
-                        expires_at,
-                        max_duration_seconds,
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ServiceError(
-                    "Duplicate open ticket for source/task_ref",
-                    409,
-                    "duplicate_open_ticket",
-                ) from exc
-
-            self._record_audit_event(
-                conn,
-                ticket_id=ticket_id,
-                event_type="ticket_created",
-                actor=f"submit:{submitter.source}",
-                source_ip=source_ip,
-                user_agent=user_agent,
-                previous_state=None,
-                new_state="pending_approval",
-                metadata={"task_ref": task_ref},
-            )
-            conn.commit()
-
-            row = self._select_ticket(conn, ticket_id)
-            if row is None:
-                raise ServiceError("Ticket creation failed", 500, "db_error")
-            return self._serialize_ticket(row)
+    def create_manual_ticket(
+        self,
+        payload: dict[str, Any],
+        *,
+        creator: str,
+        source_ip: str | None,
+        user_agent: str | None,
+    ) -> dict[str, Any]:
+        normalized_ticket = self._normalize_new_ticket(
+            payload,
+            source="operator",
+            require_reviewer_step_floor=self.require_reviewer_step_floor_for_source("operator"),
+        )
+        return self._insert_ticket(
+            normalized_ticket,
+            created_by=f"approver:{creator}",
+            actor=f"approver:{creator}",
+            source_ip=source_ip,
+            user_agent=user_agent,
+        )
 
     def list_tickets(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._connection() as conn:

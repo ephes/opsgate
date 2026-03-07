@@ -25,6 +25,7 @@
         {% endif %}
       {% endwith %}
       <form method="post" action="{{ url_for('ui_login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         {% if next_path %}
           <input type="hidden" name="next" value="{{ next_path }}" />
         {% endif %}

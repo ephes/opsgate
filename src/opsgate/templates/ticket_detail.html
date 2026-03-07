@@ -5,19 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpsGate Ticket {{ ticket.id }}</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
       pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }
-      .actions { display: flex; gap: 0.5rem; margin: 1rem 0; }
+      code { background: #f5f5f5; padding: 0.15rem 0.35rem; border-radius: 4px; }
+      .actions { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
+      .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.5rem 1rem; }
+      .session { border: 1px solid #d9e1e8; border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 0.75rem; background: #fbfcfd; }
       .flash-error { color: #a00; }
+      .flash-success { color: #0a6a2f; }
     </style>
   </head>
   <body>
     <p><a href="{{ url_for('ui_tickets') }}">Back to tickets</a></p>
     <h1>{{ ticket.title }}</h1>
-    <p><strong>ID:</strong> {{ ticket.id }}</p>
-    <p><strong>State:</strong> {{ ticket.state }}</p>
-    <p><strong>Source:</strong> {{ ticket.source }}</p>
-    <p><strong>Task Ref:</strong> {{ ticket.task_ref or 'n/a' }}</p>
+    <div class="meta-grid">
+      <p><strong>ID:</strong> {{ ticket.id }}</p>
+      <p><strong>State:</strong> {{ ticket.state }}</p>
+      <p><strong>Source:</strong> {{ ticket.source }}</p>
+      <p><strong>Task Ref:</strong> {{ ticket.task_ref or 'n/a' }}</p>
+      <p><strong>Created By:</strong> {{ ticket.created_by }}</p>
+      <p><strong>Approved By:</strong> {{ ticket.approved_by or 'n/a' }}</p>
+      <p><strong>Created At:</strong> {{ ticket.created_at }}</p>
+      <p><strong>Started At:</strong> {{ ticket.started_at or 'n/a' }}</p>
+      <p><strong>Finished At:</strong> {{ ticket.finished_at or 'n/a' }}</p>
+      <p><strong>Result:</strong> {{ ticket.result or 'n/a' }}</p>
+    </div>
     <p><strong>Summary:</strong> {{ ticket.summary }}</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -31,9 +43,11 @@
     {% if ticket.state == 'pending_approval' %}
       <div class="actions">
         <form method="post" action="{{ url_for('ui_ticket_approve', ticket_id=ticket.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <button type="submit">Approve</button>
         </form>
         <form method="post" action="{{ url_for('ui_ticket_reject', ticket_id=ticket.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           <input type="text" name="reason" placeholder="Reject reason (optional)" />
           <button type="submit">Reject</button>
         </form>
@@ -42,6 +56,7 @@
 
     {% if ticket.state in ['pending_approval', 'approved', 'running'] %}
       <form method="post" action="{{ url_for('ui_ticket_cancel', ticket_id=ticket.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
         <input type="text" name="reason" placeholder="Cancel reason (optional)" />
         <button type="submit">Cancel</button>
       </form>
@@ -49,6 +64,19 @@
 
     <h2>Execution Plan</h2>
     <pre>{{ ticket.execution_plan | tojson(indent=2) }}</pre>
+
+    {% if ticket.tmux_sessions %}
+      <h2>Runner Sessions</h2>
+      {% for session in ticket.tmux_sessions %}
+        <section class="session">
+          <p><strong>Step:</strong> {{ session.step_index + 1 }} / {{ session.role }} / {{ session.agent }}</p>
+          <p><strong>Status:</strong> {{ session.status }}</p>
+          <p><strong>Session:</strong> <code>{{ session.session_name }}</code></p>
+          <p><strong>Attach:</strong> <code>{{ session.attach_command }}</code></p>
+          <p><strong>Log:</strong> <code>{{ session.log_path }}</code></p>
+        </section>
+      {% endfor %}
+    {% endif %}
 
     <h2>Policy Requirements</h2>
     <pre>{{ ticket.policy_requirements | tojson(indent=2) }}</pre>

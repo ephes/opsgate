@@ -129,6 +129,33 @@ def test_load_settings_allows_missing_openclaw_submit_token(
     assert submit_sources == {"nyxmon", "operator"}
 
 
+def test_load_settings_supports_secure_session_cookie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / "opsgate.env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "OPSGATE_UI_USERNAME=opsgate-admin",
+                "OPSGATE_UI_PASSWORD_BCRYPT=$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+                "OPSGATE_SESSION_SECRET=session-secret-0123456789",
+                "OPSGATE_TRUST_PROXY_HEADERS=true",
+                "OPSGATE_SESSION_COOKIE_SECURE=true",
+                "OPSGATE_SUBMIT_TOKEN_NYXMON=nyxmon-token-000000000000",
+                "OPSGATE_SUBMIT_TOKEN_OPERATOR=operator-token-00000000000",
+                "OPSGATE_RUNNER_TOKEN=runner-token-000000000000",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("OPSGATE_ENV_FILE", str(env_file))
+    settings = load_settings()
+    assert settings.trust_proxy_headers is True
+    assert settings.session_cookie_secure is True
+
+
 def test_load_runner_settings_reports_invalid_integer_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

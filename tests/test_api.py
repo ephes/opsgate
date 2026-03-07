@@ -20,6 +20,8 @@ def _build_settings(db_path: str) -> OpsGateSettings:
         bind_port=8711,
         db_path=db_path,
         session_secret="x" * 32,
+        trust_proxy_headers=False,
+        session_cookie_secure=False,
         session_timeout_seconds=3600,
         ui_username="opsgate-admin",
         ui_password_bcrypt=password_hash,
@@ -59,6 +61,22 @@ def client(tmp_path: Path) -> Any:
     return app.test_client()
 
 
+@pytest.fixture
+def proxy_client(tmp_path: Path) -> Any:
+    db_file = str(tmp_path / "opsgate-proxy.sqlite3")
+    settings = _build_settings(db_file)
+    settings = OpsGateSettings(
+        **{
+            **settings.__dict__,
+            "trust_proxy_headers": True,
+        }
+    )
+    app = create_app(settings)
+    app.config.update(TESTING=True)
+    app.config["OPSGATE_TEST_DB_PATH"] = db_file
+    return app.test_client()
+
+
 def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
@@ -67,13 +85,29 @@ def runner_headers() -> dict[str, str]:
     return auth_headers("runner-token-000000000000")
 
 
-def login(client: Any) -> None:
+def session_csrf_token(client: Any) -> str:
+    with client.session_transaction() as session:
+        token = session.get("csrf_token")
+    assert isinstance(token, str)
+    return token
+
+
+def login(client: Any, path: str = "/login") -> Any:
+    page = client.get(path, follow_redirects=False)
+    assert page.status_code == 200
+    pre_login_token = session_csrf_token(client)
     response = client.post(
-        "/login",
-        data={"username": "opsgate-admin", "password": "secret-password"},
+        path,
+        data={
+            "csrf_token": pre_login_token,
+            "username": "opsgate-admin",
+            "password": "secret-password",
+        },
         follow_redirects=False,
     )
     assert response.status_code == 302
+    assert session_csrf_token(client) != pre_login_token
+    return response
 
 
 def create_ticket(
@@ -127,51 +161,217 @@ def test_login_redirects_to_requested_next_path(client: Any) -> None:
     assert redirect_to_login.status_code == 302
     login_path = redirect_to_login.headers["Location"]
 
-    login_response = client.post(
-        login_path,
-        data={"username": "opsgate-admin", "password": "secret-password"},
-        follow_redirects=False,
-    )
+    login_response = login(client, login_path)
     assert login_response.status_code == 302
     assert login_response.headers["Location"] == f"/tickets/{ticket_id}"
 
 
-def test_login_ignores_external_next_path(client: Any) -> None:
+def test_manual_ticket_creation_from_ui(client: Any) -> None:
+    login(client)
+
     response = client.post(
-        "/login?next=https://example.com/steal",
-        data={"username": "opsgate-admin", "password": "secret-password"},
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Manual remediation",
+            "summary": "Create through web UI",
+            "task_ref": "ui-manual-1",
+            "step_role": "reviewer",
+            "step_agent": "codex",
+            "prompt_markdown": "Apply a safe no-op change and report findings.",
+            "max_duration_seconds": "900",
+            "context_json": '{"service": "opsgate", "host": "macstudio"}',
+        },
         follow_redirects=False,
     )
+    assert response.status_code == 302
+
+    location = response.headers["Location"]
+    assert location.startswith("/tickets/")
+
+    detail = client.get(location)
+    assert detail.status_code == 200
+    body = detail.get_data(as_text=True)
+    assert "Manual remediation" in body
+    assert "approver:opsgate-admin" in body
+
+
+def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Needs reviewer",
+            "summary": "Policy floor should reject this",
+            "step_role": "implementer",
+            "step_agent": "codex",
+            "prompt_markdown": "Make a change.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+    page = client.get("/tickets")
+    assert "requires at least one reviewer step" in page.get_data(as_text=True)
+
+
+def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Bad context",
+            "summary": "This should fail",
+            "step_role": "investigator",
+            "step_agent": "codex",
+            "prompt_markdown": "Inspect state.",
+            "context_json": "[1, 2, 3]",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+    page = client.get("/tickets")
+    assert "context_json must decode to an object" in page.get_data(as_text=True)
+
+
+def test_manual_ticket_creation_requires_csrf_token(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "title": "Missing token",
+            "summary": "This should be rejected",
+            "step_role": "reviewer",
+            "step_agent": "codex",
+            "prompt_markdown": "Do nothing.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+    page = client.get("/tickets")
+    assert "Invalid form token" in page.get_data(as_text=True)
+
+
+def test_manual_ticket_creation_rejects_tampered_csrf_token(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": "tampered-token",
+            "title": "Bad token",
+            "summary": "This should be rejected",
+            "step_role": "reviewer",
+            "step_agent": "codex",
+            "prompt_markdown": "Do nothing.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+    page = client.get("/tickets")
+    assert "Invalid form token" in page.get_data(as_text=True)
+
+
+@pytest.mark.parametrize(
+    ("route_name", "path_builder", "data_builder"),
+    [
+        ("logout", lambda ticket_id: "/logout", lambda _ticket_id: {}),
+        ("approve", lambda ticket_id: f"/tickets/{ticket_id}/approve", lambda _ticket_id: {}),
+        ("reject", lambda ticket_id: f"/tickets/{ticket_id}/reject", lambda _ticket_id: {"reason": "nope"}),
+        ("cancel", lambda ticket_id: f"/tickets/{ticket_id}/cancel", lambda _ticket_id: {"reason": "stop"}),
+    ],
+)
+def test_ui_post_routes_require_csrf_token(
+    client: Any,
+    route_name: str,
+    path_builder: Any,
+    data_builder: Any,
+) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Needs approval",
+        summary="CSRF route coverage",
+        task_ref=f"ui-csrf-{route_name}",
+    )
+    login(client)
+
+    response = client.post(
+        path_builder(ticket_id),
+        data=data_builder(ticket_id),
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+    page = client.get("/tickets")
+    assert "Invalid form token" in page.get_data(as_text=True)
+
+
+def test_trusted_proxy_headers_restore_client_ip_for_access_and_audit(proxy_client: Any) -> None:
+    payload = {
+        "title": "Proxy path",
+        "summary": "Audit real client IP",
+        "task_ref": "proxy-audit-1",
+        "execution_plan": [
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect proxy behavior"}
+        ],
+    }
+
+    response = proxy_client.post(
+        "/api/v1/tickets",
+        headers={
+            **auth_headers("nyxmon-token-000000000000"),
+            "X-Forwarded-For": "100.100.100.42",
+        },
+        json=payload,
+        environ_base={"REMOTE_ADDR": "203.0.113.8"},
+    )
+    assert response.status_code == 201
+
+    ticket_id = response.get_json()["id"]
+    db_path = proxy_client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT source_ip FROM audit_events WHERE ticket_id = ? AND event_type = 'ticket_created'",
+            (ticket_id,),
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "100.100.100.42"
+
+
+def test_login_ignores_external_next_path(client: Any) -> None:
+    response = login(client, "/login?next=https://example.com/steal")
     assert response.status_code == 302
     assert response.headers["Location"] == "/tickets"
 
 
 def test_login_ignores_protocol_relative_next_path(client: Any) -> None:
-    response = client.post(
-        "/login?next=//evil.example/steal",
-        data={"username": "opsgate-admin", "password": "secret-password"},
-        follow_redirects=False,
-    )
+    response = login(client, "/login?next=//evil.example/steal")
     assert response.status_code == 302
     assert response.headers["Location"] == "/tickets"
 
 
 def test_login_ignores_javascript_next_path(client: Any) -> None:
-    response = client.post(
-        "/login?next=javascript:alert(1)",
-        data={"username": "opsgate-admin", "password": "secret-password"},
-        follow_redirects=False,
-    )
+    response = login(client, "/login?next=javascript:alert(1)")
     assert response.status_code == 302
     assert response.headers["Location"] == "/tickets"
 
 
 def test_login_ignores_control_chars_in_next_path(client: Any) -> None:
-    response = client.post(
-        "/login?next=/tickets/test%0D%0Ainvalid",
-        data={"username": "opsgate-admin", "password": "secret-password"},
-        follow_redirects=False,
-    )
+    response = login(client, "/login?next=/tickets/test%0D%0Ainvalid")
     assert response.status_code == 302
     assert response.headers["Location"] == "/tickets"
 

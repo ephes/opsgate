@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "opsgate"
 version = "0.2.0"
-description = "OpsGate control service and runner (Phase 4A)"
+description = "OpsGate control service and runner (Phase 4B)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}

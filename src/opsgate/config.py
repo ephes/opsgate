@@ -28,6 +28,8 @@ class OpsGateSettings:
     bind_port: int
     db_path: str
     session_secret: str
+    trust_proxy_headers: bool
+    session_cookie_secure: bool
     session_timeout_seconds: int
     ui_username: str
     ui_password_bcrypt: str
@@ -125,6 +127,8 @@ def load_settings() -> OpsGateSettings:
     session_secret = os.environ.get("OPSGATE_SESSION_SECRET", "").strip()
     if len(session_secret) < 20:
         raise SettingsError("OPSGATE_SESSION_SECRET is required and must be at least 20 characters")
+    trust_proxy_headers = parse_bool(os.environ.get("OPSGATE_TRUST_PROXY_HEADERS"), default=False)
+    session_cookie_secure = parse_bool(os.environ.get("OPSGATE_SESSION_COOKIE_SECURE"), default=False)
 
     max_duration_default = parse_int(
         os.environ.get("OPSGATE_MAX_DURATION_SECONDS_DEFAULT"),
@@ -204,6 +208,8 @@ def load_settings() -> OpsGateSettings:
         bind_port=bind_port,
         db_path=db_path,
         session_secret=session_secret,
+        trust_proxy_headers=trust_proxy_headers,
+        session_cookie_secure=session_cookie_secure,
         session_timeout_seconds=session_timeout_seconds,
         ui_username=ui_username,
         ui_password_bcrypt=ui_password_bcrypt,

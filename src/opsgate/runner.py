@@ -149,7 +149,14 @@ def _build_agent_command(agent: str, prompt_path: Path) -> str:
     prompt_value = str(prompt_path)
     quoted_prompt = shlex.quote(prompt_value)
     if lower == "codex":
-        return f"codex --prompt-file {quoted_prompt}"
+        # OpsGate tickets are manually approved before execution, so the runner
+        # uses non-interactive Codex with full local execution and no git-root
+        # requirement. Prompt content is streamed on stdin via `-`.
+        return (
+            "codex exec --skip-git-repo-check "
+            "--dangerously-bypass-approvals-and-sandbox "
+            f"- < {quoted_prompt}"
+        )
     if lower in {"claude", "claude-code"}:
         return f"claude-code --prompt-file {quoted_prompt}"
     if lower in {"shell", "bash", "sh"}:

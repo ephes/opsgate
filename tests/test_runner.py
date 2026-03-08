@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from opsgate.config import RunnerSettings
-from opsgate.runner import OpsGateRunner, RunnerApiError, TicketExecutor, _build_agent_command
+from opsgate.runner import OpsGateRunner, RunnerApiError, TicketExecutor, _build_agent_command, _build_attach_command
 
 
 class FakeApi:
@@ -77,6 +77,7 @@ def _runner_settings(tmp_path: Path) -> RunnerSettings:
         tickets_dir=str(tickets_dir),
         session_artifacts_dir=str(session_artifacts_dir),
         tmux_socket_label="remediation",
+        tmux_tmpdir=str(execution_data_dir / "tmux"),
         disable_file_path=str(execution_data_dir / ".disabled"),
     )
 
@@ -390,6 +391,27 @@ def test_build_agent_command_uses_codex_exec_with_stdin(tmp_path: Path) -> None:
         "codex exec --skip-git-repo-check "
         "--dangerously-bypass-approvals-and-sandbox "
         f"- < {shlex.quote(str(prompt_path))}"
+    )
+
+
+def test_build_agent_command_uses_claude_print_with_bypass_permissions(tmp_path: Path) -> None:
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("echo hi\n", encoding="utf-8")
+    command = _build_agent_command("claude", prompt_path)
+
+    assert command == f"claude -p --dangerously-skip-permissions < {shlex.quote(str(prompt_path))}"
+
+
+def test_build_attach_command_includes_tmux_tmpdir() -> None:
+    command = _build_attach_command(
+        tmux_socket_label="remediation",
+        session_name="job-1",
+        tmux_tmpdir="/Users/ops/remediation/tmux",
+    )
+
+    assert command == (
+        "sudo -u ops env TMUX_TMPDIR=/Users/ops/remediation/tmux "
+        "tmux -L remediation attach -t job-1"
     )
 
 

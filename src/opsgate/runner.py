@@ -158,7 +158,7 @@ def _build_agent_command(agent: str, prompt_path: Path) -> str:
             f"- < {quoted_prompt}"
         )
     if lower in {"claude", "claude-code"}:
-        return f"claude-code --prompt-file {quoted_prompt}"
+        return f"claude -p --dangerously-skip-permissions < {quoted_prompt}"
     if lower in {"shell", "bash", "sh"}:
         return f"/bin/bash {quoted_prompt}"
     if "{prompt_file}" in normalized:
@@ -169,6 +169,15 @@ def _build_agent_command(agent: str, prompt_path: Path) -> str:
     if not expanded:
         raise ValueError("agent command cannot be empty")
     return " ".join(shlex.quote(token) for token in expanded)
+
+
+def _build_attach_command(*, tmux_socket_label: str, session_name: str, tmux_tmpdir: str) -> str:
+    if tmux_tmpdir:
+        return (
+            f"sudo -u ops env TMUX_TMPDIR={shlex.quote(tmux_tmpdir)} "
+            f"tmux -L {shlex.quote(tmux_socket_label)} attach -t {shlex.quote(session_name)}"
+        )
+    return f"sudo -u ops tmux -L {shlex.quote(tmux_socket_label)} attach -t {shlex.quote(session_name)}"
 
 
 class TicketExecutor:
@@ -337,7 +346,11 @@ class TicketExecutor:
         step_agent = str(step.get("agent", ""))
         prompt_markdown = str(step.get("prompt_markdown", ""))
         session_name = f"job-{self.ticket_id}-{step_index + 1:02d}-{_slugify(step_role)}"
-        attach_command = f"sudo -u ops tmux -L {self.settings.tmux_socket_label} attach -t {session_name}"
+        attach_command = _build_attach_command(
+            tmux_socket_label=self.settings.tmux_socket_label,
+            session_name=session_name,
+            tmux_tmpdir=self.settings.tmux_tmpdir,
+        )
 
         context_payload = {
             "ticket_id": self.ticket_id,

@@ -57,6 +57,7 @@ class RunnerSettings:
     tickets_dir: str
     session_artifacts_dir: str
     tmux_socket_label: str
+    tmux_tmpdir: str
     disable_file_path: str
 
 
@@ -281,6 +282,7 @@ def load_runner_settings() -> RunnerSettings:
     tmux_socket_label = os.environ.get("OPSGATE_TMUX_SOCKET_LABEL", "remediation").strip()
     if not tmux_socket_label:
         raise SettingsError("OPSGATE_TMUX_SOCKET_LABEL must not be empty")
+    tmux_tmpdir = os.environ.get("TMUX_TMPDIR", "").strip()
 
     disable_file = os.environ.get("OPSGATE_DISABLE_FILE_PATH", "").strip()
     if not disable_file:
@@ -301,5 +303,6 @@ def load_runner_settings() -> RunnerSettings:
         tickets_dir=tickets_dir,
         session_artifacts_dir=session_artifacts_dir,
         tmux_socket_label=tmux_socket_label,
+        tmux_tmpdir=tmux_tmpdir,
         disable_file_path=disable_file,
     )

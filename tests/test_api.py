@@ -703,7 +703,10 @@ def test_runner_status_accepts_timeout_result_and_tmux_sessions(client: Any) -> 
             "agent": "codex",
             "session_name": "job-1",
             "status": "timeout",
-            "attach_command": "sudo -u ops tmux -L remediation attach -t job-1",
+            "attach_command": (
+                "sudo -u ops env TMUX_TMPDIR=/Users/ops/remediation/tmux "
+                "tmux -L remediation attach -t job-1"
+            ),
         }
     ]
     failed = client.post(

@@ -176,9 +176,12 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
             "title": "Manual remediation",
             "summary": "Create through web UI",
             "task_ref": "ui-manual-1",
-            "step_role": "reviewer",
-            "step_agent": "codex",
-            "prompt_markdown": "Apply a safe no-op change and report findings.",
+            "steps-0-role": "implementer",
+            "steps-0-agent": "codex",
+            "steps-0-prompt_markdown": "Inspect the target service and prepare a no-op patch.",
+            "steps-1-role": "reviewer",
+            "steps-1-agent": "shell",
+            "steps-1-prompt_markdown": "Review the proposed change and confirm it stays a no-op.",
             "max_duration_seconds": "900",
             "context_json": '{"service": "opsgate", "host": "macstudio"}',
         },
@@ -188,12 +191,128 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
 
     location = response.headers["Location"]
     assert location.startswith("/tickets/")
+    ticket_id = location.rsplit("/", 1)[-1]
+
+    api_detail = client.get(f"/api/v1/tickets/{ticket_id}")
+    assert api_detail.status_code == 200
+    ticket = api_detail.get_json()
+    assert ticket["execution_plan"] == [
+        {
+            "role": "implementer",
+            "agent": "codex",
+            "prompt_markdown": "Inspect the target service and prepare a no-op patch.",
+        },
+        {
+            "role": "reviewer",
+            "agent": "shell",
+            "prompt_markdown": "Review the proposed change and confirm it stays a no-op.",
+        },
+    ]
+    assert ticket["policy_requirements"]["require_reviewer_step"] is True
 
     detail = client.get(location)
     assert detail.status_code == 200
     body = detail.get_data(as_text=True)
     assert "Manual remediation" in body
     assert "approver:opsgate-admin" in body
+
+
+def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
+    login(client)
+
+    response = client.get("/tickets")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert 'name="steps-0-role"' in body
+    assert 'value="reviewer"' in body
+    assert 'name="steps-0-agent"' in body
+    assert 'value="claude"' in body
+
+
+def test_manual_ticket_creation_defaults_agent_from_role(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Role-based defaults",
+            "summary": "Agent values should default from step role",
+            "steps-0-role": "implementer",
+            "steps-0-prompt_markdown": "Prepare the implementation plan.",
+            "steps-1-role": "reviewer",
+            "steps-1-prompt_markdown": "Review the implementation plan.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    ticket_id = response.headers["Location"].rsplit("/", 1)[-1]
+    api_detail = client.get(f"/api/v1/tickets/{ticket_id}")
+    assert api_detail.status_code == 200
+    ticket = api_detail.get_json()
+    assert ticket["execution_plan"] == [
+        {
+            "role": "implementer",
+            "agent": "codex",
+            "prompt_markdown": "Prepare the implementation plan.",
+        },
+        {
+            "role": "reviewer",
+            "agent": "claude",
+            "prompt_markdown": "Review the implementation plan.",
+        },
+    ]
+
+
+def test_manual_ticket_creation_supports_legacy_single_step_fields(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Legacy single step",
+            "summary": "Old field names should still work",
+            "step_role": "reviewer",
+            "step_agent": "claude",
+            "prompt_markdown": "Review the change set.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    ticket_id = response.headers["Location"].rsplit("/", 1)[-1]
+    api_detail = client.get(f"/api/v1/tickets/{ticket_id}")
+    assert api_detail.status_code == 200
+    ticket = api_detail.get_json()
+    assert ticket["execution_plan"] == [
+        {
+            "role": "reviewer",
+            "agent": "claude",
+            "prompt_markdown": "Review the change set.",
+        }
+    ]
+
+
+def test_manual_ticket_creation_rejects_empty_execution_plan_from_ui(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "No steps",
+            "summary": "Submitting without steps should fail",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "execution_plan must be a non-empty array" in body
+    assert 'value="No steps"' in body
+    assert ">Submitting without steps should fail</textarea>" in body
+    assert "No workflow steps yet" in body
 
 
 def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) -> None:
@@ -205,17 +324,29 @@ def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) ->
             "csrf_token": session_csrf_token(client),
             "title": "Needs reviewer",
             "summary": "Policy floor should reject this",
-            "step_role": "implementer",
-            "step_agent": "codex",
-            "prompt_markdown": "Make a change.",
+            "steps-0-role": "implementer",
+            "steps-0-agent": "codex",
+            "steps-0-prompt_markdown": "Make a change.",
+            "steps-1-role": "investigator",
+            "steps-1-agent": "shell",
+            "steps-1-prompt_markdown": "Collect logs.",
         },
         follow_redirects=False,
     )
-    assert response.status_code == 302
-    assert response.headers["Location"] == "/tickets"
-
-    page = client.get("/tickets")
-    assert "requires at least one reviewer step" in page.get_data(as_text=True)
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "requires at least one reviewer step" in body
+    assert 'value="Needs reviewer"' in body
+    assert ">Policy floor should reject this</textarea>" in body
+    assert 'name="steps-0-role"' in body
+    assert 'value="implementer"' in body
+    assert 'value="codex"' in body
+    assert ">Make a change.</textarea>" in body
+    assert 'name="steps-1-role"' in body
+    assert 'value="investigator"' in body
+    assert 'value="shell"' in body
+    assert ">Collect logs.</textarea>" in body
+    assert "Operator policy floor" in body
 
 
 def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> None:
@@ -227,18 +358,22 @@ def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> Non
             "csrf_token": session_csrf_token(client),
             "title": "Bad context",
             "summary": "This should fail",
-            "step_role": "investigator",
-            "step_agent": "codex",
-            "prompt_markdown": "Inspect state.",
+            "steps-0-role": "reviewer",
+            "steps-0-agent": "codex",
+            "steps-0-prompt_markdown": "Inspect state.",
+            "steps-1-role": "implementer",
+            "steps-1-agent": "shell",
+            "steps-1-prompt_markdown": "Prepare a no-op fix.",
             "context_json": "[1, 2, 3]",
         },
         follow_redirects=False,
     )
-    assert response.status_code == 302
-    assert response.headers["Location"] == "/tickets"
-
-    page = client.get("/tickets")
-    assert "context_json must decode to an object" in page.get_data(as_text=True)
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "context_json must decode to an object" in body
+    assert ">[1, 2, 3]</textarea>" in body
+    assert ">Inspect state.</textarea>" in body
+    assert ">Prepare a no-op fix.</textarea>" in body
 
 
 def test_manual_ticket_creation_requires_csrf_token(client: Any) -> None:
@@ -284,6 +419,34 @@ def test_manual_ticket_creation_rejects_tampered_csrf_token(client: Any) -> None
     assert "Invalid form token" in page.get_data(as_text=True)
 
 
+def test_ui_ticket_action_failure_redirects_back_to_ticket_detail(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Already approved",
+        summary="Second approval should preserve detail context",
+        task_ref="ui-action-failure-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+    login(client)
+
+    first_approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert first_approve.status_code == 200
+
+    second_approve = client.post(
+        f"/tickets/{ticket_id}/approve",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    )
+    assert second_approve.status_code == 302
+    assert second_approve.headers["Location"] == f"/tickets/{ticket_id}"
+
+    detail = client.get(second_approve.headers["Location"])
+    assert detail.status_code == 200
+    assert "Ticket is not pending approval" in detail.get_data(as_text=True)
+
+
 @pytest.mark.parametrize(
     ("route_name", "path_builder", "data_builder"),
     [
@@ -314,9 +477,10 @@ def test_ui_post_routes_require_csrf_token(
         follow_redirects=False,
     )
     assert response.status_code == 302
-    assert response.headers["Location"] == "/tickets"
+    expected_location = "/tickets" if route_name == "logout" else f"/tickets/{ticket_id}"
+    assert response.headers["Location"] == expected_location
 
-    page = client.get("/tickets")
+    page = client.get(expected_location)
     assert "Invalid form token" in page.get_data(as_text=True)
 
 
@@ -356,6 +520,20 @@ def test_login_ignores_external_next_path(client: Any) -> None:
     response = login(client, "/login?next=https://example.com/steal")
     assert response.status_code == 302
     assert response.headers["Location"] == "/tickets"
+
+
+def test_login_form_uses_autofill_friendly_fields(client: Any) -> None:
+    response = client.get("/login")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert '<form method="post" action="/login" autocomplete="on">' in body
+    assert 'name="username"' in body
+    assert 'autocomplete="username"' in body
+    assert 'autocapitalize="none"' in body
+    assert 'autocorrect="off"' in body
+    assert 'spellcheck="false"' in body
+    assert 'name="password"' in body
+    assert 'autocomplete="current-password"' in body
 
 
 def test_login_ignores_protocol_relative_next_path(client: Any) -> None:

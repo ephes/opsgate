@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import secrets
 from collections.abc import Callable
 from datetime import timedelta
@@ -35,6 +36,16 @@ R = TypeVar("R")
 
 class AccessDenied(ServiceError):
     pass
+
+
+MANUAL_STEP_FIELD_PATTERN = re.compile(r"^steps-(\d+)-(role|agent|prompt_markdown)$")
+TICKET_ACTION_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/(approve|reject|cancel)$")
+DEFAULT_AGENT_BY_ROLE = {
+    "implementer": "codex",
+    "implementor": "codex",
+    "reviewer": "claude",
+    "investigator": "codex",
+}
 
 
 def create_app(settings: OpsGateSettings | None = None) -> Flask:
@@ -105,6 +116,12 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             return None
         return next_path
 
+    def ticket_detail_redirect_path_for_request() -> str | None:
+        match = TICKET_ACTION_PATH_PATTERN.match(request.path)
+        if match is None:
+            return None
+        return url_for("ui_ticket_detail", ticket_id=match.group(1))
+
     def ensure_csrf_token() -> str:
         token = session.get("csrf_token")
         if isinstance(token, str) and token:
@@ -113,13 +130,57 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         session["csrf_token"] = token
         return token
 
+    def default_agent_for_role(role: str) -> str:
+        normalized_role = role.strip().lower()
+        return DEFAULT_AGENT_BY_ROLE.get(normalized_role, "codex")
+
+    def default_manual_step(*, operator_requires_reviewer: bool) -> dict[str, str]:
+        role = "reviewer" if operator_requires_reviewer else "investigator"
+        return {
+            "role": role,
+            "agent": default_agent_for_role(role),
+            "prompt_markdown": "",
+        }
+
+    def parse_manual_ticket_steps(*, operator_requires_reviewer: bool) -> list[dict[str, str]]:
+        indexed_steps: dict[int, dict[str, str]] = {}
+        for key in request.form.keys():
+            match = MANUAL_STEP_FIELD_PATTERN.match(key)
+            if match is None:
+                continue
+            step_index = int(match.group(1))
+            field_name = match.group(2)
+            indexed_steps.setdefault(step_index, {})[field_name] = request.form.get(key, "").strip()
+
+        if indexed_steps:
+            return [
+                {
+                    "role": indexed_steps[index].get("role", ""),
+                    "agent": indexed_steps[index].get("agent", "")
+                    or default_agent_for_role(indexed_steps[index].get("role", "")),
+                    "prompt_markdown": indexed_steps[index].get("prompt_markdown", ""),
+                }
+                for index in sorted(indexed_steps)
+            ]
+
+        if any(key in request.form for key in ("step_role", "step_agent", "prompt_markdown")):
+            default_step = default_manual_step(operator_requires_reviewer=operator_requires_reviewer)
+            return [
+                {
+                    "role": request.form.get("step_role", default_step["role"]).strip() or default_step["role"],
+                    "agent": request.form.get("step_agent", "").strip()
+                    or default_agent_for_role(request.form.get("step_role", default_step["role"]).strip()),
+                    "prompt_markdown": request.form.get("prompt_markdown", "").strip(),
+                }
+            ]
+
+        return []
+
     def build_manual_ticket_payload() -> dict[str, object]:
+        operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")
         title = request.form.get("title", "").strip()
         summary = request.form.get("summary", "").strip()
         task_ref = request.form.get("task_ref", "").strip()
-        step_role = request.form.get("step_role", "investigator").strip() or "investigator"
-        step_agent = request.form.get("step_agent", "codex").strip() or "codex"
-        prompt_markdown = request.form.get("prompt_markdown", "").strip()
         expires_at = request.form.get("expires_at", "").strip()
         max_duration_raw = request.form.get("max_duration_seconds", "").strip()
         context_raw = request.form.get("context_json", "").strip()
@@ -127,13 +188,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         payload: dict[str, object] = {
             "title": title,
             "summary": summary,
-            "execution_plan": [
-                {
-                    "role": step_role,
-                    "agent": step_agent,
-                    "prompt_markdown": prompt_markdown,
-                }
-            ],
+            "execution_plan": parse_manual_ticket_steps(operator_requires_reviewer=operator_requires_reviewer),
         }
 
         if task_ref:
@@ -152,6 +207,41 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             payload["context"] = context
 
         return payload
+
+    def build_manual_ticket_form_data(*, operator_requires_reviewer: bool) -> dict[str, object]:
+        steps = parse_manual_ticket_steps(operator_requires_reviewer=operator_requires_reviewer)
+        if not steps and not request.form:
+            steps = [default_manual_step(operator_requires_reviewer=operator_requires_reviewer)]
+
+        return {
+            "title": request.form.get("title", "").strip(),
+            "summary": request.form.get("summary", "").strip(),
+            "task_ref": request.form.get("task_ref", "").strip(),
+            "max_duration_seconds": request.form.get("max_duration_seconds", "3600").strip() or "3600",
+            "expires_at": request.form.get("expires_at", "").strip(),
+            "context_json": request.form.get("context_json", "").strip(),
+            "steps": steps,
+        }
+
+    def render_tickets_page(
+        *,
+        status_code: int = 200,
+        form_data: dict[str, object] | None = None,
+    ) -> ResponseReturnValue:
+        operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")
+        if form_data is None:
+            form_data = build_manual_ticket_form_data(operator_requires_reviewer=operator_requires_reviewer)
+        tickets = service.list_tickets(limit=100)
+        return Response(
+            render_template(
+                "tickets.html",
+                tickets=tickets,
+                form_data=form_data,
+                operator_requires_reviewer=operator_requires_reviewer,
+                role_agent_defaults=DEFAULT_AGENT_BY_ROLE,
+            ),
+            status_code,
+        )
 
     def require_approver_session(view: Callable[P, R]) -> Callable[P, R]:
         @wraps(view)
@@ -199,7 +289,8 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         if request.path.startswith("/api/"):
             return api_error(error)
         flash(str(error), "error")
-        return redirect(url_for("ui_tickets")), 302
+        redirect_target = ticket_detail_redirect_path_for_request() or url_for("ui_tickets")
+        return redirect(redirect_target), 302
 
     @app.errorhandler(403)
     def handle_forbidden(_: Exception) -> ResponseReturnValue:
@@ -371,24 +462,22 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             return redirect(url_for("ui_login"))
 
         if request.method == "POST":
-            ticket = service.create_manual_ticket(
-                build_manual_ticket_payload(),
-                creator=approver,
-                source_ip=get_client_ip(),
-                user_agent=request.headers.get("User-Agent"),
-            )
+            operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")
+            form_data = build_manual_ticket_form_data(operator_requires_reviewer=operator_requires_reviewer)
+            try:
+                ticket = service.create_manual_ticket(
+                    build_manual_ticket_payload(),
+                    creator=approver,
+                    source_ip=get_client_ip(),
+                    user_agent=request.headers.get("User-Agent"),
+                )
+            except ServiceError as error:
+                flash(str(error), "error")
+                return render_tickets_page(status_code=400, form_data=form_data)
             flash("Ticket created and queued for approval", "success")
             return redirect(url_for("ui_ticket_detail", ticket_id=ticket["id"]))
 
-        tickets = service.list_tickets(limit=100)
-        return Response(
-            render_template(
-                "tickets.html",
-                tickets=tickets,
-                operator_requires_reviewer=service.require_reviewer_step_floor_for_source("operator"),
-            ),
-            200,
-        )
+        return render_tickets_page()
 
     @app.get("/tickets/<ticket_id>")
     def ui_ticket_detail(ticket_id: str) -> ResponseReturnValue:

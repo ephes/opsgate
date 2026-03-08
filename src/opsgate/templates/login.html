@@ -5,18 +5,96 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpsGate Login</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; }
-      main { max-width: 480px; margin: 0 auto; }
-      label { display: block; margin-top: 1rem; }
-      input { width: 100%; padding: 0.5rem; }
-      button { margin-top: 1rem; padding: 0.6rem 1rem; }
-      .flash-error { color: #a00; }
+      :root {
+        color-scheme: light;
+        --bg: #f3f6f8;
+        --panel: #fbfcfd;
+        --panel-border: #d9e1e8;
+        --text: #17212b;
+        --muted: #506070;
+        --primary: #1f5b96;
+        --primary-strong: #164875;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(100%, 28rem);
+        display: grid;
+        gap: 1rem;
+      }
+      h1, p { margin: 0; }
+      .panel {
+        border: 1px solid var(--panel-border);
+        border-radius: 1rem;
+        padding: 1.1rem;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
+      }
+      .copy {
+        display: grid;
+        gap: 0.45rem;
+      }
+      .meta {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      form {
+        display: grid;
+        gap: 0.9rem;
+      }
+      label {
+        display: grid;
+        gap: 0.35rem;
+        font-weight: 600;
+      }
+      input, button { font: inherit; }
+      input {
+        width: 100%;
+        padding: 0.8rem;
+        border: 1px solid #bdc8d4;
+        border-radius: 0.85rem;
+        background: #fff;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1rem;
+        background: var(--primary);
+        color: #fff;
+        cursor: pointer;
+      }
+      button:hover { background: var(--primary-strong); }
+      .flash-error {
+        padding: 0.85rem 1rem;
+        border: 1px solid #f2c6c0;
+        border-radius: 0.9rem;
+        background: #fff0ed;
+        color: #8a2217;
+      }
+
+      @media (min-width: 720px) {
+        body { padding: 1.5rem; }
+        .panel { padding: 1.35rem; }
+      }
     </style>
   </head>
   <body>
     <main>
-      <h1>OpsGate</h1>
-      <p>Approver login (Tailscale-only context in v1).</p>
+      <section class="panel copy">
+        <h1>OpsGate</h1>
+        <p class="meta">Approver login for the internal Tailscale-only operator UI.</p>
+      </section>
+
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           {% for category, message in messages %}
@@ -24,19 +102,42 @@
           {% endfor %}
         {% endif %}
       {% endwith %}
-      <form method="post" action="{{ url_for('ui_login') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        {% if next_path %}
-          <input type="hidden" name="next" value="{{ next_path }}" />
-        {% endif %}
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" autocomplete="username" required />
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <section class="panel">
+        <form method="post" action="{{ url_for('ui_login') }}" autocomplete="on">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          {% if next_path %}
+            <input type="hidden" name="next" value="{{ next_path }}" />
+          {% endif %}
 
-        <button type="submit">Login</button>
-      </form>
+          <label for="username">Username</label>
+          <input
+            id="username"
+            name="username"
+            type="text"
+            autocomplete="username"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            inputmode="text"
+            required
+          />
+
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            required
+          />
+
+          <button type="submit">Login</button>
+        </form>
+      </section>
     </main>
   </body>
 </html>

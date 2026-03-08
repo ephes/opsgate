@@ -5,83 +5,357 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpsGate Ticket {{ ticket.id }}</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-      pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }
-      code { background: #f5f5f5; padding: 0.15rem 0.35rem; border-radius: 4px; }
-      .actions { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
-      .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.5rem 1rem; }
-      .session { border: 1px solid #d9e1e8; border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 0.75rem; background: #fbfcfd; }
-      .flash-error { color: #a00; }
-      .flash-success { color: #0a6a2f; }
+      :root {
+        color-scheme: light;
+        --bg: #f3f6f8;
+        --panel: #fbfcfd;
+        --panel-border: #d9e1e8;
+        --text: #17212b;
+        --muted: #506070;
+        --pill: #eef3f7;
+        --pill-text: #24445f;
+        --primary: #1f5b96;
+        --primary-strong: #164875;
+        --success: #116b3a;
+        --danger: #b33a2b;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      a { color: var(--primary); }
+      pre {
+        margin: 0;
+        padding: 1rem;
+        border-radius: 0.95rem;
+        background: #f3f6f8;
+        overflow-x: auto;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #eef3f7;
+        padding: 0.15rem 0.35rem;
+        border-radius: 0.35rem;
+      }
+      input, textarea, button { font: inherit; }
+      input, textarea {
+        width: 100%;
+        padding: 0.75rem 0.8rem;
+        border: 1px solid #bdc8d4;
+        border-radius: 0.85rem;
+        background: #fff;
+      }
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1rem;
+        background: var(--primary);
+        color: #fff;
+        cursor: pointer;
+      }
+      button:hover { background: var(--primary-strong); }
+      button.danger {
+        background: #f6e6e3;
+        color: var(--danger);
+      }
+      button.danger:hover { background: #f1dad6; }
+      .page {
+        width: min(100%, 1100px);
+        margin: 0 auto;
+        display: grid;
+        gap: 1rem;
+      }
+      .panel {
+        border: 1px solid var(--panel-border);
+        border-radius: 1rem;
+        padding: 1rem;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
+      }
+      .header {
+        display: grid;
+        gap: 0.8rem;
+      }
+      .header-copy {
+        display: grid;
+        gap: 0.35rem;
+      }
+      .meta { color: var(--muted); font-size: 0.95rem; }
+      .state-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: fit-content;
+        padding: 0.3rem 0.7rem;
+        border-radius: 999px;
+        background: var(--pill);
+        color: var(--pill-text);
+        font-size: 0.82rem;
+      }
+      .meta-grid {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .meta-item {
+        display: grid;
+        gap: 0.2rem;
+        padding: 0.8rem 0.85rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.9rem;
+        background: #fff;
+      }
+      .meta-label {
+        font-size: 0.84rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .flash-error,
+      .flash-success {
+        padding: 0.85rem 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid;
+      }
+      .flash-error {
+        background: #fff0ed;
+        border-color: #f2c6c0;
+        color: #8a2217;
+      }
+      .flash-success {
+        background: #eefaf2;
+        border-color: #bfdcc8;
+        color: var(--success);
+      }
+      .layout {
+        display: grid;
+        gap: 1rem;
+      }
+      .actions-panel,
+      .action-form,
+      .reason-form,
+      .step-card,
+      .session,
+      .stack {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .step-card,
+      .session {
+        padding: 0.95rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.95rem;
+        background: #fff;
+      }
+      .step-header,
+      .session-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        align-items: start;
+      }
+      .section-title {
+        display: grid;
+        gap: 0.3rem;
+      }
+      .step-prompt {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .inline-pairs {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      @media (min-width: 720px) {
+        body { padding: 1.5rem; }
+        .meta-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .inline-pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+
+      @media (min-width: 1080px) {
+        .layout {
+          grid-template-columns: minmax(0, 1.4fr) minmax(18rem, 24rem);
+          align-items: start;
+        }
+        .meta-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      }
     </style>
   </head>
   <body>
-    <p><a href="{{ url_for('ui_tickets') }}">Back to tickets</a></p>
-    <h1>{{ ticket.title }}</h1>
-    <div class="meta-grid">
-      <p><strong>ID:</strong> {{ ticket.id }}</p>
-      <p><strong>State:</strong> {{ ticket.state }}</p>
-      <p><strong>Source:</strong> {{ ticket.source }}</p>
-      <p><strong>Task Ref:</strong> {{ ticket.task_ref or 'n/a' }}</p>
-      <p><strong>Created By:</strong> {{ ticket.created_by }}</p>
-      <p><strong>Approved By:</strong> {{ ticket.approved_by or 'n/a' }}</p>
-      <p><strong>Created At:</strong> {{ ticket.created_at }}</p>
-      <p><strong>Started At:</strong> {{ ticket.started_at or 'n/a' }}</p>
-      <p><strong>Finished At:</strong> {{ ticket.finished_at or 'n/a' }}</p>
-      <p><strong>Result:</strong> {{ ticket.result or 'n/a' }}</p>
-    </div>
-    <p><strong>Summary:</strong> {{ ticket.summary }}</p>
+    <div class="page">
+      <section class="panel header">
+        <p><a href="{{ url_for('ui_tickets') }}">Back to tickets</a></p>
+        <div class="header-copy">
+          <span class="state-pill">{{ ticket.state }}</span>
+          <h1>{{ ticket.title }}</h1>
+          <p class="meta">{{ ticket.summary }}</p>
+        </div>
+      </section>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <p class="flash-{{ category }}">{{ message }}</p>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <p class="flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
 
-    {% if ticket.state == 'pending_approval' %}
-      <div class="actions">
-        <form method="post" action="{{ url_for('ui_ticket_approve', ticket_id=ticket.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <button type="submit">Approve</button>
-        </form>
-        <form method="post" action="{{ url_for('ui_ticket_reject', ticket_id=ticket.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-          <input type="text" name="reason" placeholder="Reject reason (optional)" />
-          <button type="submit">Reject</button>
-        </form>
+      <div class="meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">Ticket ID</span>
+          <strong>{{ ticket.id }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Source</span>
+          <strong>{{ ticket.source }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Task Ref</span>
+          <strong>{{ ticket.task_ref or 'n/a' }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Created By</span>
+          <strong>{{ ticket.created_by }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Approved By</span>
+          <strong>{{ ticket.approved_by or 'n/a' }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Created At</span>
+          <strong>{{ ticket.created_at }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Started At</span>
+          <strong>{{ ticket.started_at or 'n/a' }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Finished At</span>
+          <strong>{{ ticket.finished_at or 'n/a' }}</strong>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Result</span>
+          <strong>{{ ticket.result or 'n/a' }}</strong>
+        </div>
       </div>
-    {% endif %}
 
-    {% if ticket.state in ['pending_approval', 'approved', 'running'] %}
-      <form method="post" action="{{ url_for('ui_ticket_cancel', ticket_id=ticket.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <input type="text" name="reason" placeholder="Cancel reason (optional)" />
-        <button type="submit">Cancel</button>
-      </form>
-    {% endif %}
+      <main class="layout">
+        <div class="stack">
+          <section class="panel stack">
+            <div class="section-title">
+              <h2>Execution Plan</h2>
+              <p class="meta">Steps execute in order from top to bottom.</p>
+            </div>
+            {% for step in ticket.execution_plan %}
+              <article class="step-card">
+                <div class="step-header">
+                  <div class="section-title">
+                    <h3>Step {{ loop.index }}</h3>
+                    <p class="meta">{{ step.role }} via {{ step.agent }}</p>
+                  </div>
+                </div>
+                <div class="inline-pairs">
+                  <div class="meta-item">
+                    <span class="meta-label">Role</span>
+                    <strong>{{ step.role }}</strong>
+                  </div>
+                  <div class="meta-item">
+                    <span class="meta-label">Agent</span>
+                    <strong>{{ step.agent }}</strong>
+                  </div>
+                </div>
+                <div class="section-title">
+                  <strong>Prompt Markdown</strong>
+                  <pre class="step-prompt">{{ step.prompt_markdown }}</pre>
+                </div>
+              </article>
+            {% endfor %}
+          </section>
 
-    <h2>Execution Plan</h2>
-    <pre>{{ ticket.execution_plan | tojson(indent=2) }}</pre>
+          {% if ticket.tmux_sessions %}
+            <section class="panel stack">
+              <div class="section-title">
+                <h2>Runner Sessions</h2>
+                <p class="meta">Per-step tmux execution state.</p>
+              </div>
+              {% for session in ticket.tmux_sessions %}
+                <section class="session">
+                  <div class="session-header">
+                    <div class="section-title">
+                      <h3>Step {{ session.step_index + 1 }}</h3>
+                      <p class="meta">{{ session.role }} via {{ session.agent }}</p>
+                    </div>
+                    <span class="state-pill">{{ session.status }}</span>
+                  </div>
+                  <div class="stack">
+                    <p><strong>Session:</strong> <code>{{ session.session_name }}</code></p>
+                    <p><strong>Attach:</strong> <code>{{ session.attach_command }}</code></p>
+                    <p><strong>Log:</strong> <code>{{ session.log_path }}</code></p>
+                  </div>
+                </section>
+              {% endfor %}
+            </section>
+          {% endif %}
 
-    {% if ticket.tmux_sessions %}
-      <h2>Runner Sessions</h2>
-      {% for session in ticket.tmux_sessions %}
-        <section class="session">
-          <p><strong>Step:</strong> {{ session.step_index + 1 }} / {{ session.role }} / {{ session.agent }}</p>
-          <p><strong>Status:</strong> {{ session.status }}</p>
-          <p><strong>Session:</strong> <code>{{ session.session_name }}</code></p>
-          <p><strong>Attach:</strong> <code>{{ session.attach_command }}</code></p>
-          <p><strong>Log:</strong> <code>{{ session.log_path }}</code></p>
-        </section>
-      {% endfor %}
-    {% endif %}
+          <section class="panel stack">
+            <div class="section-title">
+              <h2>Policy Requirements</h2>
+              <p class="meta">Effective policy attached to this ticket.</p>
+            </div>
+            <pre>{{ ticket.policy_requirements | tojson(indent=2) }}</pre>
+          </section>
 
-    <h2>Policy Requirements</h2>
-    <pre>{{ ticket.policy_requirements | tojson(indent=2) }}</pre>
+          <section class="panel stack">
+            <div class="section-title">
+              <h2>Context</h2>
+              <p class="meta">JSON context passed to the runner.</p>
+            </div>
+            <pre>{{ ticket.context | tojson(indent=2) }}</pre>
+          </section>
+        </div>
 
-    <h2>Context</h2>
-    <pre>{{ ticket.context | tojson(indent=2) }}</pre>
+        <aside class="stack">
+          {% if ticket.state == 'pending_approval' %}
+            <section class="panel actions-panel">
+              <div class="section-title">
+                <h2>Approval Actions</h2>
+                <p class="meta">These actions change the ticket state immediately.</p>
+              </div>
+              <form method="post" action="{{ url_for('ui_ticket_approve', ticket_id=ticket.id) }}" class="action-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button type="submit">Approve Ticket</button>
+              </form>
+              <form method="post" action="{{ url_for('ui_ticket_reject', ticket_id=ticket.id) }}" class="reason-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <label for="reject-reason">Reject reason</label>
+                <textarea id="reject-reason" name="reason" placeholder="Optional rejection reason"></textarea>
+                <button type="submit" class="danger">Reject Ticket</button>
+              </form>
+            </section>
+          {% endif %}
+
+          {% if ticket.state in ['pending_approval', 'approved', 'running'] %}
+            <section class="panel actions-panel">
+              <div class="section-title">
+                <h2>Cancel Ticket</h2>
+                <p class="meta">Use cancel if the work should no longer continue.</p>
+              </div>
+              <form method="post" action="{{ url_for('ui_ticket_cancel', ticket_id=ticket.id) }}" class="reason-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <label for="cancel-reason">Cancel reason</label>
+                <textarea id="cancel-reason" name="reason" placeholder="Optional cancellation reason"></textarea>
+                <button type="submit" class="danger">Cancel Ticket</button>
+              </form>
+            </section>
+          {% endif %}
+        </aside>
+      </main>
+    </div>
   </body>
 </html>

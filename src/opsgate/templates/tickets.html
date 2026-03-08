@@ -5,124 +5,678 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpsGate Tickets</title>
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #17212b; }
-      main { display: grid; gap: 2rem; }
-      h1, h2 { margin-bottom: 0.75rem; }
-      table { width: 100%; border-collapse: collapse; background: #fff; }
-      th, td { border-bottom: 1px solid #ddd; text-align: left; padding: 0.65rem; vertical-align: top; }
-      .layout { display: grid; grid-template-columns: minmax(18rem, 28rem) minmax(0, 1fr); gap: 2rem; align-items: start; }
-      .panel { border: 1px solid #d9e1e8; border-radius: 12px; padding: 1rem; background: #fbfcfd; }
-      .fields { display: grid; gap: 0.85rem; }
-      label { display: grid; gap: 0.35rem; font-weight: 600; }
+      :root {
+        color-scheme: light;
+        --bg: #f3f6f8;
+        --panel: #fbfcfd;
+        --panel-border: #d9e1e8;
+        --text: #17212b;
+        --muted: #506070;
+        --pill: #eef3f7;
+        --pill-text: #24445f;
+        --primary: #1f5b96;
+        --primary-strong: #164875;
+        --danger: #b33a2b;
+        --success: #116b3a;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 1rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+      a { color: var(--primary); }
+      main { display: grid; gap: 1rem; }
+      h1, h2, h3 { margin: 0; }
+      p { margin: 0; }
       input, textarea, select, button { font: inherit; }
-      input, textarea, select { padding: 0.6rem 0.7rem; border: 1px solid #bdc8d4; border-radius: 8px; background: #fff; }
-      textarea { min-height: 6rem; resize: vertical; }
-      .short textarea { min-height: 4rem; }
-      .meta { color: #506070; font-size: 0.95rem; margin-top: 0; }
-      .actions { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-      .state-pill { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 999px; background: #eef3f7; font-size: 0.85rem; }
-      .flash-error { color: #a00; }
-      .flash-success { color: #0a6a2f; }
-      @media (max-width: 900px) {
-        .layout { grid-template-columns: 1fr; }
+      input, textarea, select {
+        width: 100%;
+        padding: 0.75rem 0.8rem;
+        border: 1px solid #bdc8d4;
+        border-radius: 0.85rem;
+        background: #fff;
+      }
+      textarea { min-height: 7rem; resize: vertical; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.8rem 1rem;
+        background: var(--primary);
+        color: #fff;
+        cursor: pointer;
+      }
+      button:hover { background: var(--primary-strong); }
+      button.secondary {
+        background: #e7edf3;
+        color: var(--text);
+      }
+      button.secondary:hover { background: #dae4ec; }
+      button.danger {
+        background: #f6e6e3;
+        color: var(--danger);
+      }
+      button.danger:hover { background: #f1dad6; }
+      .page {
+        width: min(100%, 1180px);
+        margin: 0 auto;
+        display: grid;
+        gap: 1rem;
+      }
+      .header {
+        display: grid;
+        gap: 0.85rem;
+        align-items: start;
+      }
+      .header-copy {
+        display: grid;
+        gap: 0.35rem;
+      }
+      .meta { color: var(--muted); font-size: 0.95rem; }
+      .panel {
+        border: 1px solid var(--panel-border);
+        border-radius: 1rem;
+        padding: 1rem;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(23, 33, 43, 0.04);
+      }
+      .flash-error,
+      .flash-success {
+        padding: 0.85rem 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid;
+      }
+      .flash-error {
+        background: #fff0ed;
+        border-color: #f2c6c0;
+        color: #8a2217;
+      }
+      .flash-success {
+        background: #eefaf2;
+        border-color: #bfdcc8;
+        color: var(--success);
+      }
+      .layout {
+        display: grid;
+        gap: 1rem;
+      }
+      .tickets-list {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .ticket-card {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0.95rem 1rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.95rem;
+        background: #fff;
+      }
+      .ticket-card-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .ticket-link {
+        font-weight: 700;
+        text-decoration: none;
+      }
+      .ticket-link:hover { text-decoration: underline; }
+      .ticket-card-title {
+        display: grid;
+        gap: 0.25rem;
+      }
+      .ticket-facts {
+        display: grid;
+        gap: 0.45rem;
+      }
+      .ticket-facts-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .ticket-id {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.88rem;
+        color: var(--muted);
+        overflow-wrap: anywhere;
+      }
+      .state-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.3rem 0.65rem;
+        border-radius: 999px;
+        background: var(--pill);
+        color: var(--pill-text);
+        font-size: 0.82rem;
+        white-space: nowrap;
+      }
+      .fields,
+      .workflow-step,
+      .workflow-step-grid {
+        display: grid;
+        gap: 0.85rem;
+      }
+      label {
+        display: grid;
+        gap: 0.35rem;
+        font-weight: 600;
+      }
+      .policy-note,
+      .workflow-empty {
+        padding: 0.85rem 1rem;
+        border-radius: 0.9rem;
+        background: #edf4fb;
+        color: #24445f;
+        font-size: 0.95rem;
+      }
+      .workflow-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .workflow-steps {
+        display: grid;
+        gap: 0.85rem;
+      }
+      .workflow-step {
+        padding: 0.95rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.95rem;
+        background: #fff;
+      }
+      .workflow-step-header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .workflow-step-copy {
+        display: grid;
+        gap: 0.2rem;
+      }
+      .workflow-step-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.5rem;
+      }
+      .workflow-step-actions button {
+        min-width: 4.25rem;
+        padding-inline: 0.85rem;
+      }
+      .form-actions {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .form-actions button {
+        width: 100%;
+      }
+      .no-tickets {
+        color: var(--muted);
+        font-size: 0.95rem;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (min-width: 720px) {
+        body { padding: 1.5rem; }
+        .header {
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 1rem;
+        }
+        .workflow-step-grid {
+          grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+        }
+        .ticket-facts {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (min-width: 1080px) {
+        .layout {
+          grid-template-columns: minmax(0, 1fr) minmax(20rem, 30rem);
+          align-items: start;
+        }
+        .create-panel { order: -1; }
       }
     </style>
   </head>
   <body>
-    <header class="actions">
-      <div>
-        <h1>OpsGate Tickets</h1>
-        <p class="meta">Create manual tickets, then explicitly approve them before the runner starts work.</p>
-      </div>
-      <form method="post" action="{{ url_for('ui_logout') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-        <button type="submit">Logout</button>
-      </form>
-    </header>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for category, message in messages %}
-          <p class="flash-{{ category }}">{{ message }}</p>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <main class="layout">
-      <section class="panel">
-        <h2>Create Ticket</h2>
-        <form method="post" action="{{ url_for('ui_tickets') }}" class="fields">
+    <div class="page">
+      <header class="header panel">
+        <div class="header-copy">
+          <h1>OpsGate Tickets</h1>
+          <p class="meta">Review pending approvals from a phone, inspect workflow steps quickly, and create manual tickets that stay in <code>pending_approval</code> until explicitly approved.</p>
+        </div>
+        <form method="post" action="{{ url_for('ui_logout') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit">Logout</button>
+        </form>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <p class="flash-{{ category }}">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <main class="layout">
+        <section class="panel">
+          <div class="header-copy">
+            <h2>Recent Tickets</h2>
+            <p class="meta">Open the ticket to approve, reject, cancel, or inspect the workflow on a narrow screen.</p>
+          </div>
+          <div class="tickets-list">
+            {% for ticket in tickets %}
+              <article class="ticket-card">
+                <div class="ticket-card-header">
+                  <div class="ticket-card-title">
+                    <a class="ticket-link" href="{{ url_for('ui_ticket_detail', ticket_id=ticket.id) }}">{{ ticket.title }}</a>
+                    <p class="ticket-id">{{ ticket.id }}</p>
+                  </div>
+                  <span class="state-pill">{{ ticket.state }}</span>
+                </div>
+                <div class="ticket-facts">
+                  <div class="ticket-facts-row">
+                    <span>Source</span>
+                    <strong>{{ ticket.source }}</strong>
+                  </div>
+                  <div class="ticket-facts-row">
+                    <span>Created</span>
+                    <strong>{{ ticket.created_at }}</strong>
+                  </div>
+                  {% if ticket.task_ref %}
+                    <div class="ticket-facts-row">
+                      <span>Task Ref</span>
+                      <strong>{{ ticket.task_ref }}</strong>
+                    </div>
+                  {% endif %}
+                  <div class="ticket-facts-row">
+                    <span>Steps</span>
+                    <strong>{{ ticket.execution_plan | length }}</strong>
+                  </div>
+                </div>
+              </article>
+            {% else %}
+              <p class="no-tickets">No tickets yet.</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="panel create-panel">
+          <div class="header-copy">
+            <h2>Create Ticket</h2>
+            <p class="meta">Build the execution plan step by step. Each step has its own role, agent, and prompt.</p>
+          </div>
+
+          {% if operator_requires_reviewer %}
+            <p class="policy-note">Operator policy floor: this workflow must include at least one <code>reviewer</code> step. The backend still enforces that rule even if the browser is bypassed.</p>
+          {% endif %}
+
+          <form method="post" action="{{ url_for('ui_tickets') }}" class="fields" id="manual-ticket-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+            <label>
+              Title
+              <input type="text" name="title" value="{{ form_data.title }}" placeholder="Investigate disk pressure on macmini" required />
+            </label>
+
+            <label>
+              Summary
+              <textarea name="summary" placeholder="Describe the task and expected outcome." required>{{ form_data.summary }}</textarea>
+            </label>
+
+            <label>
+              Task Ref
+              <input type="text" name="task_ref" value="{{ form_data.task_ref }}" placeholder="optional-dedupe-key" />
+            </label>
+
+            <section class="fields" aria-labelledby="workflow-editor-heading">
+              <div class="workflow-toolbar">
+                <div class="header-copy">
+                  <h3 id="workflow-editor-heading">Workflow Steps</h3>
+                  <p class="meta">Add, remove, and reorder steps before submitting.</p>
+                </div>
+                <button type="button" class="secondary" data-step-add>Add Step</button>
+              </div>
+
+              <div class="workflow-empty"{% if form_data.steps %} hidden{% endif %} id="workflow-empty">No workflow steps yet. Add the first step to build the execution plan.</div>
+
+              <div class="workflow-steps" id="workflow-steps">
+                {% for step in form_data.steps %}
+                  <article class="workflow-step" data-step>
+                    <div class="workflow-step-header">
+                      <div class="workflow-step-copy">
+                        <h3>Step <span data-step-number>{{ loop.index }}</span></h3>
+                        <p class="meta">Execution order is top to bottom.</p>
+                      </div>
+                      <div class="workflow-step-actions">
+                        <button type="button" class="secondary" data-step-move="up">Up</button>
+                        <button type="button" class="secondary" data-step-move="down">Down</button>
+                        <button type="button" class="danger" data-step-remove>Remove</button>
+                      </div>
+                    </div>
+
+                    <div class="workflow-step-grid">
+                      <label>
+                        Role
+                        <input
+                          type="text"
+                          list="workflow-role-options"
+                          name="steps-{{ loop.index0 }}-role"
+                          value="{{ step.role }}"
+                          data-step-field="role"
+                          required
+                        />
+                      </label>
+
+                      <label>
+                        Agent
+                        <input
+                          type="text"
+                          name="steps-{{ loop.index0 }}-agent"
+                          value="{{ step.agent }}"
+                          data-step-field="agent"
+                          required
+                        />
+                      </label>
+                    </div>
+
+                    <label>
+                      Prompt Markdown
+                      <textarea
+                        name="steps-{{ loop.index0 }}-prompt_markdown"
+                        placeholder="Explain exactly what this step should do."
+                        data-step-field="prompt_markdown"
+                        required
+                      >{{ step.prompt_markdown }}</textarea>
+                    </label>
+                  </article>
+                {% endfor %}
+              </div>
+
+              <noscript>
+                <p class="meta">JavaScript is required to add, remove, or reorder workflow steps. Existing rendered steps still submit normally.</p>
+              </noscript>
+            </section>
+
+            <label>
+              Max Duration Seconds
+              <input type="number" min="1" name="max_duration_seconds" value="{{ form_data.max_duration_seconds }}" />
+            </label>
+
+            <label>
+              Expires At
+              <input type="text" name="expires_at" value="{{ form_data.expires_at }}" placeholder="2026-03-06T18:00:00Z" />
+            </label>
+
+            <label>
+              Context JSON
+              <textarea name="context_json" placeholder='{"host":"macmini","service":"paperless"}'>{{ form_data.context_json }}</textarea>
+            </label>
+
+            <div class="form-actions">
+              <button type="button" class="secondary" data-step-add>Add Another Step</button>
+              <button type="submit">Create Ticket</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <datalist id="workflow-role-options">
+      <option value="investigator"></option>
+      <option value="implementer"></option>
+      <option value="reviewer"></option>
+    </datalist>
+
+    <template id="workflow-step-template">
+      <article class="workflow-step" data-step>
+        <div class="workflow-step-header">
+          <div class="workflow-step-copy">
+            <h3>Step <span data-step-number></span></h3>
+            <p class="meta">Execution order is top to bottom.</p>
+          </div>
+          <div class="workflow-step-actions">
+            <button type="button" class="secondary" data-step-move="up">Up</button>
+            <button type="button" class="secondary" data-step-move="down">Down</button>
+            <button type="button" class="danger" data-step-remove>Remove</button>
+          </div>
+        </div>
+
+        <div class="workflow-step-grid">
           <label>
-            Title
-            <input type="text" name="title" placeholder="Investigate disk pressure on macmini" required />
+            Role
+            <input type="text" list="workflow-role-options" value="{{ 'reviewer' if operator_requires_reviewer else 'investigator' }}" data-step-field="role" required />
           </label>
-          <label class="short">
-            Summary
-            <textarea name="summary" placeholder="Describe the task and expected outcome." required></textarea>
-          </label>
-          <label>
-            Task Ref
-            <input type="text" name="task_ref" placeholder="optional-dedupe-key" />
-          </label>
-          <label>
-            Step Role
-            <select name="step_role">
-              <option value="investigator"{% if not operator_requires_reviewer %} selected{% endif %}>investigator</option>
-              <option value="implementer">implementer</option>
-              <option value="reviewer"{% if operator_requires_reviewer %} selected{% endif %}>reviewer</option>
-              <option value="custom">custom</option>
-            </select>
-          </label>
+
           <label>
             Agent
-            <input type="text" name="step_agent" value="codex" required />
+            <input
+              type="text"
+              value="{{ 'claude' if operator_requires_reviewer else 'codex' }}"
+              data-step-field="agent"
+              required
+            />
           </label>
-          <label>
-            Prompt Markdown
-            <textarea name="prompt_markdown" placeholder="Explain exactly what the runner should do." required></textarea>
-          </label>
-          <label>
-            Max Duration Seconds
-            <input type="number" min="1" name="max_duration_seconds" value="3600" />
-          </label>
-          <label>
-            Expires At
-            <input type="text" name="expires_at" placeholder="2026-03-06T18:00:00Z" />
-          </label>
-          <label class="short">
-            Context JSON
-            <textarea name="context_json" placeholder='{"host":"macmini","service":"paperless"}'></textarea>
-          </label>
-          <button type="submit">Create Ticket</button>
-        </form>
-      </section>
+        </div>
 
-      <section class="panel">
-        <h2>Recent Tickets</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Source</th>
-              <th>State</th>
-              <th>Title</th>
-              <th>Created</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for ticket in tickets %}
-              <tr>
-                <td><a href="{{ url_for('ui_ticket_detail', ticket_id=ticket.id) }}">{{ ticket.id }}</a></td>
-                <td>{{ ticket.source }}</td>
-                <td><span class="state-pill">{{ ticket.state }}</span></td>
-                <td>{{ ticket.title }}</td>
-                <td>{{ ticket.created_at }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </section>
-    </main>
+        <label>
+          Prompt Markdown
+          <textarea placeholder="Explain exactly what this step should do." data-step-field="prompt_markdown" required></textarea>
+        </label>
+      </article>
+    </template>
+
+    <script>
+      (() => {
+        const form = document.getElementById("manual-ticket-form");
+        if (!form) {
+          return;
+        }
+
+        const roleAgentDefaults = {{ role_agent_defaults | tojson }};
+        const stepsContainer = document.getElementById("workflow-steps");
+        const emptyState = document.getElementById("workflow-empty");
+        const stepTemplate = document.getElementById("workflow-step-template");
+
+        function defaultAgentForRole(roleValue) {
+          const normalizedRole = roleValue.trim().toLowerCase();
+          return roleAgentDefaults[normalizedRole] || "codex";
+        }
+
+        function getSteps() {
+          return Array.from(stepsContainer.querySelectorAll("[data-step]"));
+        }
+
+        function applyDefaultAgent(step, { force = false } = {}) {
+          const roleField = step.querySelector("[data-step-field='role']");
+          const agentField = step.querySelector("[data-step-field='agent']");
+          if (!(roleField instanceof HTMLInputElement) || !(agentField instanceof HTMLInputElement)) {
+            return;
+          }
+
+          const currentDefault = defaultAgentForRole(roleField.value);
+          const previousRole = agentField.dataset.lastRole || roleField.value;
+          const previousDefault = defaultAgentForRole(previousRole);
+          const currentValue = agentField.value.trim();
+          const canAutofill =
+            force ||
+            agentField.dataset.autoManaged === "true" ||
+            currentValue === "" ||
+            currentValue === previousDefault;
+
+          if (canAutofill) {
+            agentField.value = currentDefault;
+            agentField.dataset.autoManaged = "true";
+          }
+
+          agentField.dataset.lastRole = roleField.value.trim();
+        }
+
+        function syncSteps() {
+          const steps = getSteps();
+
+          steps.forEach((step, index) => {
+            const numberNode = step.querySelector("[data-step-number]");
+            if (numberNode) {
+              numberNode.textContent = String(index + 1);
+            }
+
+            const moveUp = step.querySelector("[data-step-move='up']");
+            if (moveUp instanceof HTMLButtonElement) {
+              moveUp.disabled = index === 0;
+            }
+
+            const moveDown = step.querySelector("[data-step-move='down']");
+            if (moveDown instanceof HTMLButtonElement) {
+              moveDown.disabled = index === steps.length - 1;
+            }
+
+            step.querySelectorAll("[data-step-field]").forEach((field) => {
+              if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+                return;
+              }
+              const fieldName = field.dataset.stepField;
+              if (!fieldName) {
+                return;
+              }
+              field.name = `steps-${index}-${fieldName}`;
+              field.id = `steps-${index}-${fieldName}`;
+            });
+
+            applyDefaultAgent(step);
+          });
+
+          if (emptyState) {
+            emptyState.hidden = steps.length > 0;
+          }
+        }
+
+        function addStep() {
+          const fragment = stepTemplate.content.cloneNode(true);
+          stepsContainer.appendChild(fragment);
+          const newStep = getSteps().at(-1);
+          if (newStep) {
+            applyDefaultAgent(newStep, { force: true });
+          }
+          syncSteps();
+          const prompt = newStep?.querySelector("textarea");
+          if (prompt instanceof HTMLTextAreaElement) {
+            prompt.focus();
+          }
+        }
+
+        form.querySelectorAll("[data-step-add]").forEach((button) => {
+          button.addEventListener("click", addStep);
+        });
+
+        form.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+
+          const roleField = target.closest("[data-step-field='role']");
+          if (roleField) {
+            const step = roleField.closest("[data-step]");
+            if (step) {
+              applyDefaultAgent(step);
+            }
+            return;
+          }
+
+          const removeButton = target.closest("[data-step-remove]");
+          if (removeButton) {
+            removeButton.closest("[data-step]")?.remove();
+            syncSteps();
+            return;
+          }
+
+          const moveButton = target.closest("[data-step-move]");
+          if (!moveButton) {
+            return;
+          }
+
+          const direction = moveButton.getAttribute("data-step-move");
+          const step = moveButton.closest("[data-step]");
+          if (!step) {
+            return;
+          }
+
+          if (direction === "up" && step.previousElementSibling) {
+            stepsContainer.insertBefore(step, step.previousElementSibling);
+            syncSteps();
+          }
+
+          if (direction === "down" && step.nextElementSibling) {
+            stepsContainer.insertBefore(step.nextElementSibling, step);
+            syncSteps();
+          }
+        });
+
+        form.addEventListener("input", (event) => {
+          const target = event.target;
+          if (!(target instanceof Element)) {
+            return;
+          }
+
+          const roleField = target.closest("[data-step-field='role']");
+          if (roleField) {
+            const step = roleField.closest("[data-step]");
+            if (step) {
+              applyDefaultAgent(step);
+            }
+            return;
+          }
+
+          const agentField = target.closest("[data-step-field='agent']");
+          if (!(agentField instanceof HTMLInputElement)) {
+            return;
+          }
+
+          const step = agentField.closest("[data-step]");
+          if (!step) {
+            return;
+          }
+
+          const roleFieldForAgent = step.querySelector("[data-step-field='role']");
+          if (!(roleFieldForAgent instanceof HTMLInputElement)) {
+            return;
+          }
+
+          agentField.dataset.autoManaged =
+            agentField.value.trim() === "" ||
+            agentField.value.trim() === defaultAgentForRole(roleFieldForAgent.value)
+              ? "true"
+              : "false";
+          agentField.dataset.lastRole = roleFieldForAgent.value.trim();
+        });
+
+        form.addEventListener("submit", syncSteps);
+        syncSteps();
+      })();
+    </script>
   </body>
 </html>

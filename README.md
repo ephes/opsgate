@@ -15,7 +15,9 @@ Phase 4B implementation scope in this repository:
 - Runner supports restart recovery from local runner state files under `{{ execution_data_dir }}/runner-state`.
 - OpenClaw submit token is optional for this slice (Nyxmon producer is primary).
 - Login supports safe deep-link redirect (`/login?next=/tickets/<id>`) for approval-link UX.
-- Authenticated approvers can create manual tickets in the web UI.
+- Authenticated approvers can create manual tickets in the web UI with a mobile-first multi-step workflow editor.
+- Manual create flow supports per-step role/agent/prompt editing with role-based agent defaults (`implementer` -> `codex`, `reviewer` -> `claude`) and sticky validation errors.
+- Login form markup is password-manager/autofill friendly without relaxing session or CSRF protections.
 
 ## Runtime model
 

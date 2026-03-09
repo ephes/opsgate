@@ -251,7 +251,6 @@ class OpsGateService:
 
                 CREATE INDEX IF NOT EXISTS idx_tickets_state ON tickets(state);
                 CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at);
-                CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_dedupe
                     ON tickets(source, task_ref)
@@ -267,6 +266,7 @@ class OpsGateService:
                 conn.execute("ALTER TABLE tickets ADD COLUMN archived_at TEXT")
             if "archived_by" not in ticket_columns:
                 conn.execute("ALTER TABLE tickets ADD COLUMN archived_by TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at)")
             conn.commit()
 
     def authenticate_submitter(self, token: str | None) -> SubmitterContext | None:

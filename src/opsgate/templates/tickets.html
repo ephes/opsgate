@@ -381,14 +381,15 @@
                     <div class="workflow-step-grid">
                       <label>
                         Role
-                        <input
-                          type="text"
-                          list="workflow-role-options"
+                        <select
                           name="steps-{{ loop.index0 }}-role"
-                          value="{{ step.role }}"
                           data-step-field="role"
                           required
-                        />
+                        >
+                          <option value="investigator"{% if step.role == "investigator" %} selected{% endif %}>investigator</option>
+                          <option value="implementer"{% if step.role == "implementer" or step.role == "implementor" %} selected{% endif %}>implementer</option>
+                          <option value="reviewer"{% if step.role == "reviewer" %} selected{% endif %}>reviewer</option>
+                        </select>
                       </label>
 
                       <label>
@@ -445,12 +446,6 @@
       </main>
     </div>
 
-    <datalist id="workflow-role-options">
-      <option value="investigator"></option>
-      <option value="implementer"></option>
-      <option value="reviewer"></option>
-    </datalist>
-
     <template id="workflow-step-template">
       <article class="workflow-step" data-step>
         <div class="workflow-step-header">
@@ -468,7 +463,11 @@
         <div class="workflow-step-grid">
           <label>
             Role
-            <input type="text" list="workflow-role-options" value="{{ 'reviewer' if operator_requires_reviewer else 'investigator' }}" data-step-field="role" required />
+            <select data-step-field="role" required>
+              <option value="investigator"{% if not operator_requires_reviewer %} selected{% endif %}>investigator</option>
+              <option value="implementer">implementer</option>
+              <option value="reviewer"{% if operator_requires_reviewer %} selected{% endif %}>reviewer</option>
+            </select>
           </label>
 
           <label>
@@ -513,7 +512,10 @@
         function applyDefaultAgent(step, { force = false } = {}) {
           const roleField = step.querySelector("[data-step-field='role']");
           const agentField = step.querySelector("[data-step-field='agent']");
-          if (!(roleField instanceof HTMLInputElement) || !(agentField instanceof HTMLInputElement)) {
+          if (
+            !(roleField instanceof HTMLInputElement || roleField instanceof HTMLSelectElement) ||
+            !(agentField instanceof HTMLInputElement)
+          ) {
             return;
           }
 
@@ -555,7 +557,11 @@
             }
 
             step.querySelectorAll("[data-step-field]").forEach((field) => {
-              if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) {
+              if (
+                !(field instanceof HTMLInputElement) &&
+                !(field instanceof HTMLTextAreaElement) &&
+                !(field instanceof HTMLSelectElement)
+              ) {
                 return;
               }
               const fieldName = field.dataset.stepField;
@@ -595,15 +601,6 @@
         form.addEventListener("click", (event) => {
           const target = event.target;
           if (!(target instanceof Element)) {
-            return;
-          }
-
-          const roleField = target.closest("[data-step-field='role']");
-          if (roleField) {
-            const step = roleField.closest("[data-step]");
-            if (step) {
-              applyDefaultAgent(step);
-            }
             return;
           }
 
@@ -662,7 +659,9 @@
           }
 
           const roleFieldForAgent = step.querySelector("[data-step-field='role']");
-          if (!(roleFieldForAgent instanceof HTMLInputElement)) {
+          if (
+            !(roleFieldForAgent instanceof HTMLInputElement || roleFieldForAgent instanceof HTMLSelectElement)
+          ) {
             return;
           }
 

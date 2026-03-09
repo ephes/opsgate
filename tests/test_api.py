@@ -224,7 +224,8 @@ def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'name="steps-0-role"' in body
-    assert 'value="reviewer"' in body
+    assert '<option value="implementer">implementer</option>' in body
+    assert '<option value="reviewer" selected>reviewer</option>' in body
     assert 'name="steps-0-agent"' in body
     assert 'value="claude"' in body
 

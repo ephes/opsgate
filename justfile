@@ -1,6 +1,11 @@
 _sync:
     uv sync --extra dev
 
+check:
+    @just test
+    @just typecheck
+    @just lint
+
 test: _sync
     uv run pytest
 

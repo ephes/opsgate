@@ -225,6 +225,67 @@
         min-width: 4.25rem;
         padding-inline: 0.85rem;
       }
+      .workflow-role-note {
+        padding: 0.85rem 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid #d9e1e8;
+        background: #fff;
+        display: grid;
+        gap: 0.55rem;
+      }
+      .workflow-role-grid {
+        display: grid;
+        gap: 0.65rem;
+      }
+      .workflow-role-card {
+        padding: 0.75rem 0.85rem;
+        border-radius: 0.9rem;
+        background: #f4f8fb;
+        display: grid;
+        gap: 0.2rem;
+      }
+      .workflow-step-guidance {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0.85rem;
+        border-radius: 0.9rem;
+        background: #f4f8fb;
+      }
+      .workflow-step-guidance-title {
+        font-weight: 700;
+      }
+      .workflow-step-guidance-grid {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .workflow-step-guidance-group {
+        display: grid;
+        gap: 0.35rem;
+      }
+      .workflow-step-guidance-group strong {
+        font-size: 0.95rem;
+      }
+      .workflow-step-guidance-group ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        color: var(--muted);
+      }
+      .workflow-step-guidance-group li + li {
+        margin-top: 0.25rem;
+      }
+      .prompt-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        align-items: center;
+      }
+      .prompt-tools button {
+        width: fit-content;
+      }
+      .prompt-help {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
       .form-actions {
         display: grid;
         gap: 0.75rem;
@@ -256,6 +317,10 @@
         }
         .workflow-step-grid {
           grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+        }
+        .workflow-role-grid,
+        .workflow-step-guidance-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
         }
         .ticket-facts {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -344,6 +409,27 @@
             <p class="meta">Build the execution plan step by step. Each step has its own role, agent, and prompt.</p>
           </div>
 
+          <section class="workflow-role-note" aria-labelledby="role-model-heading">
+            <div class="header-copy">
+              <h3 id="role-model-heading">Role model</h3>
+              <p class="meta">OpsGate currently supports exactly three workflow roles. Use them to keep tickets inspect-only, repo-first, and review-driven.</p>
+            </div>
+            <div class="workflow-role-grid">
+              <article class="workflow-role-card">
+                <strong>investigator</strong>
+                <p class="meta">Inspect state, collect evidence, identify the owning repo/workspace, and propose next steps. No edits, deploys, or ad hoc live fixes.</p>
+              </article>
+              <article class="workflow-role-card">
+                <strong>implementer</strong>
+                <p class="meta">Make the change in the source of truth, iterate with review, validate it, then commit, deploy, and verify when the ticket calls for a live fix.</p>
+              </article>
+              <article class="workflow-role-card">
+                <strong>reviewer</strong>
+                <p class="meta">Review the proposed work, validation, logs, and rollout plan. Do not make independent implementation or deployment changes here.</p>
+              </article>
+            </div>
+          </section>
+
           {% if operator_requires_reviewer %}
             <p class="policy-note">Operator policy floor: this workflow must include at least one <code>reviewer</code> step. The backend still enforces that rule even if the browser is bypassed.</p>
           {% endif %}
@@ -379,6 +465,7 @@
 
               <div class="workflow-steps" id="workflow-steps">
                 {% for step in form_data.steps %}
+                  {% set scaffolding = prompt_scaffolding_for_role(step.role) %}
                   <article class="workflow-step" data-step>
                     <div class="workflow-step-header">
                       <div class="workflow-step-copy">
@@ -423,15 +510,48 @@
                       </label>
                     </div>
 
+                    <section class="workflow-step-guidance" data-step-guidance>
+                      <div class="header-copy">
+                        <span class="workflow-step-guidance-title" data-role-guidance-title>{{ scaffolding.title }}</span>
+                        <p class="meta" data-role-guidance-summary>{{ scaffolding.summary }}</p>
+                      </div>
+                      <div class="workflow-step-guidance-grid">
+                        <div class="workflow-step-guidance-group">
+                          <strong>Do</strong>
+                          <ul data-role-guidance-do>
+                            {% for item in scaffolding.dos %}
+                              <li>{{ item }}</li>
+                            {% endfor %}
+                          </ul>
+                        </div>
+                        <div class="workflow-step-guidance-group">
+                          <strong>Avoid</strong>
+                          <ul data-role-guidance-dont>
+                            {% for item in scaffolding.donts %}
+                              <li>{{ item }}</li>
+                            {% endfor %}
+                          </ul>
+                        </div>
+                        <div class="workflow-step-guidance-group">
+                          <strong>Suggested prompt</strong>
+                          <p class="meta" data-role-guidance-prompt-preview>{{ scaffolding.placeholder }}</p>
+                        </div>
+                      </div>
+                    </section>
+
                     <label>
                       Prompt Markdown
                       <textarea
                         name="steps-{{ loop.index0 }}-prompt_markdown"
-                        placeholder="Explain exactly what this step should do."
+                        placeholder="{{ scaffolding.placeholder }}"
                         data-step-field="prompt_markdown"
                         required
                       >{{ step.prompt_markdown }}</textarea>
                     </label>
+                    <div class="prompt-tools">
+                      <button type="button" class="secondary" data-step-suggest-prompt>Use suggested prompt</button>
+                      <p class="prompt-help">Start from the role scaffold, then make it specific to the service, repo, validation, and expected outcome.</p>
+                    </div>
                   </article>
                 {% endfor %}
               </div>
@@ -499,10 +619,35 @@
           </label>
         </div>
 
+        <section class="workflow-step-guidance" data-step-guidance>
+          <div class="header-copy">
+            <span class="workflow-step-guidance-title" data-role-guidance-title></span>
+            <p class="meta" data-role-guidance-summary></p>
+          </div>
+          <div class="workflow-step-guidance-grid">
+            <div class="workflow-step-guidance-group">
+              <strong>Do</strong>
+              <ul data-role-guidance-do></ul>
+            </div>
+            <div class="workflow-step-guidance-group">
+              <strong>Avoid</strong>
+              <ul data-role-guidance-dont></ul>
+            </div>
+            <div class="workflow-step-guidance-group">
+              <strong>Suggested prompt</strong>
+              <p class="meta" data-role-guidance-prompt-preview></p>
+            </div>
+          </div>
+        </section>
+
         <label>
           Prompt Markdown
-          <textarea placeholder="Explain exactly what this step should do." data-step-field="prompt_markdown" required></textarea>
+          <textarea data-step-field="prompt_markdown" required></textarea>
         </label>
+        <div class="prompt-tools">
+          <button type="button" class="secondary" data-step-suggest-prompt>Use suggested prompt</button>
+          <p class="prompt-help">Start from the role scaffold, then make it specific to the service, repo, validation, and expected outcome.</p>
+        </div>
       </article>
     </template>
 
@@ -514,17 +659,71 @@
         }
 
         const roleAgentDefaults = {{ role_agent_defaults | tojson }};
+        const rolePromptScaffolding = {{ role_prompt_scaffolding | tojson }};
         const stepsContainer = document.getElementById("workflow-steps");
         const emptyState = document.getElementById("workflow-empty");
         const stepTemplate = document.getElementById("workflow-step-template");
 
+        function normalizeRole(roleValue) {
+          return roleValue.trim().toLowerCase();
+        }
+
         function defaultAgentForRole(roleValue) {
-          const normalizedRole = roleValue.trim().toLowerCase();
+          const normalizedRole = normalizeRole(roleValue);
           return roleAgentDefaults[normalizedRole] || "codex";
+        }
+
+        function promptScaffoldingForRole(roleValue) {
+          const normalizedRole = normalizeRole(roleValue);
+          return rolePromptScaffolding[normalizedRole] || rolePromptScaffolding.investigator;
         }
 
         function getSteps() {
           return Array.from(stepsContainer.querySelectorAll("[data-step]"));
+        }
+
+        function syncGuidanceList(container, items) {
+          if (!(container instanceof HTMLUListElement)) {
+            return;
+          }
+          container.replaceChildren();
+          items.forEach((item) => {
+            const listItem = document.createElement("li");
+            listItem.textContent = item;
+            container.appendChild(listItem);
+          });
+        }
+
+        function applyRoleGuidance(step) {
+          const roleField = step.querySelector("[data-step-field='role']");
+          const promptField = step.querySelector("[data-step-field='prompt_markdown']");
+          if (
+            !(roleField instanceof HTMLInputElement || roleField instanceof HTMLSelectElement) ||
+            !(promptField instanceof HTMLTextAreaElement)
+          ) {
+            return;
+          }
+
+          const scaffolding = promptScaffoldingForRole(roleField.value);
+          const titleNode = step.querySelector("[data-role-guidance-title]");
+          if (titleNode) {
+            titleNode.textContent = scaffolding.title;
+          }
+
+          const summaryNode = step.querySelector("[data-role-guidance-summary]");
+          if (summaryNode) {
+            summaryNode.textContent = scaffolding.summary;
+          }
+
+          const promptPreviewNode = step.querySelector("[data-role-guidance-prompt-preview]");
+          if (promptPreviewNode) {
+            promptPreviewNode.textContent = scaffolding.placeholder;
+          }
+
+          syncGuidanceList(step.querySelector("[data-role-guidance-do]"), scaffolding.dos || []);
+          syncGuidanceList(step.querySelector("[data-role-guidance-dont]"), scaffolding.donts || []);
+
+          promptField.placeholder = scaffolding.placeholder || "";
         }
 
         function applyDefaultAgent(step, { force = false } = {}) {
@@ -590,6 +789,7 @@
               field.id = `steps-${index}-${fieldName}`;
             });
 
+            applyRoleGuidance(step);
             applyDefaultAgent(step);
           });
 
@@ -629,6 +829,25 @@
             return;
           }
 
+          const suggestPromptButton = target.closest("[data-step-suggest-prompt]");
+          if (suggestPromptButton) {
+            const step = suggestPromptButton.closest("[data-step]");
+            if (!step) {
+              return;
+            }
+            const roleField = step.querySelector("[data-step-field='role']");
+            const promptField = step.querySelector("[data-step-field='prompt_markdown']");
+            if (
+              !(roleField instanceof HTMLInputElement || roleField instanceof HTMLSelectElement) ||
+              !(promptField instanceof HTMLTextAreaElement)
+            ) {
+              return;
+            }
+            promptField.value = promptScaffoldingForRole(roleField.value).suggested_prompt || "";
+            promptField.focus();
+            return;
+          }
+
           const moveButton = target.closest("[data-step-move]");
           if (!moveButton) {
             return;
@@ -661,6 +880,7 @@
           if (roleField) {
             const step = roleField.closest("[data-step]");
             if (step) {
+              applyRoleGuidance(step);
               applyDefaultAgent(step);
             }
             return;

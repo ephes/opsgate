@@ -48,6 +48,92 @@ DEFAULT_AGENT_BY_ROLE = {
     "reviewer": "claude",
     "investigator": "codex",
 }
+ROLE_PROMPT_SCAFFOLDING: dict[str, dict[str, object]] = {
+    "investigator": {
+        "title": "Inspect-only investigation",
+        "summary": (
+            "Use this role to inspect state, collect evidence, identify the owning "
+            "repo/workspace, and explain next steps."
+        ),
+        "dos": [
+            "Read code, config, logs, tickets, and deployment state.",
+            "Explain findings and likely root cause in concrete terms.",
+            "Point to the source repo/workspace that should own the fix.",
+        ],
+        "donts": [
+            "Do not edit source files or commit changes.",
+            "Do not deploy, restart services, or patch files on live hosts.",
+            "Do not perform ad hoc remediation while acting as investigator.",
+        ],
+        "placeholder": (
+            "Inspect current state only. Gather evidence, identify the owning "
+            "repo/workspace, and propose next steps without making changes."
+        ),
+        "suggested_prompt": (
+            "Inspect the current state only. Do not edit source files, commit changes, deploy code, restart services, "
+            "or patch files on the live host.\n\n"
+            "Gather the relevant logs, config, code, and deployment context. Identify the owning repo or workspace, "
+            "explain the likely root cause, and end with concrete recommended next steps."
+        ),
+    },
+    "implementer": {
+        "title": "Repo-first implementation",
+        "summary": (
+            "Use this role to make the intended change in the source of truth, "
+            "validate it, and prepare it for deploy."
+        ),
+        "dos": [
+            "Change the correct repo or workspace, not the live host directly.",
+            "Run the relevant validation commands before calling the work ready.",
+            "Commit, deploy, and verify only after the reviewer loop is complete.",
+        ],
+        "donts": [
+            "Do not patch production files ad hoc as the primary fix path.",
+            "Do not skip validation or omit deploy verification.",
+            "Do not treat the reviewer step as optional when policy requires it.",
+        ],
+        "placeholder": (
+            "Implement the change in the correct repo/workspace, run validation, "
+            "and prepare a clear deploy and verification path."
+        ),
+        "suggested_prompt": (
+            "Make the intended change in the correct repo or workspace, not by "
+            "patching files directly on the live host.\n\n"
+            "Describe the files you changed, run the relevant validation commands, "
+            "summarize the results, and prepare the change for reviewer feedback. "
+            "Once the reviewer loop is complete, commit, deploy through the normal "
+            "workflow, and verify the live result."
+        ),
+    },
+    "reviewer": {
+        "title": "Independent review gate",
+        "summary": (
+            "Use this role to inspect the proposed change, validation evidence, "
+            "and rollout plan before implementation is considered ready."
+        ),
+        "dos": [
+            "Review diffs, prompts, logs, validation output, and deploy steps.",
+            "Call out risks, missing tests, or unclear assumptions.",
+            "State clearly whether the implementer loop is ready to proceed.",
+        ],
+        "donts": [
+            "Do not make independent implementation changes in the reviewer step.",
+            "Do not commit or deploy while acting as reviewer.",
+            "Do not approve vague prompts that lack validation or rollout detail.",
+        ],
+        "placeholder": (
+            "Review the proposed change, validation evidence, and deploy plan. "
+            "Call out risks and state whether it is ready."
+        ),
+        "suggested_prompt": (
+            "Review the proposed change, validation evidence, and deployment plan.\n\n"
+            "Do not make additional implementation changes, commit code, or deploy while acting as reviewer. "
+            "Call out concrete risks, missing validation, or unclear assumptions, and state whether the implementer "
+            "loop is ready to proceed."
+        ),
+    },
+}
+ROLE_PROMPT_SCAFFOLDING["implementor"] = ROLE_PROMPT_SCAFFOLDING["implementer"]
 LOG_PREVIEW_LINE_LIMIT = 40
 
 
@@ -139,6 +225,10 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     def default_agent_for_role(role: str) -> str:
         normalized_role = role.strip().lower()
         return DEFAULT_AGENT_BY_ROLE.get(normalized_role, "codex")
+
+    def prompt_scaffolding_for_role(role: str) -> dict[str, object]:
+        normalized_role = role.strip().lower()
+        return ROLE_PROMPT_SCAFFOLDING.get(normalized_role, ROLE_PROMPT_SCAFFOLDING["investigator"])
 
     def default_manual_step(*, operator_requires_reviewer: bool) -> dict[str, str]:
         role = "reviewer" if operator_requires_reviewer else "investigator"
@@ -245,7 +335,9 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
                 form_data=form_data,
                 operator_requires_reviewer=operator_requires_reviewer,
                 role_agent_defaults=DEFAULT_AGENT_BY_ROLE,
+                role_prompt_scaffolding=ROLE_PROMPT_SCAFFOLDING,
                 supported_agents=SUPPORTED_AGENTS,
+                prompt_scaffolding_for_role=prompt_scaffolding_for_role,
             ),
             status_code,
         )

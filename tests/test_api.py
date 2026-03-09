@@ -250,6 +250,20 @@ def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
     assert '<option value="claude" selected>claude</option>' in body
 
 
+def test_manual_ticket_form_renders_role_scaffolding(client: Any) -> None:
+    login(client)
+
+    response = client.get("/tickets")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Role model" in body
+    assert "OpsGate currently supports exactly three workflow roles." in body
+    assert "Inspect-only investigation" in body
+    assert "Repo-first implementation" in body
+    assert "Independent review gate" in body
+    assert "Use suggested prompt" in body
+
+
 def test_ticket_list_renders_compact_created_at_timestamp(client: Any) -> None:
     ticket_id = create_ticket(
         client,
@@ -581,6 +595,32 @@ def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) ->
     assert '<option value="claude" selected>claude</option>' in body
     assert ">Collect logs.</textarea>" in body
     assert "Operator policy floor" in body
+    assert "Repo-first implementation" in body
+    assert "Inspect-only investigation" in body
+    assert "Do not patch production files ad hoc as the primary fix path." in body
+    assert "Do not edit source files or commit changes." in body
+
+
+def test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_role(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Legacy implementor guidance",
+            "summary": "Guidance should still match implementer semantics",
+            "steps-0-role": "implementor",
+            "steps-0-agent": "codex",
+            "steps-0-prompt_markdown": "Prepare the fix in source.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "requires at least one reviewer step" in body
+    assert "Repo-first implementation" in body
+    assert "Do not patch production files ad hoc as the primary fix path." in body
 
 
 def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> None:

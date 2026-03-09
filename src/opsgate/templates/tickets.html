@@ -504,6 +504,8 @@
 
           {% if operator_requires_reviewer %}
             <p class="policy-note">Operator policy floor: this workflow must include at least one <code>reviewer</code> step. The backend still enforces that rule even if the browser is bypassed.</p>
+          {% else %}
+            <p class="policy-note">Single-step operator tickets are allowed for quick investigations and smoke tests. Use a <code>reviewer</code> step for durable changes when review adds value.</p>
           {% endif %}
 
           <form method="post" action="{{ url_for('ui_tickets') }}" class="fields" id="manual-ticket-form">

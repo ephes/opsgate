@@ -44,7 +44,7 @@ def _build_settings(db_path: str) -> OpsGateSettings:
             SubmitterPolicy(
                 source="operator",
                 token="operator-token-00000000000",
-                require_reviewer_step_floor=True,
+                require_reviewer_step_floor=False,
             ),
         ),
         require_tailscale_context=True,
@@ -259,7 +259,7 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
             "prompt_markdown": "Review the proposed change and confirm it stays a no-op.",
         },
     ]
-    assert ticket["policy_requirements"]["require_reviewer_step"] is True
+    assert ticket["policy_requirements"]["require_reviewer_step"] is False
 
     detail = client.get(location)
     assert detail.status_code == 200
@@ -268,18 +268,17 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
     assert "approver:opsgate-admin" in body
 
 
-def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
+def test_manual_ticket_form_defaults_investigator_to_codex(client: Any) -> None:
     login(client)
 
     response = client.get("/tickets")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert 'name="steps-0-role"' in body
-    assert '<option value="implementer">implementer</option>' in body
-    assert '<option value="reviewer" selected>reviewer</option>' in body
+    assert '<option value="investigator" selected>investigator</option>' in body
     assert 'name="steps-0-agent"' in body
-    assert '<option value="codex">codex</option>' in body
-    assert '<option value="claude" selected>claude</option>' in body
+    assert '<option value="codex" selected>codex</option>' in body
+    assert '<option value="claude">claude</option>' in body
 
 
 def test_manual_ticket_form_renders_role_scaffolding(client: Any) -> None:
@@ -815,44 +814,6 @@ def test_manual_ticket_creation_rejects_empty_execution_plan_from_ui(client: Any
     assert "No workflow steps yet" in body
 
 
-def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) -> None:
-    login(client)
-
-    response = client.post(
-        "/tickets",
-        data={
-            "csrf_token": session_csrf_token(client),
-            "title": "Needs reviewer",
-            "summary": "Policy floor should reject this",
-            "steps-0-role": "implementer",
-            "steps-0-agent": "codex",
-            "steps-0-prompt_markdown": "Make a change.",
-            "steps-1-role": "investigator",
-            "steps-1-agent": "claude",
-            "steps-1-prompt_markdown": "Collect logs.",
-        },
-        follow_redirects=False,
-    )
-    assert response.status_code == 400
-    body = response.get_data(as_text=True)
-    assert "requires at least one reviewer step" in body
-    assert 'value="Needs reviewer"' in body
-    assert ">Policy floor should reject this</textarea>" in body
-    assert 'name="steps-0-role"' in body
-    assert 'value="implementer"' in body
-    assert 'value="codex"' in body
-    assert ">Make a change.</textarea>" in body
-    assert 'name="steps-1-role"' in body
-    assert 'value="investigator"' in body
-    assert '<option value="claude" selected>claude</option>' in body
-    assert ">Collect logs.</textarea>" in body
-    assert "Operator policy floor" in body
-    assert "Repo-first implementation" in body
-    assert "Inspect-only investigation" in body
-    assert "Do not patch production files ad hoc as the primary fix path." in body
-    assert "Do not edit source files or commit changes." in body
-
-
 def test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_role(client: Any) -> None:
     login(client)
 
@@ -868,9 +829,21 @@ def test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_rol
         },
         follow_redirects=False,
     )
-    assert response.status_code == 400
+    assert response.status_code == 302
+    ticket_id = response.headers["Location"].rsplit("/", 1)[-1]
+    detail = client.get(f"/api/v1/tickets/{ticket_id}")
+    assert detail.status_code == 200
+    ticket = detail.get_json()
+    assert ticket["execution_plan"] == [
+        {
+            "role": "implementor",
+            "agent": "codex",
+            "prompt_markdown": "Prepare the fix in source.",
+        }
+    ]
+
+    response = client.get("/tickets")
     body = response.get_data(as_text=True)
-    assert "requires at least one reviewer step" in body
     assert "Repo-first implementation" in body
     assert "Do not patch production files ad hoc as the primary fix path." in body
 
@@ -1276,25 +1249,25 @@ def test_dedupe_not_applied_when_task_ref_missing(client: Any) -> None:
     assert second.status_code == 201
 
 
-def test_policy_floor_cannot_be_weakened(client: Any) -> None:
+def test_operator_submitter_may_explicitly_require_reviewer_step(client: Any) -> None:
     payload = {
         "title": "Operator task",
-        "summary": "Should fail floor validation",
+        "summary": "Operator may opt into reviewer requirement",
         "execution_plan": [
             {"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}
         ],
-        "policy_requirements": {"require_reviewer_step": False},
+        "policy_requirements": {"require_reviewer_step": True},
     }
     response = client.post("/api/v1/tickets", headers=auth_headers("operator-token-00000000000"), json=payload)
-    assert response.status_code == 400
+    assert response.status_code == 201
     body = response.get_json()
-    assert body["error"] == "policy_floor_violation"
+    assert body["policy_requirements"]["require_reviewer_step"] is True
 
 
-def test_policy_floor_omitted_ticket_policy_uses_floor(client: Any) -> None:
+def test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor(client: Any) -> None:
     payload = {
         "title": "Operator task with omitted policy",
-        "summary": "Should inherit floor",
+        "summary": "Should default to no reviewer floor",
         "execution_plan": [
             {"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}
         ],
@@ -1302,7 +1275,7 @@ def test_policy_floor_omitted_ticket_policy_uses_floor(client: Any) -> None:
     response = client.post("/api/v1/tickets", headers=auth_headers("operator-token-00000000000"), json=payload)
     assert response.status_code == 201
     body = response.get_json()
-    assert body["policy_requirements"]["require_reviewer_step"] is True
+    assert body["policy_requirements"]["require_reviewer_step"] is False
 
 
 def test_lazy_expiry_blocks_approval(client: Any) -> None:

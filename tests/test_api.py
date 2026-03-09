@@ -155,6 +155,38 @@ def write_ticket_log(ticket_id: str, *, relative_path: str, content: str) -> Pat
     return log_path
 
 
+def set_ticket_terminal_state(
+    client: Any,
+    ticket_id: str,
+    *,
+    state: str,
+    result: str = "failure",
+    result_detail: str = "terminal_state_for_test",
+) -> None:
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    finished_at = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE tickets
+            SET state = ?, finished_at = ?, result = ?, result_detail = ?
+            WHERE id = ?
+            """,
+            (state, finished_at, result, result_detail, ticket_id),
+        )
+        conn.commit()
+
+
+def audit_event_types(client: Any, ticket_id: str) -> list[str]:
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT event_type FROM audit_events WHERE ticket_id = ? ORDER BY id ASC",
+            (ticket_id,),
+        ).fetchall()
+    return [str(row[0]) for row in rows]
+
+
 def test_ui_ticket_detail_redirects_to_login_with_next(client: Any) -> None:
     ticket_id = create_ticket(
         client,
@@ -282,6 +314,226 @@ def test_ticket_list_renders_compact_created_at_timestamp(client: Any) -> None:
     body = response.get_data(as_text=True)
     assert expected_created_at in body
     assert raw_created_at not in body
+
+
+def test_api_archive_and_unarchive_preserve_ticket_access_and_audit(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive via API",
+        summary="Archive should preserve direct reads and audit events",
+        task_ref="archive-api-1",
+    )
+    login(client)
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"})
+    assert reject.status_code == 200
+
+    archive = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    assert archive.status_code == 200
+    archived_ticket = archive.get_json()
+    assert archived_ticket["state"] == "rejected"
+    assert archived_ticket["is_archived"] is True
+    assert archived_ticket["archived_by"] == "opsgate-admin"
+    assert isinstance(archived_ticket["archived_at"], str)
+
+    submitter_detail = client.get(
+        f"/api/v1/tickets/{ticket_id}",
+        headers=auth_headers("nyxmon-token-000000000000"),
+    )
+    assert submitter_detail.status_code == 200
+    assert submitter_detail.get_json()["is_archived"] is True
+
+    unarchive = client.post(f"/api/v1/tickets/{ticket_id}/unarchive")
+    assert unarchive.status_code == 200
+    restored_ticket = unarchive.get_json()
+    assert restored_ticket["state"] == "rejected"
+    assert restored_ticket["is_archived"] is False
+    assert restored_ticket["archived_at"] is None
+    assert restored_ticket["archived_by"] is None
+
+    assert audit_event_types(client, ticket_id)[-2:] == ["ticket_archived", "ticket_unarchived"]
+
+
+def test_archive_requires_terminal_state(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive blocked",
+        summary="Pending tickets should not archive",
+        task_ref="archive-api-2",
+    )
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "invalid_state",
+        "message": "Only terminal tickets can be archived",
+    }
+
+
+@pytest.mark.parametrize(
+    ("state", "result"),
+    [
+        ("succeeded", "success"),
+        ("failed", "failure"),
+        ("rejected", "failure"),
+        ("canceled", "canceled"),
+        ("expired", "failure"),
+    ],
+)
+def test_archive_allowed_for_all_terminal_states(client: Any, state: str, result: str) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title=f"Archive {state}",
+        summary="All terminal states should archive cleanly",
+        task_ref=f"archive-terminal-{state}",
+    )
+    set_ticket_terminal_state(client, ticket_id, state=state, result=result, result_detail=f"{state}_for_test")
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    assert response.status_code == 200
+    archived_ticket = response.get_json()
+    assert archived_ticket["state"] == state
+    assert archived_ticket["result"] == result
+    assert archived_ticket["is_terminal"] is True
+    assert archived_ticket["is_archived"] is True
+
+
+def test_archive_rejects_double_archive(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive twice",
+        summary="Second archive should fail",
+        task_ref="archive-api-3",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+    assert client.post(f"/api/v1/tickets/{ticket_id}/archive").status_code == 200
+
+    second_archive = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    assert second_archive.status_code == 409
+    assert second_archive.get_json() == {
+        "error": "already_archived",
+        "message": "Ticket is already archived",
+    }
+
+
+def test_unarchive_rejects_non_archived_ticket(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Restore not archived",
+        summary="Unarchive should fail if archive never happened",
+        task_ref="archive-api-4",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/unarchive")
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "not_archived",
+        "message": "Ticket is not archived",
+    }
+
+
+def test_ui_archive_and_restore_controls_manage_ticket_visibility(client: Any) -> None:
+    title = "Archive through UI"
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title=title,
+        summary="Terminal ticket should move out of the default queue",
+        task_ref="archive-ui-1",
+    )
+    login(client)
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"})
+    assert reject.status_code == 200
+
+    before_archive = client.get(f"/tickets/{ticket_id}")
+    assert before_archive.status_code == 200
+    assert "Archive Ticket" in before_archive.get_data(as_text=True)
+    assert "Restore Ticket" not in before_archive.get_data(as_text=True)
+
+    archive = client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    )
+    assert archive.status_code == 302
+    assert archive.headers["Location"] == f"/tickets/{ticket_id}"
+
+    archived_detail = client.get(f"/tickets/{ticket_id}")
+    archived_body = archived_detail.get_data(as_text=True)
+    assert archived_detail.status_code == 200
+    assert "Restore Ticket" in archived_body
+    assert "Archive Ticket" not in archived_body
+    assert "archived" in archived_body
+    assert "Archived At" in archived_body
+    assert "Archived By" in archived_body
+
+    active_list = client.get("/tickets")
+    active_body = active_list.get_data(as_text=True)
+    assert active_list.status_code == 200
+    assert title not in active_body
+
+    archived_list = client.get("/tickets?view=archived")
+    archived_list_body = archived_list.get_data(as_text=True)
+    assert archived_list.status_code == 200
+    assert title in archived_list_body
+    assert "Archived tickets stay readable and restorable" in archived_list_body
+
+    restore = client.post(
+        f"/tickets/{ticket_id}/unarchive",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    )
+    assert restore.status_code == 302
+    assert restore.headers["Location"] == f"/tickets/{ticket_id}"
+
+    restored_list = client.get("/tickets")
+    assert restored_list.status_code == 200
+    assert title in restored_list.get_data(as_text=True)
+
+    restored_detail = client.get(f"/tickets/{ticket_id}")
+    assert restored_detail.status_code == 200
+    restored_body = restored_detail.get_data(as_text=True)
+    assert "Archived At" not in restored_body
+    assert "Archived By" not in restored_body
+
+
+def test_ui_archive_routes_require_csrf_token(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive CSRF",
+        summary="Archive and restore should require CSRF tokens",
+        task_ref="archive-ui-csrf-1",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+
+    archive = client.post(f"/tickets/{ticket_id}/archive", data={}, follow_redirects=False)
+    assert archive.status_code == 302
+    assert archive.headers["Location"] == f"/tickets/{ticket_id}"
+    archive_detail = client.get(archive.headers["Location"])
+    assert "Invalid form token" in archive_detail.get_data(as_text=True)
+
+    assert client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    ).status_code == 302
+
+    unarchive = client.post(f"/tickets/{ticket_id}/unarchive", data={}, follow_redirects=False)
+    assert unarchive.status_code == 302
+    assert unarchive.headers["Location"] == f"/tickets/{ticket_id}"
+    unarchive_detail = client.get(unarchive.headers["Location"])
+    assert "Invalid form token" in unarchive_detail.get_data(as_text=True)
 
 
 def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any) -> None:

@@ -19,6 +19,7 @@ Phase 4B implementation scope in this repository:
 - Manual create flow supports per-step role/agent/prompt editing with role-based agent defaults (`implementer` -> `codex`, `reviewer` -> `claude`) and sticky validation errors.
 - The create form shows role-specific guidance and suggested prompt scaffolds for `investigator`, `implementer`, and `reviewer` steps.
 - Authenticated approvers can inspect per-step runner logs in the web UI via inline previews and dedicated log pages on ticket detail.
+- Authenticated approvers can archive terminal tickets out of the default `/tickets` queue and restore them later without deleting ticket history, logs, or artifact references.
 - Supported step agents are `codex` and `claude` only.
 - Login form markup is password-manager/autofill friendly without relaxing session or CSRF protections.
 

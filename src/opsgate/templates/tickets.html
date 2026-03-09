@@ -107,6 +107,40 @@
         display: grid;
         gap: 0.75rem;
       }
+      .tickets-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+      }
+      .ticket-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .ticket-filter {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 2.25rem;
+        padding: 0.45rem 0.8rem;
+        border: 1px solid var(--panel-border);
+        border-radius: 999px;
+        color: var(--text);
+        background: #fff;
+        font-size: 0.92rem;
+        text-decoration: none;
+      }
+      .ticket-filter:hover {
+        background: #f4f8fb;
+      }
+      .ticket-filter-active {
+        border-color: #c6d7e7;
+        background: #edf4fb;
+        color: #24445f;
+        font-weight: 700;
+      }
       .ticket-card {
         display: grid;
         gap: 0.75rem;
@@ -120,6 +154,12 @@
         align-items: start;
         justify-content: space-between;
         gap: 0.75rem;
+      }
+      .ticket-card-statuses {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.45rem;
       }
       .ticket-link {
         font-weight: 700;
@@ -168,6 +208,10 @@
         color: var(--pill-text);
         font-size: 0.82rem;
         white-space: nowrap;
+      }
+      .archive-pill {
+        background: #f3efe5;
+        color: #6b5420;
       }
       .fields,
       .workflow-step,
@@ -362,9 +406,22 @@
 
       <main class="layout">
         <section class="panel">
-          <div class="header-copy">
-            <h2>Recent Tickets</h2>
-            <p class="meta">Open the ticket to approve, reject, cancel, or inspect the workflow on a narrow screen.</p>
+          <div class="tickets-toolbar">
+            <div class="header-copy">
+              <h2>Recent Tickets</h2>
+              {% if ticket_view == 'archived' %}
+                <p class="meta">Archived tickets stay readable and restorable, but do not appear in the default queue.</p>
+              {% elif ticket_view == 'all' %}
+                <p class="meta">All tickets, including archived history, in one chronological view.</p>
+              {% else %}
+                <p class="meta">Open the ticket to approve, reject, cancel, archive, or inspect the workflow on a narrow screen.</p>
+              {% endif %}
+            </div>
+            <nav class="ticket-filters" aria-label="Ticket views">
+              <a href="{{ url_for('ui_tickets') }}" class="ticket-filter{% if ticket_view == 'active' %} ticket-filter-active{% endif %}">Active Queue</a>
+              <a href="{{ url_for('ui_tickets', view='archived') }}" class="ticket-filter{% if ticket_view == 'archived' %} ticket-filter-active{% endif %}">Archived</a>
+              <a href="{{ url_for('ui_tickets', view='all') }}" class="ticket-filter{% if ticket_view == 'all' %} ticket-filter-active{% endif %}">All</a>
+            </nav>
           </div>
           <div class="tickets-list">
             {% for ticket in tickets %}
@@ -374,7 +431,12 @@
                     <a class="ticket-link" href="{{ url_for('ui_ticket_detail', ticket_id=ticket.id) }}">{{ ticket.title }}</a>
                     <p class="ticket-id">{{ ticket.id }}</p>
                   </div>
-                  <span class="state-pill">{{ ticket.state }}</span>
+                  <div class="ticket-card-statuses">
+                    <span class="state-pill">{{ ticket.state }}</span>
+                    {% if ticket.is_archived %}
+                      <span class="state-pill archive-pill">archived</span>
+                    {% endif %}
+                  </div>
                 </div>
                 <div class="ticket-facts">
                   <div class="ticket-facts-row">
@@ -395,10 +457,20 @@
                     <span class="ticket-facts-label">Steps</span>
                     <span class="ticket-facts-value">{{ ticket.execution_plan | length }}</span>
                   </div>
+                  {% if ticket.is_archived %}
+                    <div class="ticket-facts-row">
+                      <span class="ticket-facts-label">Archived</span>
+                      <span class="ticket-facts-value ticket-facts-value-timestamp">{{ ticket.archived_at | ui_datetime }}</span>
+                    </div>
+                  {% endif %}
                 </div>
               </article>
             {% else %}
-              <p class="no-tickets">No tickets yet.</p>
+              {% if ticket_view == 'archived' %}
+                <p class="no-tickets">No archived tickets yet.</p>
+              {% else %}
+                <p class="no-tickets">No tickets yet.</p>
+              {% endif %}
             {% endfor %}
           </div>
         </section>

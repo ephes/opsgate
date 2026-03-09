@@ -29,7 +29,17 @@ from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import OpsGateSettings, load_settings
-from .service import SUPPORTED_AGENTS, OpsGateService, ServiceError, isoformat_z, parse_iso_datetime, utc_now
+from .service import (
+    LIST_ARCHIVED_EXCLUDE,
+    LIST_ARCHIVED_INCLUDE,
+    LIST_ARCHIVED_ONLY,
+    SUPPORTED_AGENTS,
+    OpsGateService,
+    ServiceError,
+    isoformat_z,
+    parse_iso_datetime,
+    utc_now,
+)
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -40,8 +50,9 @@ class AccessDenied(ServiceError):
 
 
 MANUAL_STEP_FIELD_PATTERN = re.compile(r"^steps-(\d+)-(role|agent|prompt_markdown)$")
-TICKET_ACTION_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/(approve|reject|cancel)$")
+TICKET_ACTION_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/(approve|reject|cancel|archive|unarchive)$")
 TICKET_LOG_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/steps/\d+/log$")
+TICKET_LIST_VIEW_OPTIONS = {"active", "archived", "all"}
 DEFAULT_AGENT_BY_ROLE = {
     "implementer": "codex",
     "implementor": "codex",
@@ -324,14 +335,25 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         status_code: int = 200,
         form_data: dict[str, object] | None = None,
     ) -> ResponseReturnValue:
+        ticket_view = str(request.args.get("view", "active")).strip().lower()
+        if ticket_view not in TICKET_LIST_VIEW_OPTIONS:
+            ticket_view = "active"
+
+        archived_filter = LIST_ARCHIVED_EXCLUDE
+        if ticket_view == "archived":
+            archived_filter = LIST_ARCHIVED_ONLY
+        elif ticket_view == "all":
+            archived_filter = LIST_ARCHIVED_INCLUDE
+
         operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")
         if form_data is None:
             form_data = build_manual_ticket_form_data(operator_requires_reviewer=operator_requires_reviewer)
-        tickets = service.list_tickets(limit=100)
+        tickets = service.list_tickets(limit=100, archived=archived_filter)
         return Response(
             render_template(
                 "tickets.html",
                 tickets=tickets,
+                ticket_view=ticket_view,
                 form_data=form_data,
                 operator_requires_reviewer=operator_requires_reviewer,
                 role_agent_defaults=DEFAULT_AGENT_BY_ROLE,
@@ -565,6 +587,30 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         )
         return jsonify(ticket), 200
 
+    @app.post("/api/v1/tickets/<ticket_id>/archive")
+    @require_approver_session
+    def api_archive_ticket(ticket_id: str) -> ResponseReturnValue:
+        approver = str(request.environ["opsgate.approver"])
+        ticket = service.archive_ticket(
+            ticket_id,
+            approver=approver,
+            source_ip=get_client_ip(),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return jsonify(ticket), 200
+
+    @app.post("/api/v1/tickets/<ticket_id>/unarchive")
+    @require_approver_session
+    def api_unarchive_ticket(ticket_id: str) -> ResponseReturnValue:
+        approver = str(request.environ["opsgate.approver"])
+        ticket = service.unarchive_ticket(
+            ticket_id,
+            approver=approver,
+            source_ip=get_client_ip(),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return jsonify(ticket), 200
+
     @app.post("/api/v1/runner/claim")
     @require_runner_token
     def api_runner_claim() -> ResponseReturnValue:
@@ -674,10 +720,12 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         if get_session_user() is None:
             return redirect(url_for("ui_login", next=request.path))
         ticket = service.get_ticket(ticket_id)
+        tickets_back_href = url_for("ui_tickets", view="archived" if ticket.get("is_archived") else "active")
         return Response(
             render_template(
                 "ticket_detail.html",
                 ticket=ticket,
+                tickets_back_href=tickets_back_href,
                 session_views=build_ticket_session_views(ticket),
             ),
             200,
@@ -741,6 +789,32 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             ticket_id,
             approver=approver,
             reason=reason,
+            source_ip=get_client_ip(),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return redirect(url_for("ui_ticket_detail", ticket_id=ticket_id))
+
+    @app.post("/tickets/<ticket_id>/archive")
+    def ui_ticket_archive(ticket_id: str) -> ResponseReturnValue:
+        approver = get_session_user()
+        if approver is None:
+            return redirect(url_for("ui_login"))
+        service.archive_ticket(
+            ticket_id,
+            approver=approver,
+            source_ip=get_client_ip(),
+            user_agent=request.headers.get("User-Agent"),
+        )
+        return redirect(url_for("ui_ticket_detail", ticket_id=ticket_id))
+
+    @app.post("/tickets/<ticket_id>/unarchive")
+    def ui_ticket_unarchive(ticket_id: str) -> ResponseReturnValue:
+        approver = get_session_user()
+        if approver is None:
+            return redirect(url_for("ui_login"))
+        service.unarchive_ticket(
+            ticket_id,
+            approver=approver,
             source_ip=get_client_ip(),
             user_agent=request.headers.get("User-Agent"),
         )

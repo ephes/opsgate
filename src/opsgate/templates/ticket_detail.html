@@ -86,6 +86,11 @@
         display: grid;
         gap: 0.35rem;
       }
+      .header-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+      }
       .meta { color: var(--muted); font-size: 0.95rem; }
       .state-pill {
         display: inline-flex;
@@ -97,6 +102,10 @@
         background: var(--pill);
         color: var(--pill-text);
         font-size: 0.82rem;
+      }
+      .archive-pill {
+        background: #f3efe5;
+        color: #6b5420;
       }
       .meta-grid {
         display: grid;
@@ -215,9 +224,14 @@
   <body>
     <div class="page">
       <section class="panel header">
-        <p><a href="{{ url_for('ui_tickets') }}">Back to tickets</a></p>
+        <p><a href="{{ tickets_back_href }}">Back to tickets</a></p>
         <div class="header-copy">
-          <span class="state-pill">{{ ticket.state }}</span>
+          <div class="header-badges">
+            <span class="state-pill">{{ ticket.state }}</span>
+            {% if ticket.is_archived %}
+              <span class="state-pill archive-pill">archived</span>
+            {% endif %}
+          </div>
           <h1>{{ ticket.title }}</h1>
           <p class="meta">{{ ticket.summary }}</p>
         </div>
@@ -268,6 +282,16 @@
           <span class="meta-label">Result</span>
           <strong>{{ ticket.result or 'n/a' }}</strong>
         </div>
+        {% if ticket.is_archived %}
+          <div class="meta-item">
+            <span class="meta-label">Archived At</span>
+            <strong>{{ ticket.archived_at | ui_datetime }}</strong>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Archived By</span>
+            <strong>{{ ticket.archived_by or 'n/a' }}</strong>
+          </div>
+        {% endif %}
       </div>
 
       <main class="layout">
@@ -392,6 +416,30 @@
                 <label for="cancel-reason">Cancel reason</label>
                 <textarea id="cancel-reason" name="reason" placeholder="Optional cancellation reason"></textarea>
                 <button type="submit" class="danger">Cancel Ticket</button>
+              </form>
+            </section>
+          {% endif %}
+
+          {% if ticket.is_archived %}
+            <section class="panel actions-panel">
+              <div class="section-title">
+                <h2>Restore Ticket</h2>
+                <p class="meta">Return this terminal ticket to the default queue without changing its lifecycle state.</p>
+              </div>
+              <form method="post" action="{{ url_for('ui_ticket_unarchive', ticket_id=ticket.id) }}" class="action-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button type="submit">Restore Ticket</button>
+              </form>
+            </section>
+          {% elif ticket.is_terminal %}
+            <section class="panel actions-panel">
+              <div class="section-title">
+                <h2>Archive Ticket</h2>
+                <p class="meta">Hide this terminal ticket from the default queue while keeping detail, logs, and audit trail accessible.</p>
+              </div>
+              <form method="post" action="{{ url_for('ui_ticket_archive', ticket_id=ticket.id) }}" class="action-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <button type="submit">Archive Ticket</button>
               </form>
             </section>
           {% endif %}

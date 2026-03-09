@@ -27,6 +27,9 @@ RUNNER_EVENT_TYPES = {
     "invalid_plan",
 }
 SUPPORTED_AGENTS = ("codex", "claude")
+LIST_ARCHIVED_EXCLUDE = "exclude"
+LIST_ARCHIVED_ONLY = "only"
+LIST_ARCHIVED_INCLUDE = "include"
 
 
 class ServiceError(RuntimeError):
@@ -222,7 +225,9 @@ class OpsGateService:
                     started_at TEXT,
                     finished_at TEXT,
                     result TEXT,
-                    result_detail TEXT
+                    result_detail TEXT,
+                    archived_at TEXT,
+                    archived_by TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS audit_events (
@@ -246,6 +251,7 @@ class OpsGateService:
 
                 CREATE INDEX IF NOT EXISTS idx_tickets_state ON tickets(state);
                 CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at);
+                CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_dedupe
                     ON tickets(source, task_ref)
@@ -253,6 +259,14 @@ class OpsGateService:
                       AND state IN ('pending_approval', 'approved', 'running');
                 """
             )
+            ticket_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(tickets)").fetchall()
+            }
+            if "archived_at" not in ticket_columns:
+                conn.execute("ALTER TABLE tickets ADD COLUMN archived_at TEXT")
+            if "archived_by" not in ticket_columns:
+                conn.execute("ALTER TABLE tickets ADD COLUMN archived_by TEXT")
             conn.commit()
 
     def authenticate_submitter(self, token: str | None) -> SubmitterContext | None:
@@ -347,6 +361,10 @@ class OpsGateService:
             "finished_at": row["finished_at"],
             "result": row["result"],
             "result_detail": row["result_detail"],
+            "archived_at": row["archived_at"],
+            "archived_by": row["archived_by"],
+            "is_archived": bool(row["archived_at"]),
+            "is_terminal": str(row["state"]) in TERMINAL_STATES,
         }
 
     def _ticket_payload_from_fields(
@@ -613,10 +631,24 @@ class OpsGateService:
             user_agent=user_agent,
         )
 
-    def list_tickets(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_tickets(
+        self,
+        limit: int = 100,
+        *,
+        archived: str = LIST_ARCHIVED_EXCLUDE,
+    ) -> list[dict[str, Any]]:
+        if archived == LIST_ARCHIVED_EXCLUDE:
+            where_clause = "WHERE archived_at IS NULL"
+        elif archived == LIST_ARCHIVED_ONLY:
+            where_clause = "WHERE archived_at IS NOT NULL"
+        elif archived == LIST_ARCHIVED_INCLUDE:
+            where_clause = ""
+        else:
+            raise ServiceError("Invalid archived ticket filter", 400, "invalid_ticket_filter")
+
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM tickets ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM tickets {where_clause} ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
             return [self._serialize_ticket(row) for row in rows]
@@ -789,6 +821,98 @@ class OpsGateService:
             updated = self._select_ticket(conn, ticket_id)
             if updated is None:
                 raise ServiceError("Ticket not found after cancel", 500, "db_error")
+            return self._serialize_ticket(updated)
+
+    def archive_ticket(
+        self,
+        ticket_id: str,
+        *,
+        approver: str,
+        source_ip: str | None,
+        user_agent: str | None,
+    ) -> dict[str, Any]:
+        with self._connection() as conn:
+            row = self._select_ticket(conn, ticket_id)
+            if row is None:
+                raise ServiceError("Ticket not found", 404, "ticket_not_found")
+            if row["state"] not in TERMINAL_STATES:
+                raise ServiceError("Only terminal tickets can be archived", 409, "invalid_state")
+            if row["archived_at"]:
+                raise ServiceError("Ticket is already archived", 409, "already_archived")
+
+            archived_at = isoformat_z(utc_now())
+            conn.execute(
+                """
+                UPDATE tickets
+                SET archived_at = ?,
+                    archived_by = ?
+                WHERE id = ?
+                """,
+                (archived_at, approver, ticket_id),
+            )
+            self._record_audit_event(
+                conn,
+                ticket_id=ticket_id,
+                event_type="ticket_archived",
+                actor=f"approver:{approver}",
+                source_ip=source_ip,
+                user_agent=user_agent,
+                previous_state=row["state"],
+                new_state=row["state"],
+                metadata={"archived_at": archived_at},
+            )
+            conn.commit()
+
+            updated = self._select_ticket(conn, ticket_id)
+            if updated is None:
+                raise ServiceError("Ticket not found after archive", 500, "db_error")
+            return self._serialize_ticket(updated)
+
+    def unarchive_ticket(
+        self,
+        ticket_id: str,
+        *,
+        approver: str,
+        source_ip: str | None,
+        user_agent: str | None,
+    ) -> dict[str, Any]:
+        with self._connection() as conn:
+            row = self._select_ticket(conn, ticket_id)
+            if row is None:
+                raise ServiceError("Ticket not found", 404, "ticket_not_found")
+            if not row["archived_at"]:
+                raise ServiceError("Ticket is not archived", 409, "not_archived")
+
+            previous_archived_at = str(row["archived_at"])
+            previous_archived_by = row["archived_by"]
+            conn.execute(
+                """
+                UPDATE tickets
+                SET archived_at = NULL,
+                    archived_by = NULL
+                WHERE id = ?
+                """,
+                (ticket_id,),
+            )
+            self._record_audit_event(
+                conn,
+                ticket_id=ticket_id,
+                event_type="ticket_unarchived",
+                actor=f"approver:{approver}",
+                source_ip=source_ip,
+                user_agent=user_agent,
+                previous_state=row["state"],
+                new_state=row["state"],
+                metadata={
+                    "previous_archived_at": previous_archived_at,
+                    "previous_archived_by": previous_archived_by,
+                },
+            )
+            conn.commit()
+
+            updated = self._select_ticket(conn, ticket_id)
+            if updated is None:
+                raise ServiceError("Ticket not found after unarchive", 500, "db_error")
             return self._serialize_ticket(updated)
 
     def claim_ticket(

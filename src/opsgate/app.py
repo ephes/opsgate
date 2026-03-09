@@ -284,6 +284,19 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     def inject_template_globals() -> dict[str, str]:
         return {"csrf_token": ensure_csrf_token()}
 
+    @app.template_filter("ui_datetime")
+    def format_ui_datetime(raw: object) -> str:
+        if not isinstance(raw, str):
+            return "n/a"
+        normalized = raw.strip()
+        if not normalized:
+            return "n/a"
+        try:
+            parsed = parse_iso_datetime(normalized)
+        except ValueError:
+            return normalized
+        return parsed.strftime("%Y-%m-%d %H:%M UTC")
+
     @app.errorhandler(ServiceError)
     def handle_service_error(error: ServiceError) -> ResponseReturnValue:
         if request.path.startswith("/api/"):

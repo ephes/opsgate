@@ -229,15 +229,15 @@
         </div>
         <div class="meta-item">
           <span class="meta-label">Created At</span>
-          <strong>{{ ticket.created_at }}</strong>
+          <strong>{{ ticket.created_at | ui_datetime }}</strong>
         </div>
         <div class="meta-item">
           <span class="meta-label">Started At</span>
-          <strong>{{ ticket.started_at or 'n/a' }}</strong>
+          <strong>{{ ticket.started_at | ui_datetime }}</strong>
         </div>
         <div class="meta-item">
           <span class="meta-label">Finished At</span>
-          <strong>{{ ticket.finished_at or 'n/a' }}</strong>
+          <strong>{{ ticket.finished_at | ui_datetime }}</strong>
         </div>
         <div class="meta-item">
           <span class="meta-label">Result</span>

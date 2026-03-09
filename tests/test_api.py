@@ -10,6 +10,7 @@ import pytest
 
 from opsgate.app import create_app
 from opsgate.config import OpsGateSettings, SubmitterPolicy
+from opsgate.service import parse_iso_datetime
 
 
 def _build_settings(db_path: str) -> OpsGateSettings:
@@ -228,6 +229,26 @@ def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
     assert '<option value="reviewer" selected>reviewer</option>' in body
     assert 'name="steps-0-agent"' in body
     assert 'value="claude"' in body
+
+
+def test_ticket_list_renders_compact_created_at_timestamp(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Compact timestamp",
+        summary="Recent tickets should use compact UTC timestamps",
+        task_ref="ui-created-at-1",
+    )
+    login(client)
+
+    raw_created_at = client.get(f"/api/v1/tickets/{ticket_id}").get_json()["created_at"]
+    expected_created_at = parse_iso_datetime(raw_created_at).strftime("%Y-%m-%d %H:%M UTC")
+
+    response = client.get("/tickets")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert expected_created_at in body
+    assert raw_created_at not in body
 
 
 def test_manual_ticket_creation_defaults_agent_from_role(client: Any) -> None:

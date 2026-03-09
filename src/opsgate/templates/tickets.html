@@ -135,11 +135,22 @@
         gap: 0.45rem;
       }
       .ticket-facts-row {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 6rem) minmax(0, 1fr);
         gap: 1rem;
-        color: var(--muted);
         font-size: 0.92rem;
+        align-items: start;
+      }
+      .ticket-facts-label {
+        color: var(--muted);
+      }
+      .ticket-facts-value {
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+      .ticket-facts-value-timestamp {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.88rem;
       }
       .ticket-id {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -249,6 +260,9 @@
         .ticket-facts {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+        .ticket-facts-row {
+          grid-template-columns: minmax(0, 5rem) minmax(0, 1fr);
+        }
       }
 
       @media (min-width: 1080px) {
@@ -299,22 +313,22 @@
                 </div>
                 <div class="ticket-facts">
                   <div class="ticket-facts-row">
-                    <span>Source</span>
-                    <strong>{{ ticket.source }}</strong>
+                    <span class="ticket-facts-label">Source</span>
+                    <span class="ticket-facts-value">{{ ticket.source }}</span>
                   </div>
                   <div class="ticket-facts-row">
-                    <span>Created</span>
-                    <strong>{{ ticket.created_at }}</strong>
+                    <span class="ticket-facts-label">Created</span>
+                    <span class="ticket-facts-value ticket-facts-value-timestamp">{{ ticket.created_at | ui_datetime }}</span>
                   </div>
                   {% if ticket.task_ref %}
                     <div class="ticket-facts-row">
-                      <span>Task Ref</span>
-                      <strong>{{ ticket.task_ref }}</strong>
+                      <span class="ticket-facts-label">Task Ref</span>
+                      <span class="ticket-facts-value">{{ ticket.task_ref }}</span>
                     </div>
                   {% endif %}
                   <div class="ticket-facts-row">
-                    <span>Steps</span>
-                    <strong>{{ ticket.execution_plan | length }}</strong>
+                    <span class="ticket-facts-label">Steps</span>
+                    <span class="ticket-facts-value">{{ ticket.execution_plan | length }}</span>
                   </div>
                 </div>
               </article>

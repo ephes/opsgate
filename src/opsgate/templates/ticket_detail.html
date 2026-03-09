@@ -167,6 +167,31 @@
         white-space: pre-wrap;
         word-break: break-word;
       }
+      .log-preview {
+        max-height: 20rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .session-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+      }
+      .session-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: fit-content;
+        padding: 0.5rem 0.75rem;
+        border-radius: 999px;
+        background: var(--pill);
+        color: var(--primary);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .session-link:hover {
+        background: #e3ebf2;
+      }
       .inline-pairs {
         display: grid;
         gap: 0.75rem;
@@ -278,17 +303,17 @@
             {% endfor %}
           </section>
 
-          {% if ticket.tmux_sessions %}
+          {% if session_views %}
             <section class="panel stack">
               <div class="section-title">
                 <h2>Runner Sessions</h2>
-                <p class="meta">Per-step tmux execution state.</p>
+                <p class="meta">Per-step tmux execution state with inline log previews.</p>
               </div>
-              {% for session in ticket.tmux_sessions %}
+              {% for session in session_views %}
                 <section class="session">
                   <div class="session-header">
                     <div class="section-title">
-                      <h3>Step {{ session.step_index + 1 }}</h3>
+                      <h3>Step {{ session.step_number }}</h3>
                       <p class="meta">{{ session.role }} via {{ session.agent }}</p>
                     </div>
                     <span class="state-pill">{{ session.status }}</span>
@@ -297,6 +322,22 @@
                     <p><strong>Session:</strong> <code>{{ session.session_name }}</code></p>
                     <p><strong>Attach:</strong> <code>{{ session.attach_command }}</code></p>
                     <p><strong>Log:</strong> <code>{{ session.log_path }}</code></p>
+                    {% if session.log_available and session.log_url %}
+                      <div class="session-links">
+                        <a class="session-link" href="{{ session.log_url }}">Open full log</a>
+                      </div>
+                      <div class="section-title">
+                        <strong>Recent log lines</strong>
+                        <pre class="log-preview">{{ session.log_preview }}</pre>
+                      </div>
+                    {% elif session.log_preview %}
+                      <div class="section-title">
+                        <strong>Recent log lines</strong>
+                        <pre class="log-preview">{{ session.log_preview }}</pre>
+                      </div>
+                    {% else %}
+                      <p class="meta">Log preview is not available yet for this step.</p>
+                    {% endif %}
                   </div>
                 </section>
               {% endfor %}

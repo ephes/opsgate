@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
 from ipaddress import ip_address, ip_network
+from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, cast
 from urllib.parse import urlsplit
 
@@ -40,12 +41,14 @@ class AccessDenied(ServiceError):
 
 MANUAL_STEP_FIELD_PATTERN = re.compile(r"^steps-(\d+)-(role|agent|prompt_markdown)$")
 TICKET_ACTION_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/(approve|reject|cancel)$")
+TICKET_LOG_PATH_PATTERN = re.compile(r"^/tickets/([^/]+)/steps/\d+/log$")
 DEFAULT_AGENT_BY_ROLE = {
     "implementer": "codex",
     "implementor": "codex",
     "reviewer": "claude",
     "investigator": "codex",
 }
+LOG_PREVIEW_LINE_LIMIT = 40
 
 
 def create_app(settings: OpsGateSettings | None = None) -> Flask:
@@ -118,9 +121,12 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
 
     def ticket_detail_redirect_path_for_request() -> str | None:
         match = TICKET_ACTION_PATH_PATTERN.match(request.path)
-        if match is None:
-            return None
-        return url_for("ui_ticket_detail", ticket_id=match.group(1))
+        if match is not None:
+            return url_for("ui_ticket_detail", ticket_id=match.group(1))
+        log_match = TICKET_LOG_PATH_PATTERN.match(request.path)
+        if log_match is not None:
+            return url_for("ui_ticket_detail", ticket_id=log_match.group(1))
+        return None
 
     def ensure_csrf_token() -> str:
         token = session.get("csrf_token")
@@ -297,6 +303,84 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         except ValueError:
             return normalized
         return parsed.strftime("%Y-%m-%d %H:%M UTC")
+
+    def session_artifacts_root_for_ticket(ticket_id: str) -> Path:
+        return (Path(resolved_settings.execution_data_dir) / "sessions" / ticket_id).resolve()
+
+    def is_path_within_root(*, root: Path, candidate: Path) -> bool:
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return False
+        return True
+
+    def read_tail_lines(path: Path, *, max_lines: int = LOG_PREVIEW_LINE_LIMIT) -> list[str]:
+        if not path.exists():
+            return []
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()
+        return [line.rstrip("\n") for line in lines[-max_lines:]]
+
+    def resolve_session_log_path(*, ticket_id: str, session_meta: dict[str, Any]) -> Path:
+        raw_log_path = str(session_meta.get("log_path", "")).strip()
+        if not raw_log_path:
+            raise ServiceError("Log file is not available for this step", 404, "log_not_found")
+
+        log_path = Path(raw_log_path).resolve()
+        artifacts_root = session_artifacts_root_for_ticket(ticket_id)
+        if not is_path_within_root(root=artifacts_root, candidate=log_path):
+            raise ServiceError("Log file path is outside the ticket artifact root", 400, "invalid_log_path")
+        if not log_path.exists() or not log_path.is_file():
+            raise ServiceError("Log file is not available for this step", 404, "log_not_found")
+        return log_path
+
+    def build_ticket_session_views(ticket: dict[str, Any]) -> list[dict[str, Any]]:
+        session_views: list[dict[str, Any]] = []
+        raw_sessions = ticket.get("tmux_sessions", [])
+        sessions = raw_sessions if isinstance(raw_sessions, list) else []
+        ticket_id = str(ticket.get("id", "")).strip()
+        for session_meta in sessions:
+            if not isinstance(session_meta, dict):
+                continue
+            view = dict(session_meta)
+            try:
+                step_index = int(session_meta.get("step_index", -1))
+            except (TypeError, ValueError):
+                step_index = -1
+            step_number = step_index + 1 if step_index >= 0 else None
+            view["step_number"] = step_number
+            view["log_preview"] = ""
+            view["log_available"] = False
+            view["log_url"] = None
+            if step_number is not None:
+                view["log_url"] = url_for("ui_ticket_step_log", ticket_id=ticket_id, step_number=step_number)
+            try:
+                log_path = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
+            except ServiceError:
+                session_views.append(view)
+                continue
+            preview_lines = read_tail_lines(log_path)
+            view["log_available"] = step_number is not None
+            view["log_preview"] = "\n".join(preview_lines)
+            session_views.append(view)
+        return session_views
+
+    def get_ticket_session_for_step(*, ticket: dict[str, Any], step_number: int) -> dict[str, Any]:
+        if step_number <= 0:
+            raise ServiceError("Step log does not exist", 404, "log_not_found")
+        raw_sessions = ticket.get("tmux_sessions", [])
+        sessions = raw_sessions if isinstance(raw_sessions, list) else []
+        step_index = step_number - 1
+        for session_meta in sessions:
+            if not isinstance(session_meta, dict):
+                continue
+            try:
+                session_step_index = int(session_meta.get("step_index", -1))
+            except (TypeError, ValueError):
+                continue
+            if session_step_index == step_index:
+                return dict(session_meta)
+        raise ServiceError("Step log does not exist", 404, "log_not_found")
 
     @app.errorhandler(ServiceError)
     def handle_service_error(error: ServiceError) -> ResponseReturnValue:
@@ -498,7 +582,34 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         if get_session_user() is None:
             return redirect(url_for("ui_login", next=request.path))
         ticket = service.get_ticket(ticket_id)
-        return Response(render_template("ticket_detail.html", ticket=ticket), 200)
+        return Response(
+            render_template(
+                "ticket_detail.html",
+                ticket=ticket,
+                session_views=build_ticket_session_views(ticket),
+            ),
+            200,
+        )
+
+    @app.get("/tickets/<ticket_id>/steps/<int:step_number>/log")
+    def ui_ticket_step_log(ticket_id: str, step_number: int) -> ResponseReturnValue:
+        if get_session_user() is None:
+            return redirect(url_for("ui_login", next=request.path))
+        ticket = service.get_ticket(ticket_id)
+        session_meta = get_ticket_session_for_step(ticket=ticket, step_number=step_number)
+        log_path = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        return Response(
+            render_template(
+                "ticket_log.html",
+                ticket=ticket,
+                session=session_meta,
+                step_number=step_number,
+                log_text=log_text,
+                log_path=str(log_path),
+            ),
+            200,
+        )
 
     @app.post("/tickets/<ticket_id>/approve")
     def ui_ticket_approve(ticket_id: str) -> ResponseReturnValue:

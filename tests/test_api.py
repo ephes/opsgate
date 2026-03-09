@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -137,6 +138,23 @@ def create_ticket(
     return response.get_json()["id"]
 
 
+def set_ticket_tmux_sessions(client: Any, ticket_id: str, tmux_sessions: list[dict[str, Any]]) -> None:
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET tmux_sessions_json = ? WHERE id = ?",
+            (json.dumps(tmux_sessions, sort_keys=True), ticket_id),
+        )
+        conn.commit()
+
+
+def write_ticket_log(ticket_id: str, *, relative_path: str, content: str) -> Path:
+    log_path = Path("/tmp/sessions") / ticket_id / relative_path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(content, encoding="utf-8")
+    return log_path
+
+
 def test_ui_ticket_detail_redirects_to_login_with_next(client: Any) -> None:
     ticket_id = create_ticket(
         client,
@@ -250,6 +268,199 @@ def test_ticket_list_renders_compact_created_at_timestamp(client: Any) -> None:
     body = response.get_data(as_text=True)
     assert expected_created_at in body
     assert raw_created_at not in body
+
+
+def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Preview logs",
+        summary="Ticket detail should show log previews",
+    )
+    log_path = write_ticket_log(
+        ticket_id,
+        relative_path="steps/01-reviewer-claude/session.log",
+        content="\n".join(f"line-{index:03d}" for index in range(1, 46)) + "\n",
+    )
+    set_ticket_tmux_sessions(
+        client,
+        ticket_id,
+        [
+            {
+                "step_index": 0,
+                "role": "reviewer",
+                "agent": "claude",
+                "status": "succeeded",
+                "session_name": "job-preview-01",
+                "attach_command": "tmux attach -t job-preview-01",
+                "log_path": str(log_path),
+            }
+        ],
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Open full log" in body
+    assert f"/tickets/{ticket_id}/steps/1/log" in body
+    assert "line-045" in body
+    assert "line-001" not in body
+
+
+def test_ticket_step_log_view_renders_full_log(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Full log",
+        summary="Operators should be able to read step logs in the UI",
+    )
+    log_path = write_ticket_log(
+        ticket_id,
+        relative_path="steps/01-reviewer-claude/session.log",
+        content="first line\nsecond line\nthird line\n",
+    )
+    set_ticket_tmux_sessions(
+        client,
+        ticket_id,
+        [
+            {
+                "step_index": 0,
+                "role": "reviewer",
+                "agent": "claude",
+                "status": "succeeded",
+                "session_name": "job-full-01",
+                "attach_command": "tmux attach -t job-full-01",
+                "log_path": str(log_path),
+            }
+        ],
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}/steps/1/log")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Step 1 Log" in body
+    assert "first line" in body
+    assert "third line" in body
+    assert str(log_path) in body
+
+
+def test_ticket_step_log_view_rejects_paths_outside_ticket_artifacts(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Bad log path",
+        summary="Tampered log path should not be readable",
+    )
+    set_ticket_tmux_sessions(
+        client,
+        ticket_id,
+        [
+            {
+                "step_index": 0,
+                "role": "reviewer",
+                "agent": "claude",
+                "status": "failed",
+                "session_name": "job-bad-path-01",
+                "attach_command": "tmux attach -t job-bad-path-01",
+                "log_path": "/etc/passwd",
+            }
+        ],
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}/steps/1/log", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"/tickets/{ticket_id}"
+
+    detail = client.get(response.headers["Location"])
+    assert detail.status_code == 200
+    assert "outside the ticket artifact root" in detail.get_data(as_text=True)
+
+
+def test_ticket_detail_hides_full_log_link_for_session_without_numeric_step_index(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Malformed step index",
+        summary="Broken full-log links should not render",
+    )
+    log_path = write_ticket_log(
+        ticket_id,
+        relative_path="steps/unknown/session.log",
+        content="preview line\n",
+    )
+    set_ticket_tmux_sessions(
+        client,
+        ticket_id,
+        [
+            {
+                "step_index": "abc",
+                "role": "reviewer",
+                "agent": "claude",
+                "status": "failed",
+                "session_name": "job-malformed-01",
+                "attach_command": "tmux attach -t job-malformed-01",
+                "log_path": str(log_path),
+            }
+        ],
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "preview line" in body
+    assert "Open full log" not in body
+
+
+def test_ticket_step_log_view_rejects_missing_step_number(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Missing step",
+        summary="Missing step logs should redirect back to detail",
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}/steps/99/log", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"/tickets/{ticket_id}"
+
+    detail = client.get(response.headers["Location"])
+    assert detail.status_code == 200
+    assert "Step log does not exist" in detail.get_data(as_text=True)
+
+
+def test_ticket_detail_shows_log_unavailable_message_for_missing_file(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Missing log file",
+        summary="UI should show when a log is not available yet",
+    )
+    set_ticket_tmux_sessions(
+        client,
+        ticket_id,
+        [
+            {
+                "step_index": 0,
+                "role": "reviewer",
+                "agent": "claude",
+                "status": "running",
+                "session_name": "job-missing-log-01",
+                "attach_command": "tmux attach -t job-missing-log-01",
+                "log_path": f"/tmp/sessions/{ticket_id}/steps/01-reviewer-claude/session.log",
+            }
+        ],
+    )
+
+    login(client)
+    response = client.get(f"/tickets/{ticket_id}")
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Log preview is not available yet for this step." in body
 
 
 def test_manual_ticket_creation_defaults_agent_from_role(client: Any) -> None:

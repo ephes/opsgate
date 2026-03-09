@@ -54,13 +54,36 @@ def _build_settings(db_path: str) -> OpsGateSettings:
     )
 
 
-@pytest.fixture
-def client(tmp_path: Path) -> Any:
+def _build_client(tmp_path: Path, *, operator_require_reviewer_step_floor: bool = False) -> Any:
     db_file = str(tmp_path / "opsgate.sqlite3")
-    app = create_app(_build_settings(db_file))
+    settings = _build_settings(db_file)
+    submitter_policies = tuple(
+        SubmitterPolicy(
+            source=policy.source,
+            token=policy.token,
+            require_reviewer_step_floor=(
+                operator_require_reviewer_step_floor
+                if policy.source == "operator"
+                else policy.require_reviewer_step_floor
+            ),
+        )
+        for policy in settings.submitter_policies
+    )
+    settings = OpsGateSettings(
+        **{
+            **settings.__dict__,
+            "submitter_policies": submitter_policies,
+        }
+    )
+    app = create_app(settings)
     app.config.update(TESTING=True)
     app.config["OPSGATE_TEST_DB_PATH"] = db_file
     return app.test_client()
+
+
+@pytest.fixture
+def client(tmp_path: Path) -> Any:
+    return _build_client(tmp_path)
 
 
 @pytest.fixture
@@ -848,6 +871,31 @@ def test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_rol
     assert "Do not patch production files ad hoc as the primary fix path." in body
 
 
+def test_manual_ticket_creation_enforces_operator_reviewer_floor_when_enabled(tmp_path: Path) -> None:
+    client = _build_client(tmp_path, operator_require_reviewer_step_floor=True)
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Needs reviewer",
+            "summary": "Policy floor should reject this",
+            "steps-0-role": "implementer",
+            "steps-0-agent": "codex",
+            "steps-0-prompt_markdown": "Make a change.",
+            "steps-1-role": "investigator",
+            "steps-1-agent": "claude",
+            "steps-1-prompt_markdown": "Collect logs.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "requires at least one reviewer step" in body
+    assert "Operator policy floor" in body
+
+
 def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> None:
     login(client)
 
@@ -1012,6 +1060,35 @@ def test_approval_revalidates_stored_agent_allowlist(client: Any) -> None:
     assert response.get_json() == {
         "error": "invalid_execution_plan",
         "message": "agent must be one of: codex, claude",
+    }
+
+
+def test_approval_revalidates_stored_reviewer_requirement(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="operator-token-00000000000",
+        title="Stored missing reviewer",
+        summary="Approval should reject a stored plan that no longer satisfies reviewer policy",
+        task_ref="approve-missing-reviewer-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET execution_plan_json = ? WHERE id = ?",
+            ('[{"role":"investigator","agent":"codex","prompt_markdown":"Inspect state"}]', ticket_id),
+        )
+        conn.commit()
+
+    login(client)
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "missing_reviewer_step",
+        "message": "policy_requirements.require_reviewer_step=true requires at least one reviewer step",
     }
 
 

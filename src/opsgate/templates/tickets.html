@@ -370,7 +370,7 @@
               <div class="workflow-toolbar">
                 <div class="header-copy">
                   <h3 id="workflow-editor-heading">Workflow Steps</h3>
-                  <p class="meta">Add, remove, and reorder steps before submitting.</p>
+                  <p class="meta">Add, remove, and reorder steps before submitting. Supported agents are <code>codex</code> and <code>claude</code>.</p>
                 </div>
                 <button type="button" class="secondary" data-step-add>Add Step</button>
               </div>
@@ -408,13 +408,18 @@
 
                       <label>
                         Agent
-                        <input
-                          type="text"
+                        <select
                           name="steps-{{ loop.index0 }}-agent"
-                          value="{{ step.agent }}"
                           data-step-field="agent"
                           required
-                        />
+                        >
+                          {% if step.agent and step.agent not in supported_agents %}
+                            <option value="{{ step.agent }}" selected>{{ step.agent }} (unsupported)</option>
+                          {% endif %}
+                          {% for agent in supported_agents %}
+                            <option value="{{ agent }}"{% if step.agent == agent %} selected{% endif %}>{{ agent }}</option>
+                          {% endfor %}
+                        </select>
                       </label>
                     </div>
 
@@ -486,12 +491,11 @@
 
           <label>
             Agent
-            <input
-              type="text"
-              value="{{ 'claude' if operator_requires_reviewer else 'codex' }}"
-              data-step-field="agent"
-              required
-            />
+            <select data-step-field="agent" required>
+              {% for agent in supported_agents %}
+                <option value="{{ agent }}"{% if agent == ('claude' if operator_requires_reviewer else 'codex') %} selected{% endif %}>{{ agent }}</option>
+              {% endfor %}
+            </select>
           </label>
         </div>
 
@@ -528,7 +532,7 @@
           const agentField = step.querySelector("[data-step-field='agent']");
           if (
             !(roleField instanceof HTMLInputElement || roleField instanceof HTMLSelectElement) ||
-            !(agentField instanceof HTMLInputElement)
+            !(agentField instanceof HTMLInputElement || agentField instanceof HTMLSelectElement)
           ) {
             return;
           }
@@ -647,7 +651,7 @@
           }
         });
 
-        form.addEventListener("input", (event) => {
+        function handleStepFieldEvent(event) {
           const target = event.target;
           if (!(target instanceof Element)) {
             return;
@@ -663,7 +667,7 @@
           }
 
           const agentField = target.closest("[data-step-field='agent']");
-          if (!(agentField instanceof HTMLInputElement)) {
+          if (!(agentField instanceof HTMLInputElement || agentField instanceof HTMLSelectElement)) {
             return;
           }
 
@@ -685,7 +689,10 @@
               ? "true"
               : "false";
           agentField.dataset.lastRole = roleFieldForAgent.value.trim();
-        });
+        }
+
+        form.addEventListener("input", handleStepFieldEvent);
+        form.addEventListener("change", handleStepFieldEvent);
 
         form.addEventListener("submit", syncSteps);
         syncSteps();

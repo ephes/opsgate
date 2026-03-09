@@ -19,7 +19,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from .config import RunnerSettings, load_runner_settings
-from .service import TERMINAL_STATES, isoformat_z, parse_iso_datetime, utc_now
+from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_datetime, utc_now
 
 TICKET_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
@@ -157,18 +157,10 @@ def _build_agent_command(agent: str, prompt_path: Path) -> str:
             "--dangerously-bypass-approvals-and-sandbox "
             f"- < {quoted_prompt}"
         )
-    if lower in {"claude", "claude-code"}:
+    if lower == "claude":
         return f"claude -p --dangerously-skip-permissions < {quoted_prompt}"
-    if lower in {"shell", "bash", "sh"}:
-        return f"/bin/bash {quoted_prompt}"
-    if "{prompt_file}" in normalized:
-        tokens = shlex.split(normalized)
-        expanded = [token.replace("{prompt_file}", prompt_value) for token in tokens]
-    else:
-        expanded = [*shlex.split(normalized), "--prompt-file", prompt_value]
-    if not expanded:
-        raise ValueError("agent command cannot be empty")
-    return " ".join(shlex.quote(token) for token in expanded)
+    allowed_agents = ", ".join(SUPPORTED_AGENTS)
+    raise ValueError(f"unsupported agent: {normalized or '<empty>'}; allowed agents: {allowed_agents}")
 
 
 def _build_attach_command(*, tmux_socket_label: str, session_name: str, tmux_tmpdir: str) -> str:
@@ -389,7 +381,17 @@ class TicketExecutor:
         )
 
         if not self._tmux_has_session(session_name):
-            self._create_step_script(step_paths=step_paths, step_agent=step_agent, prompt_path=step_paths.prompt_path)
+            try:
+                self._create_step_script(
+                    step_paths=step_paths,
+                    step_agent=step_agent,
+                    prompt_path=step_paths.prompt_path,
+                )
+            except ValueError:
+                tmux_entry["status"] = "failed"
+                tmux_entry["finished_at"] = isoformat_z(utc_now())
+                _atomic_write_json(step_paths.metadata_path, tmux_entry)
+                return StepOutcome(kind="failed", detail=f"unsupported_agent_{_slugify(step_agent)}")
             self._tmux_new_session(session_name=session_name, script_path=step_paths.script_path)
 
         heartbeat_interval = max(1, self.settings.runner_heartbeat_interval_seconds)

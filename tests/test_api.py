@@ -181,7 +181,7 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
             "steps-0-agent": "codex",
             "steps-0-prompt_markdown": "Inspect the target service and prepare a no-op patch.",
             "steps-1-role": "reviewer",
-            "steps-1-agent": "shell",
+            "steps-1-agent": "claude",
             "steps-1-prompt_markdown": "Review the proposed change and confirm it stays a no-op.",
             "max_duration_seconds": "900",
             "context_json": '{"service": "opsgate", "host": "macstudio"}',
@@ -205,7 +205,7 @@ def test_manual_ticket_creation_from_ui(client: Any) -> None:
         },
         {
             "role": "reviewer",
-            "agent": "shell",
+            "agent": "claude",
             "prompt_markdown": "Review the proposed change and confirm it stays a no-op.",
         },
     ]
@@ -228,7 +228,8 @@ def test_manual_ticket_form_defaults_reviewer_to_claude(client: Any) -> None:
     assert '<option value="implementer">implementer</option>' in body
     assert '<option value="reviewer" selected>reviewer</option>' in body
     assert 'name="steps-0-agent"' in body
-    assert 'value="claude"' in body
+    assert '<option value="codex">codex</option>' in body
+    assert '<option value="claude" selected>claude</option>' in body
 
 
 def test_ticket_list_renders_compact_created_at_timestamp(client: Any) -> None:
@@ -350,7 +351,7 @@ def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) ->
             "steps-0-agent": "codex",
             "steps-0-prompt_markdown": "Make a change.",
             "steps-1-role": "investigator",
-            "steps-1-agent": "shell",
+            "steps-1-agent": "claude",
             "steps-1-prompt_markdown": "Collect logs.",
         },
         follow_redirects=False,
@@ -366,7 +367,7 @@ def test_manual_ticket_creation_respects_operator_reviewer_floor(client: Any) ->
     assert ">Make a change.</textarea>" in body
     assert 'name="steps-1-role"' in body
     assert 'value="investigator"' in body
-    assert 'value="shell"' in body
+    assert '<option value="claude" selected>claude</option>' in body
     assert ">Collect logs.</textarea>" in body
     assert "Operator policy floor" in body
 
@@ -384,7 +385,7 @@ def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> Non
             "steps-0-agent": "codex",
             "steps-0-prompt_markdown": "Inspect state.",
             "steps-1-role": "implementer",
-            "steps-1-agent": "shell",
+            "steps-1-agent": "claude",
             "steps-1-prompt_markdown": "Prepare a no-op fix.",
             "context_json": "[1, 2, 3]",
         },
@@ -396,6 +397,29 @@ def test_manual_ticket_creation_rejects_invalid_context_json(client: Any) -> Non
     assert ">[1, 2, 3]</textarea>" in body
     assert ">Inspect state.</textarea>" in body
     assert ">Prepare a no-op fix.</textarea>" in body
+
+
+def test_manual_ticket_creation_rejects_unsupported_agent_from_ui(client: Any) -> None:
+    login(client)
+
+    response = client.post(
+        "/tickets",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "title": "Bad agent",
+            "summary": "Unsupported agents should be rejected",
+            "steps-0-role": "reviewer",
+            "steps-0-agent": "shell",
+            "steps-0-prompt_markdown": "Review the proposed change.",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    body = response.get_data(as_text=True)
+    assert "agent must be one of: codex, claude" in body
+    assert 'value="Bad agent"' in body
+    assert '>shell (unsupported)</option>' in body
+    assert ">Review the proposed change.</textarea>" in body
 
 
 def test_manual_ticket_creation_requires_csrf_token(client: Any) -> None:
@@ -467,6 +491,118 @@ def test_ui_ticket_action_failure_redirects_back_to_ticket_detail(client: Any) -
     detail = client.get(second_approve.headers["Location"])
     assert detail.status_code == 200
     assert "Ticket is not pending approval" in detail.get_data(as_text=True)
+
+
+def test_api_ticket_creation_rejects_unsupported_agent(client: Any) -> None:
+    response = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json={
+            "title": "Bad API agent",
+            "summary": "Unsupported agents should be rejected",
+            "execution_plan": [
+                {"role": "investigator", "agent": "shell", "prompt_markdown": "Inspect the service"}
+            ],
+        },
+    )
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "invalid_execution_plan",
+        "message": "agent must be one of: codex, claude",
+    }
+
+
+def test_approval_revalidates_stored_agent_allowlist(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Stored bad agent",
+        summary="Approval should reject unsupported stored agents",
+        task_ref="approve-bad-agent-1",
+    )
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET execution_plan_json = ? WHERE id = ?",
+            ('[{"role":"investigator","agent":"shell","prompt_markdown":"Inspect state"}]', ticket_id),
+        )
+        conn.commit()
+
+    login(client)
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "invalid_execution_plan",
+        "message": "agent must be one of: codex, claude",
+    }
+
+
+def test_api_ticket_creation_normalizes_agent_case(client: Any) -> None:
+    response = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json={
+            "title": "Mixed case agent",
+            "summary": "Agent values should normalize to lowercase",
+            "execution_plan": [
+                {"role": "reviewer", "agent": "CLAUDE", "prompt_markdown": "Review the change"}
+            ],
+        },
+    )
+    assert response.status_code == 201
+
+    ticket_id = response.get_json()["id"]
+    detail = client.get(f"/api/v1/tickets/{ticket_id}", headers=auth_headers("nyxmon-token-000000000000"))
+    assert detail.status_code == 200
+    assert detail.get_json()["execution_plan"] == [
+        {"role": "reviewer", "agent": "claude", "prompt_markdown": "Review the change"}
+    ]
+
+
+def test_runner_claim_fails_invalid_stored_agent_and_moves_on(client: Any) -> None:
+    bad_ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Invalid stored claim agent",
+        summary="Claim should fail invalid stored plan and continue",
+        task_ref="claim-bad-agent-1",
+    )
+    good_ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Valid follow-up ticket",
+        summary="Claim should proceed to the next valid ticket",
+        task_ref="claim-bad-agent-2",
+    )
+
+    login(client)
+    assert client.post(f"/api/v1/tickets/{bad_ticket_id}/approve").status_code == 200
+    assert client.post(f"/api/v1/tickets/{good_ticket_id}/approve").status_code == 200
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET execution_plan_json = ? WHERE id = ?",
+            ('[{"role":"investigator","agent":"shell","prompt_markdown":"Inspect state"}]', bad_ticket_id),
+        )
+        conn.commit()
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+
+    assert claim.status_code == 200
+    claimed_ticket = claim.get_json()["ticket"]
+    assert claimed_ticket is not None
+    assert claimed_ticket["id"] == good_ticket_id
+    assert claimed_ticket["state"] == "running"
+
+    bad_ticket_detail = client.get(f"/api/v1/tickets/{bad_ticket_id}")
+    assert bad_ticket_detail.status_code == 200
+    bad_ticket = bad_ticket_detail.get_json()
+    assert bad_ticket["state"] == "failed"
+    assert bad_ticket["result"] == "failure"
+    assert bad_ticket["result_detail"] == "invalid_stored_plan"
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from opsgate.config import RunnerSettings
 from opsgate.runner import OpsGateRunner, RunnerApiError, TicketExecutor, _build_agent_command, _build_attach_command
 
@@ -91,8 +93,8 @@ def test_ticket_executor_runs_steps_sequentially(tmp_path: Path) -> None:
         "started_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
         "max_duration_seconds": 120,
         "execution_plan": [
-            {"role": "investigator", "agent": "shell", "prompt_markdown": "echo step-1"},
-            {"role": "reviewer", "agent": "shell", "prompt_markdown": "echo step-2"},
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "echo step-1"},
+            {"role": "reviewer", "agent": "claude", "prompt_markdown": "echo step-2"},
         ],
         "tmux_sessions": [],
     }
@@ -127,7 +129,7 @@ def test_ticket_executor_reports_timeout_result(tmp_path: Path) -> None:
         "started_at": (now - timedelta(seconds=10)).isoformat().replace("+00:00", "Z"),
         "max_duration_seconds": 1,
         "execution_plan": [
-            {"role": "investigator", "agent": "shell", "prompt_markdown": "sleep 10"},
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "sleep 10"},
         ],
         "tmux_sessions": [],
     }
@@ -157,7 +159,7 @@ def test_ticket_executor_reports_step_failure_detail(tmp_path: Path) -> None:
         "started_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
         "max_duration_seconds": 120,
         "execution_plan": [
-            {"role": "reviewer", "agent": "shell", "prompt_markdown": "exit 7"},
+            {"role": "reviewer", "agent": "claude", "prompt_markdown": "exit 7"},
         ],
         "tmux_sessions": [],
     }
@@ -187,8 +189,8 @@ def test_ticket_executor_resumes_from_existing_step_summary(tmp_path: Path) -> N
         "started_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
         "max_duration_seconds": 120,
         "execution_plan": [
-            {"role": "investigator", "agent": "shell", "prompt_markdown": "echo step-1"},
-            {"role": "reviewer", "agent": "shell", "prompt_markdown": "echo step-2"},
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "echo step-1"},
+            {"role": "reviewer", "agent": "claude", "prompt_markdown": "echo step-2"},
         ],
         "tmux_sessions": [],
     }
@@ -371,15 +373,11 @@ def test_discover_ticket_ids_from_tmux_handles_missing_binary(tmp_path: Path, mo
     assert runner._discover_ticket_ids_from_tmux() == set()
 
 
-def test_build_agent_command_quotes_fallback_agent(tmp_path: Path) -> None:
+def test_build_agent_command_rejects_unsupported_agent(tmp_path: Path) -> None:
     prompt_path = tmp_path / "prompt.md"
     prompt_path.write_text("echo hi\n", encoding="utf-8")
-    command = _build_agent_command("custom-agent --flag '; rm -rf /'", prompt_path)
-    tokens = shlex.split(command)
-    assert tokens[0] == "custom-agent"
-    assert tokens[1] == "--flag"
-    assert tokens[2] == "; rm -rf /"
-    assert "--prompt-file" in tokens
+    with pytest.raises(ValueError, match="unsupported agent"):
+        _build_agent_command("custom-agent --flag '; rm -rf /'", prompt_path)
 
 
 def test_build_agent_command_uses_codex_exec_with_stdin(tmp_path: Path) -> None:
@@ -415,11 +413,31 @@ def test_build_attach_command_includes_tmux_tmpdir() -> None:
     )
 
 
-def test_build_agent_command_expands_prompt_placeholder_safely(tmp_path: Path) -> None:
-    prompt_path = tmp_path / "prompt.md"
-    prompt_path.write_text("echo hi\n", encoding="utf-8")
-    command = _build_agent_command("tool --input {prompt_file}", prompt_path)
-    tokens = shlex.split(command)
-    assert tokens[0] == "tool"
-    assert tokens[1] == "--input"
-    assert tokens[2] == str(prompt_path)
+def test_ticket_executor_rejects_unsupported_agent(tmp_path: Path) -> None:
+    now = datetime.now(tz=UTC)
+    ticket_id = "eeeeeeee-5555-4555-8555-555555555555"
+    ticket: dict[str, Any] = {
+        "id": ticket_id,
+        "state": "running",
+        "started_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+        "max_duration_seconds": 120,
+        "execution_plan": [
+            {"role": "investigator", "agent": "shell", "prompt_markdown": "Inspect the service"},
+        ],
+        "tmux_sessions": [],
+    }
+    api = FakeApi(ticket)
+    executor = StubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+
+    executor.run(initial_ticket=ticket)
+
+    assert ticket["state"] == "failed"
+    assert ticket["result"] == "failure"
+    assert ticket["result_detail"] == "unsupported_agent_shell"

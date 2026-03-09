@@ -28,7 +28,7 @@ from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import OpsGateSettings, load_settings
-from .service import OpsGateService, ServiceError, isoformat_z, parse_iso_datetime, utc_now
+from .service import SUPPORTED_AGENTS, OpsGateService, ServiceError, isoformat_z, parse_iso_datetime, utc_now
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -239,6 +239,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
                 form_data=form_data,
                 operator_requires_reviewer=operator_requires_reviewer,
                 role_agent_defaults=DEFAULT_AGENT_BY_ROLE,
+                supported_agents=SUPPORTED_AGENTS,
             ),
             status_code,
         )

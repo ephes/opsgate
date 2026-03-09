@@ -26,6 +26,7 @@ RUNNER_EVENT_TYPES = {
     "ticket_succeeded",
     "invalid_plan",
 }
+SUPPORTED_AGENTS = ("codex", "claude")
 
 
 class ServiceError(RuntimeError):
@@ -74,6 +75,18 @@ def compute_payload_checksum(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
+def normalize_agent(raw_agent: Any) -> str:
+    normalized = str(raw_agent).strip().lower()
+    if normalized not in SUPPORTED_AGENTS:
+        allowed_agents = ", ".join(SUPPORTED_AGENTS)
+        raise ServiceError(
+            f"agent must be one of: {allowed_agents}",
+            400,
+            "invalid_execution_plan",
+        )
+    return normalized
+
+
 def parse_execution_plan(raw_plan: Any) -> list[dict[str, str]]:
     if not isinstance(raw_plan, list) or len(raw_plan) == 0:
         raise ServiceError("execution_plan must be a non-empty array", 400, "invalid_execution_plan")
@@ -84,14 +97,15 @@ def parse_execution_plan(raw_plan: Any) -> list[dict[str, str]]:
             raise ServiceError(f"execution_plan[{idx}] must be an object", 400, "invalid_execution_plan")
 
         role = str(step.get("role", "")).strip()
-        agent = str(step.get("agent", "")).strip()
+        agent_raw = str(step.get("agent", "")).strip()
         prompt_markdown = str(step.get("prompt_markdown", "")).strip()
-        if not role or not agent or not prompt_markdown:
+        if not role or not agent_raw or not prompt_markdown:
             raise ServiceError(
                 f"execution_plan[{idx}] requires role, agent, and prompt_markdown",
                 400,
                 "invalid_execution_plan",
             )
+        agent = normalize_agent(agent_raw)
 
         normalized_steps.append(
             {
@@ -639,7 +653,7 @@ class OpsGateService:
                 conn.commit()
                 raise ServiceError("Ticket expired and cannot be approved", 409, "ticket_expired")
 
-            execution_plan = json.loads(row["execution_plan_json"])
+            execution_plan = parse_execution_plan(json.loads(row["execution_plan_json"]))
             policy_requirements = json.loads(row["policy_requirements_json"])
             enforce_policy_against_plan(policy_requirements, execution_plan)
 
@@ -813,9 +827,34 @@ class OpsGateService:
                     ):
                         continue
 
-                    execution_plan = json.loads(row["execution_plan_json"])
-                    policy_requirements = json.loads(row["policy_requirements_json"])
-                    enforce_policy_against_plan(policy_requirements, execution_plan)
+                    try:
+                        execution_plan = parse_execution_plan(json.loads(row["execution_plan_json"]))
+                        policy_requirements = json.loads(row["policy_requirements_json"])
+                        enforce_policy_against_plan(policy_requirements, execution_plan)
+                    except ServiceError as error:
+                        conn.execute(
+                            """
+                            UPDATE tickets
+                            SET state = 'failed',
+                                finished_at = ?,
+                                result = 'failure',
+                                result_detail = 'invalid_stored_plan'
+                            WHERE id = ?
+                            """,
+                            (isoformat_z(utc_now()), row["id"]),
+                        )
+                        self._record_audit_event(
+                            conn,
+                            ticket_id=row["id"],
+                            event_type="ticket_failed",
+                            actor=f"runner:{runner_host}",
+                            source_ip=source_ip,
+                            user_agent=user_agent,
+                            previous_state="approved",
+                            new_state="failed",
+                            metadata={"reason": "invalid_stored_plan", "error": error.error_code},
+                        )
+                        continue
 
                     payload_for_checksum = self._ticket_payload_from_fields(
                         source=row["source"],

@@ -19,6 +19,36 @@ Phase 4B implementation scope in this repository:
 - Manual create flow supports per-step role/agent/prompt editing with role-based agent defaults (`implementer` -> `codex`, `reviewer` -> `claude`) and sticky validation errors.
 - Login form markup is password-manager/autofill friendly without relaxing session or CSRF protections.
 
+## Operator workflow guidance
+
+OpsGate step roles are guidance for ticket authors and approvers. In the current product they are not hard
+runtime permission boundaries beyond the existing reviewer-floor policy.
+
+Only three roles are part of the intended workflow model:
+
+- `investigator`: inspect state, read code/config, collect logs, explain findings, propose next steps. Do not use this role for source edits, deployments, service restarts, or direct live-host patching.
+- `implementer`: make the intended change in the proper source of truth, iterate with the reviewer until ready, run validation, commit the agreed change, and deploy through the normal workflow when the ticket calls for a live change.
+- `reviewer`: review the proposed work, validation, logs, and rollout plan. Do not treat this role as an independent implementation or deployment step.
+
+The backend does not currently reject other non-empty role strings submitted via the API. The three-role
+model above is the intended operator workflow and is enforced today through UI controls, prompting, and
+review discipline rather than strict API validation.
+
+Expected change workflow for durable fixes:
+
+1. `investigator` may inspect the problem first and identify the owning repo/workspace.
+2. `implementer` makes the fix in source, not by editing files ad hoc on the target host.
+3. `reviewer` reviews the proposed fix.
+4. `implementer` revises as needed.
+5. Repeat the implementer-reviewer loop until both agree the change is ready.
+6. `implementer` runs the relevant validation commands locally.
+7. `implementer` commits the agreed change.
+8. `implementer` deploys through the normal service workflow.
+9. `implementer` verifies the live result and records any follow-up work.
+
+Break-glass live edits are exceptional. If a ticket ever requires direct live intervention, the outcome should
+say so explicitly and explain how source-of-truth will be reconciled afterward.
+
 ## Runtime model
 
 - API/UI process is expected to run as `control_service_user`.
@@ -75,9 +105,7 @@ Useful keys:
 ## Local development
 
 ```bash
-just test
-just typecheck
-just lint
+just check
 just run
 just run-runner
 ```

@@ -386,7 +386,7 @@
         </div>
 
         <aside class="stack">
-          {% if ticket.state == 'pending_approval' %}
+          {% if not ticket.is_archived and ticket.state == 'pending_approval' %}
             <section class="panel actions-panel">
               <div class="section-title">
                 <h2>Approval Actions</h2>
@@ -405,7 +405,7 @@
             </section>
           {% endif %}
 
-          {% if ticket.state in ['pending_approval', 'approved', 'running'] %}
+          {% if not ticket.is_archived and ticket.state in ['pending_approval', 'approved', 'running'] %}
             <section class="panel actions-panel">
               <div class="section-title">
                 <h2>Cancel Ticket</h2>

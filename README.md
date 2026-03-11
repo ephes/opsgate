@@ -103,6 +103,8 @@ Useful keys:
 - `POST /api/v1/tickets/:id/approve`
 - `POST /api/v1/tickets/:id/reject`
 - `POST /api/v1/tickets/:id/cancel`
+- `POST /api/v1/tickets/:id/archive`
+- `POST /api/v1/tickets/:id/unarchive`
 - `POST /api/v1/runner/claim`
 - `POST /api/v1/runner/:id/status`
 - `GET /api/v1/health`

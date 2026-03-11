@@ -628,6 +628,115 @@ def test_pending_approval_ticket_shows_archive_action_in_list_and_detail(client:
     assert "Archive Ticket" in detail_body
 
 
+def test_archived_pending_ticket_hides_approve_reject_and_cancel_actions(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="openclaw-token-0000000000",
+        title="Archived pending approval",
+        summary="Archived pending tickets should only offer restore",
+        task_ref="archive-ui-pending-2",
+    )
+    login(client)
+    assert client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    ).status_code == 302
+
+    detail = client.get(f"/tickets/{ticket_id}")
+    body = detail.get_data(as_text=True)
+    assert detail.status_code == 200
+    assert "Restore Ticket" in body
+    assert "Approve Ticket" not in body
+    assert "Reject Ticket" not in body
+    assert "Cancel Ticket" not in body
+
+
+@pytest.mark.parametrize(
+    ("action", "message"),
+    [
+        ("approve", "Archived ticket must be restored before approval"),
+        ("reject", "Archived ticket must be restored before rejection"),
+        ("cancel", "Archived ticket must be restored before cancel"),
+    ],
+)
+def test_archived_pending_ticket_blocks_lifecycle_actions(client: Any, action: str, message: str) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="openclaw-token-0000000000",
+        title="Archived pending approval",
+        summary="Archived pending tickets should be shelved until restored",
+        task_ref=f"archive-ui-pending-{action}",
+    )
+    login(client)
+    assert client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={"csrf_token": session_csrf_token(client)},
+        follow_redirects=False,
+    ).status_code == 302
+
+    payload = {"reason": "nope"} if action in {"reject", "cancel"} else None
+    response = client.post(
+        f"/api/v1/tickets/{ticket_id}/{action}",
+        json=payload,
+    )
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "archived_ticket",
+        "message": message,
+    }
+
+
+def test_runner_does_not_claim_archived_approved_ticket(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="openclaw-token-0000000000",
+        title="Archived approved ticket",
+        summary="Archived approved tickets should stay shelved",
+        task_ref="archive-runner-1",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET archived_at = ?, archived_by = ? WHERE id = ?",
+            ("2026-03-11T10:00:00Z", "opsgate-admin", ticket_id),
+        )
+        conn.commit()
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+    claimed_ticket = claim.get_json()["ticket"]
+    if claimed_ticket is not None:
+        assert claimed_ticket["id"] != ticket_id
+
+
+@pytest.mark.parametrize("redirect_to", ["/logout", "https://evil.example/x", "//evil.example/x"])
+def test_ticket_list_archive_redirect_sanitizes_invalid_targets(client: Any, redirect_to: str) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive redirect validation",
+        summary="Invalid redirect targets should fall back to ticket detail",
+        task_ref=f"archive-redirect-{redirect_to}",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+
+    response = client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "redirect_to": redirect_to,
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"/tickets/{ticket_id}"
+
+
 def test_ui_archive_routes_require_csrf_token(client: Any) -> None:
     ticket_id = create_ticket(
         client,

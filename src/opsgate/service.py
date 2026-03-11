@@ -366,7 +366,7 @@ class OpsGateService:
             "archived_by": row["archived_by"],
             "is_archived": bool(row["archived_at"]),
             "is_terminal": str(row["state"]) in TERMINAL_STATES,
-            "is_archivable": str(row["state"]) in ARCHIVABLE_STATES,
+            "is_archivable": (str(row["state"]) in ARCHIVABLE_STATES) and (not bool(row["archived_at"])),
         }
 
     def _ticket_payload_from_fields(
@@ -674,6 +674,8 @@ class OpsGateService:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
+            if row["archived_at"]:
+                raise ServiceError("Archived ticket must be restored before approval", 409, "archived_ticket")
             if row["state"] != "pending_approval":
                 raise ServiceError("Ticket is not pending approval", 409, "invalid_state")
 
@@ -748,6 +750,8 @@ class OpsGateService:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
+            if row["archived_at"]:
+                raise ServiceError("Archived ticket must be restored before rejection", 409, "archived_ticket")
             if row["state"] != "pending_approval":
                 raise ServiceError("Ticket cannot be rejected in current state", 409, "invalid_state")
 
@@ -793,6 +797,8 @@ class OpsGateService:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
+            if row["archived_at"]:
+                raise ServiceError("Archived ticket must be restored before cancel", 409, "archived_ticket")
             if row["state"] not in {"pending_approval", "approved", "running"}:
                 raise ServiceError("Ticket cannot be canceled in current state", 409, "invalid_state")
 
@@ -935,6 +941,7 @@ class OpsGateService:
                         """
                         SELECT * FROM tickets
                         WHERE state = 'approved'
+                          AND archived_at IS NULL
                         ORDER BY approved_at ASC, created_at ASC
                         LIMIT 1
                         """

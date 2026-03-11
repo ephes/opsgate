@@ -16,6 +16,7 @@ from .config import OpsGateSettings, SubmitterPolicy
 
 OPEN_TICKET_STATES = {"pending_approval", "approved", "running"}
 TERMINAL_STATES = {"succeeded", "failed", "rejected", "canceled", "expired"}
+ARCHIVABLE_STATES = TERMINAL_STATES | {"pending_approval"}
 RUNNER_EVENT_TYPES = {
     "heartbeat",
     "step_started",
@@ -365,6 +366,7 @@ class OpsGateService:
             "archived_by": row["archived_by"],
             "is_archived": bool(row["archived_at"]),
             "is_terminal": str(row["state"]) in TERMINAL_STATES,
+            "is_archivable": str(row["state"]) in ARCHIVABLE_STATES,
         }
 
     def _ticket_payload_from_fields(
@@ -835,8 +837,8 @@ class OpsGateService:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
-            if row["state"] not in TERMINAL_STATES:
-                raise ServiceError("Only terminal tickets can be archived", 409, "invalid_state")
+            if row["state"] not in ARCHIVABLE_STATES:
+                raise ServiceError("Only pending-approval or terminal tickets can be archived", 409, "invalid_state")
             if row["archived_at"]:
                 raise ServiceError("Ticket is already archived", 409, "already_archived")
 

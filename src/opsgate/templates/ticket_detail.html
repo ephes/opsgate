@@ -424,18 +424,18 @@
             <section class="panel actions-panel">
               <div class="section-title">
                 <h2>Restore Ticket</h2>
-                <p class="meta">Return this terminal ticket to the default queue without changing its lifecycle state.</p>
+                <p class="meta">Return this ticket to the default queue without changing its lifecycle state.</p>
               </div>
               <form method="post" action="{{ url_for('ui_ticket_unarchive', ticket_id=ticket.id) }}" class="action-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button type="submit">Restore Ticket</button>
               </form>
             </section>
-          {% elif ticket.is_terminal %}
+          {% elif ticket.is_archivable %}
             <section class="panel actions-panel">
               <div class="section-title">
                 <h2>Archive Ticket</h2>
-                <p class="meta">Hide this terminal ticket from the default queue while keeping detail, logs, and audit trail accessible.</p>
+                <p class="meta">Hide this ticket from the default queue while keeping detail, logs, and audit trail accessible.</p>
               </div>
               <form method="post" action="{{ url_for('ui_ticket_archive', ticket_id=ticket.id) }}" class="action-form">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

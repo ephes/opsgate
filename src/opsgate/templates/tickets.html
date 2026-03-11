@@ -478,7 +478,7 @@
                     </div>
                   {% endif %}
                 </div>
-                {% if ticket.is_archived or ticket.is_terminal %}
+                {% if ticket.is_archived or ticket.is_archivable %}
                   <div class="ticket-card-actions">
                     {% if ticket.is_archived %}
                       <form method="post" action="{{ url_for('ui_ticket_unarchive', ticket_id=ticket.id) }}">
@@ -486,7 +486,7 @@
                         <input type="hidden" name="redirect_to" value="{% if ticket_view == 'archived' %}{{ url_for('ui_tickets', view='archived') }}{% elif ticket_view == 'all' %}{{ url_for('ui_tickets', view='all') }}{% else %}{{ url_for('ui_tickets') }}{% endif %}" />
                         <button type="submit" class="secondary">Restore</button>
                       </form>
-                    {% elif ticket.is_terminal %}
+                    {% elif ticket.is_archivable %}
                       <form method="post" action="{{ url_for('ui_ticket_archive', ticket_id=ticket.id) }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <input type="hidden" name="redirect_to" value="{% if ticket_view == 'archived' %}{{ url_for('ui_tickets', view='archived') }}{% elif ticket_view == 'all' %}{{ url_for('ui_tickets', view='all') }}{% else %}{{ url_for('ui_tickets') }}{% endif %}" />

@@ -376,21 +376,34 @@ def test_api_archive_and_unarchive_preserve_ticket_access_and_audit(client: Any)
     assert audit_event_types(client, ticket_id)[-2:] == ["ticket_archived", "ticket_unarchived"]
 
 
-def test_archive_requires_terminal_state(client: Any) -> None:
+@pytest.mark.parametrize("state", ["approved", "running"])
+def test_archive_rejects_non_archivable_active_states(client: Any, state: str) -> None:
     ticket_id = create_ticket(
         client,
         token="nyxmon-token-000000000000",
         title="Archive blocked",
-        summary="Pending tickets should not archive",
-        task_ref="archive-api-2",
+        summary="Approved and running tickets should not archive",
+        task_ref=f"archive-api-{state}",
     )
     login(client)
+    if state == "approved":
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+    else:
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+        claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+        assert claim.status_code == 200
+        assert claim.get_json()["ticket"]["id"] == ticket_id
+        assert client.post(
+            f"/api/v1/runner/{ticket_id}/status",
+            headers=runner_headers(),
+            json={"runner_host": "runner-a", "event": "heartbeat", "state": "running"},
+        ).status_code == 200
 
     response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
     assert response.status_code == 409
     assert response.get_json() == {
         "error": "invalid_state",
-        "message": "Only terminal tickets can be archived",
+        "message": "Only pending-approval or terminal tickets can be archived",
     }
 
 
@@ -421,6 +434,24 @@ def test_archive_allowed_for_all_terminal_states(client: Any, state: str, result
     assert archived_ticket["state"] == state
     assert archived_ticket["result"] == result
     assert archived_ticket["is_terminal"] is True
+    assert archived_ticket["is_archived"] is True
+
+
+def test_archive_allowed_for_pending_approval_state(client: Any) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Archive pending approval",
+        summary="Pending approval tickets should archive cleanly",
+        task_ref="archive-pending-approval-1",
+    )
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    assert response.status_code == 200
+    archived_ticket = response.get_json()
+    assert archived_ticket["state"] == "pending_approval"
+    assert archived_ticket["is_terminal"] is False
     assert archived_ticket["is_archived"] is True
 
 
@@ -572,6 +603,29 @@ def test_ticket_list_shows_archive_and_restore_actions_with_list_redirect(client
     )
     assert restore.status_code == 302
     assert restore.headers["Location"] == "/tickets?view=archived"
+
+
+def test_pending_approval_ticket_shows_archive_action_in_list_and_detail(client: Any) -> None:
+    title = "Pending approval archive control"
+    ticket_id = create_ticket(
+        client,
+        token="openclaw-token-0000000000",
+        title=title,
+        summary="Pending approval tickets should be archivable from the UI",
+        task_ref="archive-ui-pending-1",
+    )
+    login(client)
+
+    active_list = client.get("/tickets")
+    active_body = active_list.get_data(as_text=True)
+    assert active_list.status_code == 200
+    assert title in active_body
+    assert "Archive" in active_body
+
+    detail = client.get(f"/tickets/{ticket_id}")
+    detail_body = detail.get_data(as_text=True)
+    assert detail.status_code == 200
+    assert "Archive Ticket" in detail_body
 
 
 def test_ui_archive_routes_require_csrf_token(client: Any) -> None:

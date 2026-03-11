@@ -106,6 +106,7 @@
       .tickets-list {
         display: grid;
         gap: 0.75rem;
+        margin-top: 0.85rem;
       }
       .tickets-toolbar {
         display: flex;
@@ -148,6 +149,19 @@
         border: 1px solid var(--panel-border);
         border-radius: 0.95rem;
         background: #fff;
+      }
+      .ticket-card-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 0.55rem;
+      }
+      .ticket-card-actions form {
+        margin: 0;
+      }
+      .ticket-card-actions button {
+        min-height: 2.15rem;
+        padding: 0.55rem 0.85rem;
       }
       .ticket-card-header {
         display: flex;
@@ -464,6 +478,23 @@
                     </div>
                   {% endif %}
                 </div>
+                {% if ticket.is_archived or ticket.is_terminal %}
+                  <div class="ticket-card-actions">
+                    {% if ticket.is_archived %}
+                      <form method="post" action="{{ url_for('ui_ticket_unarchive', ticket_id=ticket.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <input type="hidden" name="redirect_to" value="{% if ticket_view == 'archived' %}{{ url_for('ui_tickets', view='archived') }}{% elif ticket_view == 'all' %}{{ url_for('ui_tickets', view='all') }}{% else %}{{ url_for('ui_tickets') }}{% endif %}" />
+                        <button type="submit" class="secondary">Restore</button>
+                      </form>
+                    {% elif ticket.is_terminal %}
+                      <form method="post" action="{{ url_for('ui_ticket_archive', ticket_id=ticket.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <input type="hidden" name="redirect_to" value="{% if ticket_view == 'archived' %}{{ url_for('ui_tickets', view='archived') }}{% elif ticket_view == 'all' %}{{ url_for('ui_tickets', view='all') }}{% else %}{{ url_for('ui_tickets') }}{% endif %}" />
+                        <button type="submit" class="secondary">Archive</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                {% endif %}
               </article>
             {% else %}
               {% if ticket_view == 'archived' %}

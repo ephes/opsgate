@@ -225,6 +225,12 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             return url_for("ui_ticket_detail", ticket_id=log_match.group(1))
         return None
 
+    def ui_ticket_action_redirect_path(ticket_id: str) -> str:
+        redirect_to = sanitize_next_path(request.form.get("redirect_to"))
+        if redirect_to and redirect_to.startswith("/tickets"):
+            return redirect_to
+        return url_for("ui_ticket_detail", ticket_id=ticket_id)
+
     def ensure_csrf_token() -> str:
         token = session.get("csrf_token")
         if isinstance(token, str) and token:
@@ -805,7 +811,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             source_ip=get_client_ip(),
             user_agent=request.headers.get("User-Agent"),
         )
-        return redirect(url_for("ui_ticket_detail", ticket_id=ticket_id))
+        return redirect(ui_ticket_action_redirect_path(ticket_id))
 
     @app.post("/tickets/<ticket_id>/unarchive")
     def ui_ticket_unarchive(ticket_id: str) -> ResponseReturnValue:
@@ -818,6 +824,6 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             source_ip=get_client_ip(),
             user_agent=request.headers.get("User-Agent"),
         )
-        return redirect(url_for("ui_ticket_detail", ticket_id=ticket_id))
+        return redirect(ui_ticket_action_redirect_path(ticket_id))
 
     return app

@@ -528,6 +528,52 @@ def test_ui_archive_and_restore_controls_manage_ticket_visibility(client: Any) -
     assert "Archived By" not in restored_body
 
 
+def test_ticket_list_shows_archive_and_restore_actions_with_list_redirect(client: Any) -> None:
+    title = "Archive from list card"
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title=title,
+        summary="Terminal ticket should archive directly from the list",
+        task_ref="archive-ui-list-1",
+    )
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+
+    active_list = client.get("/tickets")
+    active_body = active_list.get_data(as_text=True)
+    assert active_list.status_code == 200
+    assert "Archive" in active_body
+
+    archive = client.post(
+        f"/tickets/{ticket_id}/archive",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "redirect_to": "/tickets",
+        },
+        follow_redirects=False,
+    )
+    assert archive.status_code == 302
+    assert archive.headers["Location"] == "/tickets"
+
+    archived_list = client.get("/tickets?view=archived")
+    archived_body = archived_list.get_data(as_text=True)
+    assert archived_list.status_code == 200
+    assert title in archived_body
+    assert "Restore" in archived_body
+
+    restore = client.post(
+        f"/tickets/{ticket_id}/unarchive",
+        data={
+            "csrf_token": session_csrf_token(client),
+            "redirect_to": "/tickets?view=archived",
+        },
+        follow_redirects=False,
+    )
+    assert restore.status_code == 302
+    assert restore.headers["Location"] == "/tickets?view=archived"
+
+
 def test_ui_archive_routes_require_csrf_token(client: Any) -> None:
     ticket_id = create_ticket(
         client,

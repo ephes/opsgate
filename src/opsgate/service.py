@@ -31,6 +31,13 @@ SUPPORTED_AGENTS = ("codex", "claude")
 LIST_ARCHIVED_EXCLUDE = "exclude"
 LIST_ARCHIVED_ONLY = "only"
 LIST_ARCHIVED_INCLUDE = "include"
+OPEN_TICKET_DEDUPE_INDEX = """
+CREATE UNIQUE INDEX idx_tickets_open_dedupe
+    ON tickets(source, task_ref)
+    WHERE task_ref IS NOT NULL
+      AND archived_at IS NULL
+      AND state IN ('pending_approval', 'approved', 'running');
+"""
 
 
 class ServiceError(RuntimeError):
@@ -252,11 +259,6 @@ class OpsGateService:
 
                 CREATE INDEX IF NOT EXISTS idx_tickets_state ON tickets(state);
                 CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at);
-
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_open_dedupe
-                    ON tickets(source, task_ref)
-                    WHERE task_ref IS NOT NULL
-                      AND state IN ('pending_approval', 'approved', 'running');
                 """
             )
             ticket_columns = {
@@ -268,6 +270,8 @@ class OpsGateService:
             if "archived_by" not in ticket_columns:
                 conn.execute("ALTER TABLE tickets ADD COLUMN archived_by TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at)")
+            conn.execute("DROP INDEX IF EXISTS idx_tickets_open_dedupe")
+            conn.execute(OPEN_TICKET_DEDUPE_INDEX)
             conn.commit()
 
     def authenticate_submitter(self, token: str | None) -> SubmitterContext | None:
@@ -893,15 +897,22 @@ class OpsGateService:
 
             previous_archived_at = str(row["archived_at"])
             previous_archived_by = row["archived_by"]
-            conn.execute(
-                """
-                UPDATE tickets
-                SET archived_at = NULL,
-                    archived_by = NULL
-                WHERE id = ?
-                """,
-                (ticket_id,),
-            )
+            try:
+                conn.execute(
+                    """
+                    UPDATE tickets
+                    SET archived_at = NULL,
+                        archived_by = NULL
+                    WHERE id = ?
+                    """,
+                    (ticket_id,),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ServiceError(
+                    "Cannot restore archived ticket while another open ticket exists for this source/task_ref",
+                    409,
+                    "duplicate_open_ticket",
+                ) from exc
             self._record_audit_event(
                 conn,
                 ticket_id=ticket_id,

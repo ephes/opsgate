@@ -494,6 +494,34 @@ def test_unarchive_rejects_non_archived_ticket(client: Any) -> None:
     }
 
 
+def test_unarchive_rejects_when_replacement_open_ticket_exists(client: Any) -> None:
+    payload = {
+        "title": "Original archived ticket",
+        "summary": "Restoring should fail once a replacement open ticket exists",
+        "task_ref": "archive-api-restore-conflict",
+        "execution_plan": [
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "Do work"}
+        ],
+    }
+    first = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json=payload)
+    assert first.status_code == 201
+    original_ticket_id = first.get_json()["id"]
+
+    login(client)
+    archive = client.post(f"/api/v1/tickets/{original_ticket_id}/archive")
+    assert archive.status_code == 200
+
+    replacement = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json=payload)
+    assert replacement.status_code == 201
+
+    response = client.post(f"/api/v1/tickets/{original_ticket_id}/unarchive")
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "duplicate_open_ticket",
+        "message": "Cannot restore archived ticket while another open ticket exists for this source/task_ref",
+    }
+
+
 def test_ui_archive_and_restore_controls_manage_ticket_visibility(client: Any) -> None:
     title = "Archive through UI"
     ticket_id = create_ticket(
@@ -1519,6 +1547,27 @@ def test_dedupe_enforced_for_open_task_ref(client: Any) -> None:
     assert second.status_code == 409
     body = second.get_json()
     assert body["error"] == "duplicate_open_ticket"
+
+
+def test_dedupe_ignores_archived_pending_ticket(client: Any) -> None:
+    payload = {
+        "title": "Investigate alert",
+        "summary": "Archived pending tickets should not block a replacement",
+        "task_ref": "same-ref-archived",
+        "execution_plan": [
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "Do work"}
+        ],
+    }
+    first = client.post("/api/v1/tickets", headers=auth_headers("openclaw-token-0000000000"), json=payload)
+    assert first.status_code == 201
+
+    login(client)
+    archive = client.post(f"/api/v1/tickets/{first.get_json()['id']}/archive")
+    assert archive.status_code == 200
+    assert archive.get_json()["is_archived"] is True
+
+    second = client.post("/api/v1/tickets", headers=auth_headers("openclaw-token-0000000000"), json=payload)
+    assert second.status_code == 201
 
 
 def test_dedupe_not_applied_when_task_ref_missing(client: Any) -> None:

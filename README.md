@@ -21,6 +21,7 @@ Phase 4B implementation scope in this repository:
 - Manual/operator tickets may be single-step investigation tickets or multi-step change/review workflows; OpsGate does not require a reviewer step for every operator-created ticket.
 - Authenticated approvers can inspect per-step runner logs in the web UI via inline previews and dedicated log pages on ticket detail.
 - Authenticated approvers can archive `pending_approval` or terminal tickets out of the default `/tickets` queue and restore them later without deleting ticket history, logs, or artifact references.
+- New submissions reconcile expired matching open tickets before dedupe, so a stale expired recurrence does not block a fresh approvable ticket for the same `source` + `task_ref`.
 - Supported step agents are `codex` and `claude` only.
 - Login form markup is password-manager/autofill friendly without relaxing session or CSRF protections.
 

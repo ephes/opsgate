@@ -494,6 +494,14 @@ class OpsGateService:
         created_at = isoformat_z(utc_now())
 
         with self._connection() as conn:
+            self._expire_open_tickets_for_task_ref(
+                conn,
+                source=normalized_ticket["source"],
+                task_ref=normalized_ticket["task_ref"],
+                actor=actor,
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
             try:
                 conn.execute(
                     """
@@ -545,6 +553,39 @@ class OpsGateService:
             if row is None:
                 raise ServiceError("Ticket creation failed", 500, "db_error")
             return self._serialize_ticket(row)
+
+    def _expire_open_tickets_for_task_ref(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source: str,
+        task_ref: str | None,
+        actor: str,
+        source_ip: str | None,
+        user_agent: str | None,
+    ) -> None:
+        if task_ref is None:
+            return
+
+        rows = conn.execute(
+            """
+            SELECT * FROM tickets
+            WHERE source = ?
+              AND task_ref = ?
+              AND archived_at IS NULL
+              AND state IN ('pending_approval', 'approved')
+            ORDER BY created_at ASC
+            """,
+            (source, task_ref),
+        ).fetchall()
+        for row in rows:
+            self._maybe_expire_ticket(
+                conn,
+                row=row,
+                actor=actor,
+                source_ip=source_ip,
+                user_agent=user_agent,
+            )
 
     def _maybe_expire_ticket(
         self,

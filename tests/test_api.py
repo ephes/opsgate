@@ -1570,6 +1570,110 @@ def test_dedupe_ignores_archived_pending_ticket(client: Any) -> None:
     assert second.status_code == 201
 
 
+def test_dedupe_expires_stale_pending_ticket_before_replacement_submit(client: Any) -> None:
+    past = datetime.now(tz=UTC) - timedelta(hours=1)
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
+    original_payload = {
+        "title": "Investigate alert",
+        "summary": "Expired pending ticket should not block a replacement",
+        "task_ref": "same-ref-expired-pending",
+        "expires_at": past.isoformat().replace("+00:00", "Z"),
+        "execution_plan": [
+            {"role": "investigator", "agent": "codex", "prompt_markdown": "Do work"}
+        ],
+    }
+    original = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json=original_payload,
+    )
+    assert original.status_code == 201
+    original_ticket_id = original.get_json()["id"]
+
+    replacement_payload = {
+        **original_payload,
+        "title": "Investigate alert recurrence",
+        "summary": "Fresh recurrence should create a new pending ticket",
+        "expires_at": future.isoformat().replace("+00:00", "Z"),
+    }
+    replacement = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json=replacement_payload,
+    )
+    assert replacement.status_code == 201
+    replacement_body = replacement.get_json()
+    assert replacement_body["id"] != original_ticket_id
+    assert replacement_body["state"] == "pending_approval"
+
+    original_read_back = client.get(
+        f"/api/v1/tickets/{original_ticket_id}",
+        headers=auth_headers("nyxmon-token-000000000000"),
+    )
+    assert original_read_back.status_code == 200
+    assert original_read_back.get_json()["state"] == "expired"
+    assert audit_event_types(client, original_ticket_id)[-1] == "ticket_expired"
+
+
+def test_dedupe_expires_stale_approved_ticket_before_replacement_submit(client: Any) -> None:
+    future = datetime.now(tz=UTC) + timedelta(hours=1)
+    past = datetime.now(tz=UTC) - timedelta(hours=1)
+    payload = {
+        "title": "Investigate alert",
+        "summary": "Expired approved ticket should not block a replacement",
+        "task_ref": "same-ref-expired-approved",
+        "expires_at": future.isoformat().replace("+00:00", "Z"),
+        "execution_plan": [
+            {"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}
+        ],
+        "policy_requirements": {"require_reviewer_step": True},
+    }
+    original = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json=payload,
+    )
+    assert original.status_code == 201
+    original_ticket_id = original.get_json()["id"]
+
+    login(client)
+    approve = client.post(f"/api/v1/tickets/{original_ticket_id}/approve")
+    assert approve.status_code == 200
+    assert approve.get_json()["state"] == "approved"
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE tickets SET expires_at = ? WHERE id = ?",
+            (past.isoformat().replace("+00:00", "Z"), original_ticket_id),
+        )
+        conn.commit()
+
+    replacement_payload = {
+        **payload,
+        "title": "Investigate alert recurrence",
+        "summary": "Fresh recurrence should create a new pending ticket",
+        "expires_at": future.isoformat().replace("+00:00", "Z"),
+    }
+    replacement = client.post(
+        "/api/v1/tickets",
+        headers=auth_headers("nyxmon-token-000000000000"),
+        json=replacement_payload,
+    )
+    assert replacement.status_code == 201
+    replacement_body = replacement.get_json()
+    assert replacement_body["id"] != original_ticket_id
+    assert replacement_body["state"] == "pending_approval"
+
+    original_read_back = client.get(
+        f"/api/v1/tickets/{original_ticket_id}",
+        headers=auth_headers("nyxmon-token-000000000000"),
+    )
+    assert original_read_back.status_code == 200
+    assert original_read_back.get_json()["state"] == "expired"
+    assert audit_event_types(client, original_ticket_id)[-1] == "ticket_expired"
+
+
 def test_dedupe_not_applied_when_task_ref_missing(client: Any) -> None:
     payload = {
         "title": "Investigate alert",

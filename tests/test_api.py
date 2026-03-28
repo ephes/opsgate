@@ -1474,14 +1474,33 @@ def test_login_form_uses_autofill_friendly_fields(client: Any) -> None:
     response = client.get("/login")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert '<form method="post" action="/login" autocomplete="on">' in body
+    assert 'id="login-form"' in body
+    assert 'name="login"' in body
+    assert 'action="/login"' in body
+    assert 'autocomplete="on"' in body
     assert 'name="username"' in body
     assert 'autocomplete="username"' in body
+    assert "autofocus" in body
     assert 'autocapitalize="none"' in body
     assert 'autocorrect="off"' in body
     assert 'spellcheck="false"' in body
     assert 'name="password"' in body
+    assert 'id="current-password"' in body
     assert 'autocomplete="current-password"' in body
+
+
+def test_login_head_is_side_effect_free(client: Any) -> None:
+    response = client.head("/login", follow_redirects=False)
+    assert response.status_code == 200
+    assert "Location" not in response.headers
+    with client.session_transaction() as session:
+        assert "_flashes" not in session
+
+    response_with_next = client.head("/login?next=/tickets/test-ticket", follow_redirects=False)
+    assert response_with_next.status_code == 200
+    assert "Location" not in response_with_next.headers
+    with client.session_transaction() as session:
+        assert "_flashes" not in session
 
 
 def test_login_ignores_protocol_relative_next_path(client: Any) -> None:

@@ -23,7 +23,7 @@ Phase 4B implementation scope in this repository:
 - Authenticated approvers can archive `pending_approval` or terminal tickets out of the default `/tickets` queue and restore them later without deleting ticket history, logs, or artifact references.
 - New submissions reconcile expired matching open tickets before dedupe, so a stale expired recurrence does not block a fresh approvable ticket for the same `source` + `task_ref`.
 - Supported step agents are `codex` and `claude` only.
-- Login form markup is password-manager/autofill friendly without relaxing session or CSRF protections.
+- Login keeps passive `GET`/`HEAD` probes side-effect free and uses password-manager/autofill-friendly form markup without relaxing session or CSRF protections.
 
 ## Operator workflow guidance
 

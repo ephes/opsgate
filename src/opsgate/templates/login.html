@@ -104,7 +104,13 @@
       {% endwith %}
 
       <section class="panel">
-        <form method="post" action="{{ url_for('ui_login') }}" autocomplete="on">
+        <form
+          id="login-form"
+          name="login"
+          method="post"
+          action="{{ url_for('ui_login') }}"
+          autocomplete="on"
+        >
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
           {% if next_path %}
             <input type="hidden" name="next" value="{{ next_path }}" />
@@ -120,12 +126,13 @@
             autocorrect="off"
             spellcheck="false"
             inputmode="text"
+            autofocus
             required
           />
 
-          <label for="password">Password</label>
+          <label for="current-password">Password</label>
           <input
-            id="password"
+            id="current-password"
             name="password"
             type="password"
             autocomplete="current-password"
@@ -135,7 +142,7 @@
             required
           />
 
-          <button type="submit">Login</button>
+          <button type="submit">Sign in</button>
         </form>
       </section>
     </main>

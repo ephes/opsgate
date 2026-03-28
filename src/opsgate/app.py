@@ -657,7 +657,8 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     @app.route("/login", methods=["GET", "POST"])
     def ui_login() -> ResponseReturnValue:
         next_path = sanitize_next_path(request.args.get("next"))
-        if request.method == "GET":
+        # Keep passive probes from browsers/password managers side-effect free.
+        if request.method in {"GET", "HEAD"}:
             return Response(render_template("login.html", next_path=next_path), 200)
 
         username = request.form.get("username", "").strip()

@@ -205,6 +205,33 @@ class OpsGateService:
         finally:
             connection.close()
 
+    @contextmanager
+    def _write_transaction(self) -> Iterator[sqlite3.Connection]:
+        """Open a connection inside ``BEGIN IMMEDIATE``.
+
+        Mutating methods read a ticket, check its state and then write. Taking the
+        write lock before the read serializes those steps against every other
+        writer, so a concurrent approve/cancel/runner update cannot slip in between.
+        Anything not committed is rolled back.
+        """
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+            except BaseException:
+                conn.rollback()
+                raise
+
+    @staticmethod
+    def _require_row_changed(cursor: sqlite3.Cursor) -> None:
+        """Fail a compare-and-set UPDATE that matched no row.
+
+        Every transition UPDATE also matches the state it read. If that state is no
+        longer current, nothing is written and the caller gets a 409.
+        """
+        if cursor.rowcount != 1:
+            raise ServiceError("Ticket changed concurrently; reload and retry", 409, "state_changed")
+
     def init_db(self) -> None:
         with self._connection() as conn:
             conn.executescript(
@@ -558,7 +585,7 @@ class OpsGateService:
         ticket_id = str(uuid4())
         created_at = isoformat_z(utc_now())
 
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             self._expire_open_tickets_for_task_ref(
                 conn,
                 source=normalized_ticket["source"],
@@ -678,17 +705,21 @@ class OpsGateService:
         if row["state"] not in OPEN_TICKET_STATES:
             return False
 
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE tickets
             SET state = 'expired',
                 finished_at = ?,
                 result = 'failure',
                 result_detail = 'expired_before_execution'
-            WHERE id = ?
+            WHERE id = ? AND state = ?
             """,
-            (isoformat_z(utc_now()), row["id"]),
+            (isoformat_z(utc_now()), row["id"], row["state"]),
         )
+        if cursor.rowcount != 1:
+            # The row was read before another writer changed it; leave the
+            # newer state alone and let the caller's own guarded write decide.
+            return False
         self._record_audit_event(
             conn,
             ticket_id=row["id"],
@@ -780,7 +811,7 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -817,17 +848,18 @@ class OpsGateService:
             approved_checksum = compute_payload_checksum(payload_for_checksum)
 
             approved_at = isoformat_z(utc_now())
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE tickets
                 SET state = 'approved',
                     approved_by = ?,
                     approved_at = ?,
                     approved_payload_checksum = ?
-                WHERE id = ?
+                WHERE id = ? AND state = 'pending_approval' AND archived_at IS NULL
                 """,
                 (approver, approved_at, approved_checksum, ticket_id),
             )
+            self._require_row_changed(cursor)
 
             self._record_audit_event(
                 conn,
@@ -856,7 +888,7 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -865,17 +897,18 @@ class OpsGateService:
             if row["state"] != "pending_approval":
                 raise ServiceError("Ticket cannot be rejected in current state", 409, "invalid_state")
 
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE tickets
                 SET state = 'rejected',
                     finished_at = ?,
                     result = 'failure',
                     result_detail = ?
-                WHERE id = ?
+                WHERE id = ? AND state = 'pending_approval' AND archived_at IS NULL
                 """,
                 (isoformat_z(utc_now()), reason or "rejected_by_approver", ticket_id),
             )
+            self._require_row_changed(cursor)
             self._record_audit_event(
                 conn,
                 ticket_id=ticket_id,
@@ -903,7 +936,7 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -912,17 +945,18 @@ class OpsGateService:
             if row["state"] not in {"pending_approval", "approved", "running"}:
                 raise ServiceError("Ticket cannot be canceled in current state", 409, "invalid_state")
 
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE tickets
                 SET state = 'canceled',
                     finished_at = ?,
                     result = 'canceled',
                     result_detail = ?
-                WHERE id = ?
+                WHERE id = ? AND state = ? AND archived_at IS NULL
                 """,
-                (isoformat_z(utc_now()), reason or "canceled_by_approver", ticket_id),
+                (isoformat_z(utc_now()), reason or "canceled_by_approver", ticket_id, row["state"]),
             )
+            self._require_row_changed(cursor)
             self._record_audit_event(
                 conn,
                 ticket_id=ticket_id,
@@ -949,7 +983,7 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -959,15 +993,16 @@ class OpsGateService:
                 raise ServiceError("Ticket is already archived", 409, "already_archived")
 
             archived_at = isoformat_z(utc_now())
-            conn.execute(
+            cursor = conn.execute(
                 """
                 UPDATE tickets
                 SET archived_at = ?,
                     archived_by = ?
-                WHERE id = ?
+                WHERE id = ? AND state = ? AND archived_at IS NULL
                 """,
-                (archived_at, approver, ticket_id),
+                (archived_at, approver, ticket_id, row["state"]),
             )
+            self._require_row_changed(cursor)
             self._record_audit_event(
                 conn,
                 ticket_id=ticket_id,
@@ -994,7 +1029,7 @@ class OpsGateService:
         source_ip: str | None,
         user_agent: str | None,
     ) -> dict[str, Any]:
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -1004,14 +1039,14 @@ class OpsGateService:
             previous_archived_at = str(row["archived_at"])
             previous_archived_by = row["archived_by"]
             try:
-                conn.execute(
+                cursor = conn.execute(
                     """
                     UPDATE tickets
                     SET archived_at = NULL,
                         archived_by = NULL
-                    WHERE id = ?
+                    WHERE id = ? AND state = ? AND archived_at = ? AND archived_by IS ?
                     """,
-                    (ticket_id,),
+                    (ticket_id, row["state"], previous_archived_at, previous_archived_by),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ServiceError(
@@ -1019,6 +1054,7 @@ class OpsGateService:
                     409,
                     "duplicate_open_ticket",
                 ) from exc
+            self._require_row_changed(cursor)
             self._record_audit_event(
                 conn,
                 ticket_id=ticket_id,
@@ -1082,17 +1118,19 @@ class OpsGateService:
                         policy_requirements = json.loads(row["policy_requirements_json"])
                         enforce_policy_against_plan(policy_requirements, execution_plan)
                     except ServiceError as error:
-                        conn.execute(
+                        cursor = conn.execute(
                             """
                             UPDATE tickets
                             SET state = 'failed',
                                 finished_at = ?,
                                 result = 'failure',
                                 result_detail = 'invalid_stored_plan'
-                            WHERE id = ?
+                            WHERE id = ? AND state = 'approved'
                             """,
                             (isoformat_z(utc_now()), row["id"]),
                         )
+                        if cursor.rowcount == 0:
+                            continue
                         self._record_audit_event(
                             conn,
                             ticket_id=row["id"],
@@ -1120,17 +1158,19 @@ class OpsGateService:
                     current_checksum = compute_payload_checksum(payload_for_checksum)
                     approved_checksum = row["approved_payload_checksum"]
                     if not approved_checksum or approved_checksum != current_checksum:
-                        conn.execute(
+                        cursor = conn.execute(
                             """
                             UPDATE tickets
                             SET state = 'failed',
                                 finished_at = ?,
                                 result = 'failure',
                                 result_detail = 'prompt_tampered'
-                            WHERE id = ?
+                            WHERE id = ? AND state = 'approved'
                             """,
                             (isoformat_z(utc_now()), row["id"]),
                         )
+                        if cursor.rowcount == 0:
+                            continue
                         self._record_audit_event(
                             conn,
                             ticket_id=row["id"],
@@ -1210,7 +1250,7 @@ class OpsGateService:
         result_detail = str(payload.get("result_detail", "")).strip()
         tmux_sessions_raw = payload.get("tmux_sessions")
 
-        with self._connection() as conn:
+        with self._write_transaction() as conn:
             row = self._select_ticket(conn, ticket_id)
             if row is None:
                 raise ServiceError("Ticket not found", 404, "ticket_not_found")
@@ -1274,11 +1314,12 @@ class OpsGateService:
                 update_fields.append("tmux_sessions_json = ?")
                 update_values.append(json.dumps(tmux_sessions_raw, sort_keys=True))
 
-            update_values.append(ticket_id)
-            conn.execute(
-                f"UPDATE tickets SET {', '.join(update_fields)} WHERE id = ?",
+            update_values.extend([ticket_id, previous_state])
+            cursor = conn.execute(
+                f"UPDATE tickets SET {', '.join(update_fields)} WHERE id = ? AND state = ?",
                 tuple(update_values),
             )
+            self._require_row_changed(cursor)
             self._update_runner_heartbeat(conn, runner_host=runner_host)
 
             self._record_audit_event(

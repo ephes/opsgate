@@ -154,6 +154,21 @@ Useful keys:
   callers are unaffected. The web UI uses its own form routes (`/tickets/:id/<action>`), which already carry
   the form token.
 
+### Concurrent ticket transitions
+
+Approve, reject, cancel, archive, unarchive, runner claim and runner status updates each run in a single
+SQLite write transaction (`BEGIN IMMEDIATE`): the ticket is read, checked and written while the write lock is
+held, so two actions on the same ticket are applied one after the other. Every transition `UPDATE` also
+matches the state it read (compare-and-set).
+
+- The second of two conflicting actions sees the first one's result. For example, a cancel that races an
+  approve cancels the now-approved ticket, and the runner cannot claim it afterwards; a second approve gets
+  `409 invalid_state`.
+- If a write ever matches no row because the ticket changed after it was read, nothing is written and the
+  request answers `409 state_changed`. Reload the ticket and retry. The runner treats `state_changed` like
+  `invalid_state`: the ticket moved on, so it stops reporting for it.
+- Audit events record the state that was actually replaced.
+
 ### Approver sessions
 
 - Sessions expire after `OPSGATE_SESSION_TIMEOUT_SECONDS`.

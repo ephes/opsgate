@@ -29,6 +29,12 @@
 
 ### Fixed
 
+- Ticket transitions no longer overwrite a concurrent change. Approve, reject, cancel, archive, unarchive and
+  runner status updates read the ticket and then wrote it without a guard, so a cancel racing an approve
+  could end as `approved` and get claimed and run, and a cancel of a running ticket could be overwritten by a
+  runner `succeeded`/`failed` update. These methods (and ticket creation) now run under `BEGIN IMMEDIATE`, and
+  every transition `UPDATE` matches the state it read. A write that no longer matches answers
+  `409 state_changed` and changes nothing. The runner treats `state_changed` like `invalid_state`.
 - The runner no longer relaunches a step whose `exit_code` already exists after a restart. Previously it started
   a second, untracked agent session for the finished step and then reported the old result.
 - Summaries of steps resumed from an existing `summary.json` are passed to later steps once instead of twice.

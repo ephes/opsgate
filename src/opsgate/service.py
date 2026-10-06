@@ -372,13 +372,17 @@ class OpsGateService:
         normalized = token.strip()
         if not normalized:
             return None
+        # Compare bytes: compare_digest raises TypeError on non-ASCII str.
+        presented = normalized.encode("utf-8")
         for submitter in self.submitters:
-            if hmac.compare_digest(submitter.token, normalized):
+            if hmac.compare_digest(submitter.token.encode("utf-8"), presented):
                 return submitter
         return None
 
     def is_runner_token(self, token: str | None) -> bool:
-        return bool(token and hmac.compare_digest(token.strip(), self.settings.runner_token))
+        if not token:
+            return False
+        return hmac.compare_digest(token.strip().encode("utf-8"), self.settings.runner_token.encode("utf-8"))
 
     def require_reviewer_step_floor_for_source(self, source: str) -> bool:
         normalized_source = source.strip().lower()

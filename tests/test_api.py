@@ -9,7 +9,7 @@ from typing import Any
 import bcrypt
 import pytest
 
-from opsgate.app import create_app
+from opsgate.app import LoginThrottle, create_app
 from opsgate.config import OpsGateSettings, SubmitterPolicy
 from opsgate.service import parse_iso_datetime
 
@@ -115,6 +115,12 @@ def session_csrf_token(client: Any) -> str:
         token = session.get("csrf_token")
     assert isinstance(token, str)
     return token
+
+
+def csrf_headers(client: Any) -> dict[str, str]:
+    with client.session_transaction() as session:
+        token = session.get("csrf_token")
+    return {"X-CSRF-Token": token} if isinstance(token, str) else {}
 
 
 def login(client: Any, path: str = "/login") -> Any:
@@ -347,10 +353,10 @@ def test_api_archive_and_unarchive_preserve_ticket_access_and_audit(client: Any)
         task_ref="archive-api-1",
     )
     login(client)
-    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"})
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
     assert reject.status_code == 200
 
-    archive = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    archive = client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client))
     assert archive.status_code == 200
     archived_ticket = archive.get_json()
     assert archived_ticket["state"] == "rejected"
@@ -365,7 +371,7 @@ def test_api_archive_and_unarchive_preserve_ticket_access_and_audit(client: Any)
     assert submitter_detail.status_code == 200
     assert submitter_detail.get_json()["is_archived"] is True
 
-    unarchive = client.post(f"/api/v1/tickets/{ticket_id}/unarchive")
+    unarchive = client.post(f"/api/v1/tickets/{ticket_id}/unarchive", headers=csrf_headers(client))
     assert unarchive.status_code == 200
     restored_ticket = unarchive.get_json()
     assert restored_ticket["state"] == "rejected"
@@ -387,9 +393,9 @@ def test_archive_rejects_non_archivable_active_states(client: Any, state: str) -
     )
     login(client)
     if state == "approved":
-        assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
     else:
-        assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
         claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
         assert claim.status_code == 200
         assert claim.get_json()["ticket"]["id"] == ticket_id
@@ -399,7 +405,7 @@ def test_archive_rejects_non_archivable_active_states(client: Any, state: str) -
             json={"runner_host": "runner-a", "event": "heartbeat", "state": "running"},
         ).status_code == 200
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client))
     assert response.status_code == 409
     assert response.get_json() == {
         "error": "invalid_state",
@@ -428,7 +434,7 @@ def test_archive_allowed_for_all_terminal_states(client: Any, state: str, result
     set_ticket_terminal_state(client, ticket_id, state=state, result=result, result_detail=f"{state}_for_test")
     login(client)
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client))
     assert response.status_code == 200
     archived_ticket = response.get_json()
     assert archived_ticket["state"] == state
@@ -447,7 +453,7 @@ def test_archive_allowed_for_pending_approval_state(client: Any) -> None:
     )
     login(client)
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client))
     assert response.status_code == 200
     archived_ticket = response.get_json()
     assert archived_ticket["state"] == "pending_approval"
@@ -464,10 +470,11 @@ def test_archive_rejects_double_archive(client: Any) -> None:
         task_ref="archive-api-3",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
-    assert client.post(f"/api/v1/tickets/{ticket_id}/archive").status_code == 200
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
+    assert reject.status_code == 200
+    assert client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client)).status_code == 200
 
-    second_archive = client.post(f"/api/v1/tickets/{ticket_id}/archive")
+    second_archive = client.post(f"/api/v1/tickets/{ticket_id}/archive", headers=csrf_headers(client))
     assert second_archive.status_code == 409
     assert second_archive.get_json() == {
         "error": "already_archived",
@@ -484,9 +491,10 @@ def test_unarchive_rejects_non_archived_ticket(client: Any) -> None:
         task_ref="archive-api-4",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
+    assert reject.status_code == 200
 
-    response = client.post(f"/api/v1/tickets/{ticket_id}/unarchive")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/unarchive", headers=csrf_headers(client))
     assert response.status_code == 409
     assert response.get_json() == {
         "error": "not_archived",
@@ -508,13 +516,13 @@ def test_unarchive_rejects_when_replacement_open_ticket_exists(client: Any) -> N
     original_ticket_id = first.get_json()["id"]
 
     login(client)
-    archive = client.post(f"/api/v1/tickets/{original_ticket_id}/archive")
+    archive = client.post(f"/api/v1/tickets/{original_ticket_id}/archive", headers=csrf_headers(client))
     assert archive.status_code == 200
 
     replacement = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json=payload)
     assert replacement.status_code == 201
 
-    response = client.post(f"/api/v1/tickets/{original_ticket_id}/unarchive")
+    response = client.post(f"/api/v1/tickets/{original_ticket_id}/unarchive", headers=csrf_headers(client))
     assert response.status_code == 409
     assert response.get_json() == {
         "error": "duplicate_open_ticket",
@@ -532,7 +540,7 @@ def test_ui_archive_and_restore_controls_manage_ticket_visibility(client: Any) -
         task_ref="archive-ui-1",
     )
     login(client)
-    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"})
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
     assert reject.status_code == 200
 
     before_archive = client.get(f"/tickets/{ticket_id}")
@@ -597,7 +605,8 @@ def test_ticket_list_shows_archive_and_restore_actions_with_list_redirect(client
         task_ref="archive-ui-list-1",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
+    assert reject.status_code == 200
 
     active_list = client.get("/tickets")
     active_body = active_list.get_data(as_text=True)
@@ -707,6 +716,7 @@ def test_archived_pending_ticket_blocks_lifecycle_actions(client: Any, action: s
     response = client.post(
         f"/api/v1/tickets/{ticket_id}/{action}",
         json=payload,
+        headers=csrf_headers(client),
     )
     assert response.status_code == 409
     assert response.get_json() == {
@@ -724,7 +734,7 @@ def test_runner_does_not_claim_archived_approved_ticket(client: Any) -> None:
         task_ref="archive-runner-1",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/approve").status_code == 200
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
 
     db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
     with sqlite3.connect(db_path) as conn:
@@ -751,7 +761,8 @@ def test_ticket_list_archive_redirect_sanitizes_invalid_targets(client: Any, red
         task_ref=f"archive-redirect-{redirect_to}",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
+    assert reject.status_code == 200
 
     response = client.post(
         f"/tickets/{ticket_id}/archive",
@@ -774,7 +785,8 @@ def test_ui_archive_routes_require_csrf_token(client: Any) -> None:
         task_ref="archive-ui-csrf-1",
     )
     login(client)
-    assert client.post(f"/api/v1/tickets/{ticket_id}/reject", json={"reason": "done"}).status_code == 200
+    reject = client.post(f"/api/v1/tickets/{ticket_id}/reject", headers=csrf_headers(client), json={"reason": "done"})
+    assert reject.status_code == 200
 
     archive = client.post(f"/tickets/{ticket_id}/archive", data={}, follow_redirects=False)
     assert archive.status_code == 302
@@ -1238,7 +1250,7 @@ def test_ui_ticket_action_failure_redirects_back_to_ticket_detail(client: Any) -
     )
     login(client)
 
-    first_approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    first_approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert first_approve.status_code == 200
 
     second_approve = client.post(
@@ -1291,7 +1303,7 @@ def test_approval_revalidates_stored_agent_allowlist(client: Any) -> None:
         conn.commit()
 
     login(client)
-    response = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
 
     assert response.status_code == 400
     assert response.get_json() == {
@@ -1320,7 +1332,7 @@ def test_approval_revalidates_stored_reviewer_requirement(client: Any) -> None:
         conn.commit()
 
     login(client)
-    response = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
 
     assert response.status_code == 400
     assert response.get_json() == {
@@ -1368,8 +1380,8 @@ def test_runner_claim_fails_invalid_stored_agent_and_moves_on(client: Any) -> No
     )
 
     login(client)
-    assert client.post(f"/api/v1/tickets/{bad_ticket_id}/approve").status_code == 200
-    assert client.post(f"/api/v1/tickets/{good_ticket_id}/approve").status_code == 200
+    assert client.post(f"/api/v1/tickets/{bad_ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    assert client.post(f"/api/v1/tickets/{good_ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
 
     db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
     with sqlite3.connect(db_path) as conn:
@@ -1581,7 +1593,7 @@ def test_dedupe_ignores_archived_pending_ticket(client: Any) -> None:
     assert first.status_code == 201
 
     login(client)
-    archive = client.post(f"/api/v1/tickets/{first.get_json()['id']}/archive")
+    archive = client.post(f"/api/v1/tickets/{first.get_json()['id']}/archive", headers=csrf_headers(client))
     assert archive.status_code == 200
     assert archive.get_json()["is_archived"] is True
 
@@ -1656,7 +1668,7 @@ def test_dedupe_expires_stale_approved_ticket_before_replacement_submit(client: 
     original_ticket_id = original.get_json()["id"]
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{original_ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{original_ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
     assert approve.get_json()["state"] == "approved"
 
@@ -1753,7 +1765,7 @@ def test_lazy_expiry_blocks_approval(client: Any) -> None:
     ticket_id = create_response.get_json()["id"]
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 409
     assert approve.get_json()["error"] == "ticket_expired"
 
@@ -1778,7 +1790,7 @@ def test_approve_and_reject_flow(client: Any) -> None:
 
     login(client)
 
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
     approved = approve.get_json()
     assert approved["state"] == "approved"
@@ -1803,6 +1815,7 @@ def test_approve_and_reject_flow(client: Any) -> None:
     reject = client.post(
         f"/api/v1/tickets/{second_ticket_id}/reject",
         json={"reason": "not-needed"},
+        headers=csrf_headers(client),
     )
     assert reject.status_code == 200
     rejected = reject.get_json()
@@ -1818,7 +1831,11 @@ def test_cancel_flow(client: Any) -> None:
         task_ref="cancel-1",
     )
     login(client)
-    cancel = client.post(f"/api/v1/tickets/{ticket_id}/cancel", json={"reason": "operator canceled"})
+    cancel = client.post(
+        f"/api/v1/tickets/{ticket_id}/cancel",
+        headers=csrf_headers(client),
+        json={"reason": "operator canceled"},
+    )
     assert cancel.status_code == 200
     body = cancel.get_json()
     assert body["state"] == "canceled"
@@ -1837,7 +1854,7 @@ def test_runner_claim_happy_path(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post(
@@ -1865,7 +1882,7 @@ def test_runner_claim_detects_checksum_tamper(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
@@ -1907,7 +1924,7 @@ def test_runner_status_rejects_terminal_state_regression(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     heartbeat_while_approved = client.post(
@@ -1959,7 +1976,7 @@ def test_runner_status_accepts_timeout_result_and_tmux_sessions(client: Any) -> 
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
@@ -2010,7 +2027,7 @@ def test_runner_status_rejects_invalid_tmux_sessions_payload(client: Any) -> Non
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
@@ -2037,7 +2054,7 @@ def test_runner_status_rejects_runner_host_mismatch(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
@@ -2064,7 +2081,7 @@ def test_runner_status_rejects_invalid_event_type(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
@@ -2091,7 +2108,7 @@ def test_runner_status_accepts_step_failed_event(client: Any) -> None:
     )
 
     login(client)
-    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    approve = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
     assert approve.status_code == 200
 
     claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
@@ -2149,3 +2166,300 @@ def test_api_rejects_non_tailscale_source_ip(client: Any) -> None:
         json=payload,
     )
     assert response.status_code == 403
+
+
+# --- Approver session hardening: API CSRF, server-side revocation, login throttle ---------------
+
+SUBMIT_TOKEN = "nyxmon-token-000000000000"
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _client_for(settings: OpsGateSettings, *, throttle: LoginThrottle | None = None) -> Any:
+    app = create_app(settings, login_throttle=throttle)
+    app.config.update(TESTING=True)
+    app.config["OPSGATE_TEST_DB_PATH"] = settings.db_path
+    return app.test_client()
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> OpsGateSettings:
+    return _build_settings(str(tmp_path / "opsgate.sqlite3"))
+
+
+def _pending_ticket(client: Any, task_ref: str) -> str:
+    return create_ticket(client, token=SUBMIT_TOKEN, title="Hardening", summary="Session hardening", task_ref=task_ref)
+
+
+def _ticket_state(client: Any, ticket_id: str) -> str:
+    response = client.get(f"/api/v1/tickets/{ticket_id}", headers=auth_headers(SUBMIT_TOKEN))
+    assert response.status_code == 200
+    return str(response.get_json()["state"])
+
+
+def _session_cookie(client: Any) -> str:
+    cookie = client.get_cookie("session")
+    assert cookie is not None
+    return str(cookie.value)
+
+
+def _failed_login(client: Any, password: str = "wrong-password") -> Any:
+    client.get("/login")
+    return client.post(
+        "/login",
+        data={"csrf_token": session_csrf_token(client), "username": "opsgate-admin", "password": password},
+        follow_redirects=False,
+    )
+
+
+# --- CSRF on cookie-authenticated API calls -------------------------------------------------------
+
+
+@pytest.mark.parametrize("action", ["approve", "reject", "cancel", "archive", "unarchive"])
+def test_cookie_api_action_without_csrf_header_is_rejected(client: Any, action: str) -> None:
+    ticket_id = _pending_ticket(client, f"csrf-missing-{action}")
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/{action}")
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "csrf_required"
+    assert _ticket_state(client, ticket_id) == "pending_approval"
+
+
+def test_cookie_approve_with_wrong_csrf_header_is_rejected(client: Any) -> None:
+    ticket_id = _pending_ticket(client, "csrf-wrong")
+    login(client)
+
+    response = client.post(
+        f"/api/v1/tickets/{ticket_id}/approve",
+        headers={"X-CSRF-Token": "not-the-token", "Sec-Fetch-Site": "same-origin"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "invalid_csrf"
+    assert _ticket_state(client, ticket_id) == "pending_approval"
+
+
+def test_cookie_approve_with_csrf_header_succeeds(client: Any) -> None:
+    ticket_id = _pending_ticket(client, "csrf-ok")
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
+
+    assert response.status_code == 200
+    assert response.get_json()["state"] == "approved"
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_status"),
+    [
+        ({"Sec-Fetch-Site": "same-origin"}, 200),
+        ({"Sec-Fetch-Site": "same-site"}, 403),
+        ({"Sec-Fetch-Site": "cross-site"}, 403),
+        ({"Sec-Fetch-Site": "none"}, 403),
+        # Sec-Fetch-Site wins over a matching Origin when both are present.
+        ({"Sec-Fetch-Site": "same-site", "Origin": "http://localhost"}, 403),
+        ({"Origin": "http://localhost"}, 200),
+        ({"Origin": "https://localhost"}, 403),
+        ({"Origin": "http://other.localhost"}, 403),
+        ({"Origin": "null"}, 403),
+    ],
+)
+def test_cookie_approve_same_origin_fallback(client: Any, headers: dict[str, str], expected_status: int) -> None:
+    ticket_id = _pending_ticket(client, "csrf-origin")
+    login(client)
+
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=headers)
+
+    assert response.status_code == expected_status
+    expected_state = "approved" if expected_status == 200 else "pending_approval"
+    assert _ticket_state(client, ticket_id) == expected_state
+
+
+def test_bearer_callers_are_unaffected_by_api_csrf(client: Any) -> None:
+    ticket_id = _pending_ticket(client, "csrf-bearer")
+    assert client.get(f"/api/v1/tickets/{ticket_id}", headers=runner_headers()).status_code == 200
+
+    # A submit token never authorizes approval, with or without a CSRF header.
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=auth_headers(SUBMIT_TOKEN))
+    assert response.status_code == 401
+    assert response.get_json()["error"] == "auth_required"
+
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert claim.status_code == 200
+    assert claim.get_json()["ticket"]["id"] == ticket_id
+
+
+def test_unauthenticated_api_action_reports_auth_before_csrf(client: Any) -> None:
+    ticket_id = _pending_ticket(client, "csrf-anon")
+    response = client.post(f"/api/v1/tickets/{ticket_id}/approve")
+    assert response.status_code == 401
+    assert response.get_json()["error"] == "auth_required"
+
+
+# --- Server-side session revocation ---------------------------------------------------------------
+
+
+def test_cookie_replayed_after_logout_is_rejected(client: Any) -> None:
+    ticket_id = _pending_ticket(client, "logout-replay")
+    login(client)
+    stolen_cookie = _session_cookie(client)
+    stolen_csrf = session_csrf_token(client)
+
+    logout = client.post("/logout", data={"csrf_token": stolen_csrf}, follow_redirects=False)
+    assert logout.status_code == 302
+    assert logout.headers["Location"].endswith("/login")
+
+    client.set_cookie("session", stolen_cookie)
+    replay = client.get("/tickets", follow_redirects=False)
+    assert replay.status_code == 302
+    assert replay.headers["Location"].endswith("/login")
+
+    client.set_cookie("session", stolen_cookie)
+    api_replay = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers={"X-CSRF-Token": stolen_csrf})
+    assert api_replay.status_code == 401
+    assert _ticket_state(client, ticket_id) == "pending_approval"
+
+
+def test_logout_revokes_other_sessions_and_fresh_login_works(settings: OpsGateSettings) -> None:
+    first = _client_for(settings)
+    second = _client_for(settings)
+    login(first)
+    login(second)
+
+    first.post("/logout", data={"csrf_token": session_csrf_token(first)})
+
+    assert second.get("/tickets", follow_redirects=False).headers["Location"].endswith("/login")
+
+    login(second)
+    assert second.get("/tickets", follow_redirects=False).status_code == 200
+
+
+def test_anonymous_logout_does_not_revoke_sessions(settings: OpsGateSettings) -> None:
+    approver = _client_for(settings)
+    anonymous = _client_for(settings)
+    login(approver)
+
+    anonymous.get("/login")
+    response = anonymous.post("/logout", data={"csrf_token": session_csrf_token(anonymous)})
+    assert response.status_code == 302
+
+    assert approver.get("/tickets", follow_redirects=False).status_code == 200
+
+
+def test_password_change_revokes_existing_sessions(settings: OpsGateSettings) -> None:
+    client = _client_for(settings)
+    login(client)
+    old_cookie = _session_cookie(client)
+
+    new_hash = bcrypt.hashpw(b"new-password", bcrypt.gensalt()).decode("utf-8")
+    rotated = _client_for(OpsGateSettings(**{**settings.__dict__, "ui_password_bcrypt": new_hash}))
+    rotated.set_cookie("session", old_cookie)
+
+    response = rotated.get("/tickets", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+
+
+def test_restart_with_same_password_keeps_sessions(settings: OpsGateSettings) -> None:
+    client = _client_for(settings)
+    login(client)
+    cookie = _session_cookie(client)
+
+    restarted = _client_for(settings)
+    restarted.set_cookie("session", cookie)
+    assert restarted.get("/tickets", follow_redirects=False).status_code == 200
+
+
+def test_session_without_generation_is_treated_as_logged_out(client: Any) -> None:
+    login(client)
+    with client.session_transaction() as session:
+        session.pop("session_generation")
+
+    response = client.get("/tickets", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+
+
+# --- Login throttle -------------------------------------------------------------------------------
+
+
+def test_login_locks_after_repeated_failures(settings: OpsGateSettings) -> None:
+    clock = FakeClock()
+    client = _client_for(settings, throttle=LoginThrottle(limit=3, window_seconds=60, clock=clock))
+
+    for _ in range(3):
+        assert _failed_login(client).status_code == 302
+
+    locked = _failed_login(client, password="secret-password")
+    assert locked.status_code == 429
+    assert b"Too many failed login attempts" in locked.data
+    assert client.get("/tickets", follow_redirects=False).headers["Location"].endswith("/login")
+
+    clock.now += 61
+    login(client)
+    assert client.get("/tickets", follow_redirects=False).status_code == 200
+
+
+def test_unknown_username_counts_toward_throttle(settings: OpsGateSettings) -> None:
+    client = _client_for(settings, throttle=LoginThrottle(limit=2, window_seconds=60, clock=FakeClock()))
+    for _ in range(2):
+        client.get("/login")
+        client.post(
+            "/login",
+            data={"csrf_token": session_csrf_token(client), "username": "nobody", "password": "x"},
+        )
+
+    assert _failed_login(client, password="secret-password").status_code == 429
+
+
+def test_successful_login_resets_failure_count(settings: OpsGateSettings) -> None:
+    client = _client_for(settings, throttle=LoginThrottle(limit=3, window_seconds=60, clock=FakeClock()))
+    _failed_login(client)
+    _failed_login(client)
+    login(client)
+    client.post("/logout", data={"csrf_token": session_csrf_token(client)})
+
+    _failed_login(client)
+    _failed_login(client)
+    assert login(client).status_code == 302
+
+
+def test_login_throttle_is_per_client_ip(settings: OpsGateSettings) -> None:
+    client = _client_for(settings, throttle=LoginThrottle(limit=1, window_seconds=60, clock=FakeClock()))
+    _failed_login(client)
+    assert _failed_login(client, password="secret-password").status_code == 429
+
+    client.get("/login", environ_base={"REMOTE_ADDR": "100.64.0.7"})
+    with client.session_transaction() as session:
+        token = session["csrf_token"]
+    response = client.post(
+        "/login",
+        data={"csrf_token": token, "username": "opsgate-admin", "password": "secret-password"},
+        environ_base={"REMOTE_ADDR": "100.64.0.7"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/tickets"
+
+
+def test_login_throttle_bounds_tracked_clients() -> None:
+    clock = FakeClock()
+    throttle = LoginThrottle(limit=2, window_seconds=60, max_tracked_clients=3, clock=clock)
+    for index in range(5):
+        clock.now += 1
+        throttle.record_failure(f"10.0.0.{index}")
+    assert len(throttle._failures) <= 3
+    # The most recent offender is still tracked.
+    throttle.record_failure("10.0.0.4")
+    assert throttle.is_locked("10.0.0.4")

@@ -4,6 +4,8 @@ import hmac
 import json
 import re
 import secrets
+import threading
+import time
 from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
@@ -146,9 +148,77 @@ ROLE_PROMPT_SCAFFOLDING: dict[str, dict[str, object]] = {
 }
 ROLE_PROMPT_SCAFFOLDING["implementor"] = ROLE_PROMPT_SCAFFOLDING["implementer"]
 LOG_PREVIEW_LINE_LIMIT = 40
+LOGIN_FAILURE_LIMIT = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_THROTTLE_MAX_TRACKED_CLIENTS = 10_000
+CSRF_HEADER_NAME = "X-CSRF-Token"
+SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def create_app(settings: OpsGateSettings | None = None) -> Flask:
+class LoginThrottle:
+    """Per-client failed-login counter with a fixed lockout window.
+
+    After ``limit`` failed attempts inside ``window_seconds`` the client is locked out until the oldest
+    counted failure ages out of the window. State is in-process, which matches the single waitress process.
+    """
+
+    def __init__(
+        self,
+        *,
+        limit: int = LOGIN_FAILURE_LIMIT,
+        window_seconds: float = LOGIN_FAILURE_WINDOW_SECONDS,
+        max_tracked_clients: int = LOGIN_THROTTLE_MAX_TRACKED_CLIENTS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self.max_tracked_clients = max_tracked_clients
+        self.clock = clock
+        self._failures: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key: str, now: float) -> list[float]:
+        cutoff = now - self.window_seconds
+        recent = [stamp for stamp in self._failures.get(key, []) if stamp > cutoff]
+        if recent:
+            self._failures[key] = recent
+        else:
+            self._failures.pop(key, None)
+        return recent
+
+    def _prune(self, now: float) -> None:
+        for key in list(self._failures):
+            self._recent(key, now)
+        overflow = len(self._failures) - self.max_tracked_clients
+        if overflow > 0:
+            # Drop the clients whose newest failure is oldest; they are the closest to unlocking anyway.
+            by_age = sorted(self._failures, key=lambda key: self._failures[key][-1])
+            for key in by_age[:overflow]:
+                self._failures.pop(key, None)
+
+    def is_locked(self, key: str) -> bool:
+        with self._lock:
+            return len(self._recent(key, self.clock())) >= self.limit
+
+    def record_failure(self, key: str) -> None:
+        with self._lock:
+            now = self.clock()
+            recent = self._recent(key, now)
+            recent.append(now)
+            self._failures[key] = recent[-self.limit :]
+            if len(self._failures) > self.max_tracked_clients:
+                self._prune(now)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._failures.pop(key, None)
+
+
+def create_app(
+    settings: OpsGateSettings | None = None,
+    *,
+    login_throttle: LoginThrottle | None = None,
+) -> Flask:
     resolved_settings = settings or load_settings()
     app = Flask(__name__, template_folder="templates")
     if resolved_settings.trust_proxy_headers:
@@ -159,6 +229,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
     app.config["SESSION_COOKIE_SECURE"] = resolved_settings.session_cookie_secure
 
     service = OpsGateService(resolved_settings)
+    throttle = login_throttle or LoginThrottle()
     allowed_networks = tuple(ip_network(cidr, strict=False) for cidr in resolved_settings.allowed_cidrs)
 
     def get_client_ip() -> str:
@@ -196,7 +267,55 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         if utc_now() - auth_at > timedelta(seconds=resolved_settings.session_timeout_seconds):
             session.clear()
             return None
+
+        # Server-side revocation: logout and password changes bump the stored generation, which
+        # invalidates every cookie minted before the bump even though it is still validly signed.
+        session_generation = session.get("session_generation")
+        current_generation = service.get_ui_session_generation(username)
+        if (
+            not isinstance(session_generation, int)
+            or isinstance(session_generation, bool)
+            or current_generation is None
+            or session_generation != current_generation
+        ):
+            session.clear()
+            return None
         return username
+
+    def expected_request_origin() -> str:
+        return f"{request.scheme}://{request.host}".lower()
+
+    def is_same_origin_request() -> bool:
+        fetch_site = request.headers.get("Sec-Fetch-Site")
+        if fetch_site is not None:
+            return fetch_site.strip().lower() == "same-origin"
+        origin = request.headers.get("Origin")
+        if origin is not None:
+            return origin.strip().lower() == expected_request_origin()
+        return False
+
+    def enforce_api_session_csrf() -> None:
+        """CSRF defence for cookie-authenticated API calls.
+
+        Accept the session CSRF token in ``X-CSRF-Token``; otherwise require the browser to report the
+        request as same-origin (``Sec-Fetch-Site``, falling back to ``Origin``). SameSite=Lax alone does not
+        stop same-site sibling origins from posting with the session cookie.
+        """
+        if request.method in SAFE_HTTP_METHODS:
+            return
+        session_token = session.get("csrf_token")
+        header_token = request.headers.get(CSRF_HEADER_NAME, "")
+        if isinstance(session_token, str) and session_token and header_token:
+            if hmac.compare_digest(session_token.encode("utf-8"), header_token.encode("utf-8")):
+                return
+            raise ServiceError("Invalid CSRF token", 403, "invalid_csrf")
+        if is_same_origin_request():
+            return
+        raise ServiceError(
+            f"Cookie-authenticated API calls require the {CSRF_HEADER_NAME} header or a same-origin request",
+            403,
+            "csrf_required",
+        )
 
     def api_error(error: ServiceError) -> ResponseReturnValue:
         return jsonify({"error": error.error_code, "message": str(error)}), error.status_code
@@ -376,6 +495,7 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             user = get_session_user()
             if user is None:
                 raise ServiceError("Authentication required", 401, "auth_required")
+            enforce_api_session_csrf()
             request.environ["opsgate.approver"] = user
             return view(*args, **kwargs)
 
@@ -664,8 +784,14 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         next_path = sanitize_next_path(request.form.get("next")) or next_path
+        throttle_key = get_client_ip() or "unknown"
+
+        if throttle.is_locked(throttle_key):
+            flash("Too many failed login attempts. Try again later.", "error")
+            return Response(render_template("login.html", next_path=next_path), 429)
 
         if username != resolved_settings.ui_username:
+            throttle.record_failure(throttle_key)
             flash("Invalid username or password", "error")
             if next_path is not None:
                 return redirect(url_for("ui_login", next=next_path))
@@ -680,14 +806,20 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
             valid = False
 
         if not valid:
+            throttle.record_failure(throttle_key)
             flash("Invalid username or password", "error")
             if next_path is not None:
                 return redirect(url_for("ui_login", next=next_path))
             return redirect(url_for("ui_login"))
 
+        session_generation = service.get_ui_session_generation(username)
+        if session_generation is None:
+            raise ServiceError("Approver session state is missing", 500, "session_state_missing")
+        throttle.reset(throttle_key)
         session.clear()
         session["username"] = username
         session["auth_at"] = isoformat_z(utc_now())
+        session["session_generation"] = session_generation
         session["csrf_token"] = secrets.token_urlsafe(32)
         if next_path is not None:
             return redirect(next_path)
@@ -695,6 +827,11 @@ def create_app(settings: OpsGateSettings | None = None) -> Flask:
 
     @app.post("/logout")
     def ui_logout() -> ResponseReturnValue:
+        user = get_session_user()
+        if user is not None:
+            # Revoke server-side so a copied cookie stops working too. Only an authenticated session may
+            # do this, so an anonymous caller cannot sign the approver out.
+            service.revoke_ui_sessions(user)
         session.clear()
         return redirect(url_for("ui_login"))
 

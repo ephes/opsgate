@@ -251,6 +251,13 @@ class OpsGateService:
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
 
+                CREATE TABLE IF NOT EXISTS ui_session_state (
+                    username TEXT PRIMARY KEY,
+                    session_generation INTEGER NOT NULL,
+                    password_fingerprint TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS runner_heartbeats (
                     runner_host TEXT PRIMARY KEY,
                     last_heartbeat_at TEXT NOT NULL,
@@ -273,6 +280,64 @@ class OpsGateService:
             conn.execute("DROP INDEX IF EXISTS idx_tickets_open_dedupe")
             conn.execute(OPEN_TICKET_DEDUPE_INDEX)
             conn.commit()
+        self._sync_ui_session_state()
+
+    def _ui_password_fingerprint(self) -> str:
+        return hashlib.sha256(self.settings.ui_password_bcrypt.encode("utf-8")).hexdigest()
+
+    def _sync_ui_session_state(self) -> None:
+        """Ensure the approver session generation row exists; bump it when the password changed."""
+        username = self.settings.ui_username
+        fingerprint = self._ui_password_fingerprint()
+        now = isoformat_z(utc_now())
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT session_generation, password_fingerprint FROM ui_session_state WHERE username = ?",
+                (username,),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO ui_session_state (username, session_generation, password_fingerprint, updated_at) "
+                    "VALUES (?, 1, ?, ?)",
+                    (username, fingerprint, now),
+                )
+            elif not hmac.compare_digest(str(row["password_fingerprint"]), fingerprint):
+                conn.execute(
+                    "UPDATE ui_session_state SET session_generation = session_generation + 1, "
+                    "password_fingerprint = ?, updated_at = ? WHERE username = ?",
+                    (fingerprint, now, username),
+                )
+            conn.commit()
+
+    def get_ui_session_generation(self, username: str) -> int | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT session_generation FROM ui_session_state WHERE username = ?",
+                (username,),
+            ).fetchone()
+        if row is None:
+            return None
+        return int(row["session_generation"])
+
+    def revoke_ui_sessions(self, username: str) -> int:
+        """Invalidate every outstanding approver session for ``username``; returns the new generation."""
+        now = isoformat_z(utc_now())
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE ui_session_state SET session_generation = session_generation + 1, updated_at = ? "
+                "WHERE username = ?",
+                (now, username),
+            )
+            row = conn.execute(
+                "SELECT session_generation FROM ui_session_state WHERE username = ?",
+                (username,),
+            ).fetchone()
+            conn.commit()
+        if row is None:
+            raise ServiceError("Unknown approver", 400, "unknown_approver")
+        return int(row["session_generation"])
 
     def authenticate_submitter(self, token: str | None) -> SubmitterContext | None:
         if not token:

@@ -528,7 +528,7 @@ class TicketExecutor:
         try:
             self.api.update_status(self.ticket_id, payload)
         except RunnerApiError as error:
-            if error.status_code == 409 and error.error_code == "invalid_state":
+            if error.status_code == 409 and error.error_code in {"invalid_state", "state_changed"}:
                 return
             raise
 

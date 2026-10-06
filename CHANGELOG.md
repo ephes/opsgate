@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- Ticket transitions no longer overwrite a concurrent change. Approve, reject, cancel, archive, unarchive and
+  runner status updates read the ticket and then wrote it without a guard, so a cancel racing an approve
+  could end as `approved` and get claimed and run, and a cancel of a running ticket could be overwritten by a
+  runner `succeeded`/`failed` update. These methods (and ticket creation) now run under `BEGIN IMMEDIATE`, and
+  every transition `UPDATE` matches the state it read. A write that no longer matches answers
+  `409 state_changed` and changes nothing. The runner treats `state_changed` like `invalid_state`.
+
 ### Security
 
 - Cookie-authenticated API actions (`POST /api/v1/tickets/<id>/approve|reject|cancel|archive|unarchive`) now

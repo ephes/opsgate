@@ -441,3 +441,42 @@ def test_ticket_executor_rejects_unsupported_agent(tmp_path: Path) -> None:
     assert ticket["state"] == "failed"
     assert ticket["result"] == "failure"
     assert ticket["result_detail"] == "unsupported_agent_shell"
+
+
+@pytest.mark.parametrize("error_code", ["invalid_state", "state_changed"])
+def test_post_status_ignores_conflict_when_ticket_moved_on(tmp_path: Path, error_code: str) -> None:
+    class ConflictApi:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def update_status(self, _: str, __: dict[str, Any]) -> dict[str, Any]:
+            self.calls += 1
+            raise RunnerApiError("conflict", status_code=409, error_code=error_code)
+
+    api = ConflictApi()
+    executor = TicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,  # type: ignore[arg-type]
+        stop_event=threading.Event(),
+        ticket_id="77777777-7777-4777-8777-777777777777",
+    )
+
+    executor._post_status(event="ticket_succeeded", state="succeeded", result="success")
+
+    assert api.calls == 1
+
+
+def test_post_status_raises_other_conflicts(tmp_path: Path) -> None:
+    class ConflictApi:
+        def update_status(self, _: str, __: dict[str, Any]) -> dict[str, Any]:
+            raise RunnerApiError("conflict", status_code=409, error_code="runner_host_mismatch")
+
+    executor = TicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=ConflictApi(),  # type: ignore[arg-type]
+        stop_event=threading.Event(),
+        ticket_id="77777777-7777-4777-8777-777777777777",
+    )
+
+    with pytest.raises(RunnerApiError):
+        executor._post_status(event="heartbeat")

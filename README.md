@@ -23,6 +23,7 @@ Phase 4B implementation scope in this repository:
 - Authenticated approvers can archive `pending_approval` or terminal tickets out of the default `/tickets` queue and restore them later without deleting ticket history, logs, or artifact references.
 - New submissions reconcile expired matching open tickets before dedupe, so a stale expired recurrence does not block a fresh approvable ticket for the same `source` + `task_ref`.
 - Supported step agents are `codex` and `claude` only.
+- Cookie-authenticated API actions require CSRF proof, logout revokes the session server-side, and failed logins are throttled per client IP (see [API authentication](#api-authentication) and [Approver sessions](#approver-sessions)).
 - Login keeps passive `GET`/`HEAD` probes side-effect free and uses password-manager/autofill-friendly form markup without relaxing session or CSRF protections.
 
 ## Operator workflow guidance
@@ -109,6 +110,35 @@ Useful keys:
 - `POST /api/v1/runner/claim`
 - `POST /api/v1/runner/:id/status`
 - `GET /api/v1/health`
+
+### API authentication
+
+- `POST /api/v1/tickets` takes a submitter bearer token; `GET /api/v1/tickets/:id` takes a submitter
+  token, the runner token, or an approver session.
+- `/api/v1/runner/*` takes the runner bearer token.
+- `approve`, `reject`, `cancel`, `archive` and `unarchive` take the approver **session cookie** from
+  `/login`. Because a cookie is sent automatically, these `POST`s also need CSRF proof:
+  - the session's CSRF token in an `X-CSRF-Token` header (the same value the UI forms post as
+    `csrf_token`), or
+  - a browser-reported same-origin request (`Sec-Fetch-Site: same-origin`, or, when the browser does not send
+    `Sec-Fetch-Site`, an `Origin` equal to the OpsGate origin).
+
+  Otherwise they answer `403` with `csrf_required` (no proof) or `invalid_csrf` (wrong token). Bearer-token
+  callers are unaffected. The web UI uses its own form routes (`/tickets/:id/<action>`), which already carry
+  the form token.
+
+### Approver sessions
+
+- Sessions expire after `OPSGATE_SESSION_TIMEOUT_SECONDS`.
+- Sessions are also revoked server-side: the database keeps a session generation for the approver, and every
+  session cookie records the generation it was issued under. `POST /logout` from an authenticated session bumps
+  the generation, so a copied cookie stops working too. This signs the approver out of **every** browser.
+  Changing `OPSGATE_UI_PASSWORD_BCRYPT` bumps the generation when the service next starts.
+- Session cookies issued before this mechanism existed carry no generation; approvers sign in once more after
+  upgrading.
+- Failed logins are throttled per client IP. After 5 failures within 15 minutes, `/login` answers `429` until the
+  oldest failure is 15 minutes old, even for the correct password. A successful login clears the counter. The
+  counter is held in memory and resets when the service restarts.
 
 ## Local development
 

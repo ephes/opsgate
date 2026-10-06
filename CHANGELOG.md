@@ -2,18 +2,6 @@
 
 ## Unreleased
 
-### Fixed
-
-- A submit or runner bearer token, or a UI form CSRF token, with non-ASCII characters no longer causes a
-  500. `hmac.compare_digest` raises `TypeError` on non-ASCII `str`, so these checks now compare UTF-8 bytes,
-  like the API CSRF header check already did. Such tokens get the normal 401 or invalid-form-token response.
-- Ticket transitions no longer overwrite a concurrent change. Approve, reject, cancel, archive, unarchive and
-  runner status updates read the ticket and then wrote it without a guard, so a cancel racing an approve
-  could end as `approved` and get claimed and run, and a cancel of a running ticket could be overwritten by a
-  runner `succeeded`/`failed` update. These methods (and ticket creation) now run under `BEGIN IMMEDIATE`, and
-  every transition `UPDATE` matches the state it read. A write that no longer matches answers
-  `409 state_changed` and changes nothing. The runner treats `state_changed` like `invalid_state`.
-
 ### Security
 
 - Cookie-authenticated API actions (`POST /api/v1/tickets/<id>/approve|reject|cancel|archive|unarchive`) now
@@ -30,3 +18,26 @@
 - Existing approver sessions are invalidated once on deploy; sign in again.
 - Any script that calls the approve/reject/cancel/archive/unarchive API with a session cookie must send the
   `X-CSRF-Token` header. Nothing in ops-control or nyxmon does this today.
+
+### Changed
+
+- **Behaviour change:** after a runner restart, a step that was interrupted (no `exit_code`, no live tmux
+  session, but `session_metadata.json` shows it was started) is no longer re-run. It is marked `interrupted` and
+  the ticket fails with `result_detail = step_<n>_interrupted`; retrying needs a new, explicitly approved
+  ticket. A graceful runner shutdown now records the killed step as `interrupted`. There is no setting to
+  restore the old re-run behaviour. See "Runner restart recovery" in the README.
+
+### Fixed
+
+- A submit or runner bearer token, or a UI form CSRF token, with non-ASCII characters no longer causes a
+  500. `hmac.compare_digest` raises `TypeError` on non-ASCII `str`, so these checks now compare UTF-8 bytes,
+  like the API CSRF header check already did. Such tokens get the normal 401 or invalid-form-token response.
+- Ticket transitions no longer overwrite a concurrent change. Approve, reject, cancel, archive, unarchive and
+  runner status updates read the ticket and then wrote it without a guard, so a cancel racing an approve
+  could end as `approved` and get claimed and run, and a cancel of a running ticket could be overwritten by a
+  runner `succeeded`/`failed` update. These methods (and ticket creation) now run under `BEGIN IMMEDIATE`, and
+  every transition `UPDATE` matches the state it read. A write that no longer matches answers
+  `409 state_changed` and changes nothing. The runner treats `state_changed` like `invalid_state`.
+- The runner no longer relaunches a step whose `exit_code` already exists after a restart. Previously it started
+  a second, untracked agent session for the finished step and then reported the old result.
+- Summaries of steps resumed from an existing `summary.json` are passed to later steps once instead of twice.

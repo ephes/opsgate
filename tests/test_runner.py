@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shlex
 import threading
 from datetime import UTC, datetime, timedelta
@@ -441,6 +442,285 @@ def test_ticket_executor_rejects_unsupported_agent(tmp_path: Path) -> None:
     assert ticket["state"] == "failed"
     assert ticket["result"] == "failure"
     assert ticket["result_detail"] == "unsupported_agent_shell"
+
+
+class RecordingStubTicketExecutor(StubTicketExecutor):
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.launched_sessions: list[str] = []
+
+    def _tmux_new_session(self, *, session_name: str, script_path: Path) -> None:
+        self.launched_sessions.append(session_name)
+        super()._tmux_new_session(session_name=session_name, script_path=script_path)
+
+
+def _resume_ticket(ticket_id: str, plan: list[dict[str, str]]) -> dict[str, Any]:
+    now = datetime.now(tz=UTC)
+    return {
+        "id": ticket_id,
+        "state": "running",
+        "started_at": (now - timedelta(seconds=1)).isoformat().replace("+00:00", "Z"),
+        "max_duration_seconds": 120,
+        "execution_plan": plan,
+        "tmux_sessions": [],
+    }
+
+
+def _write_interrupted_step(
+    executor: TicketExecutor,
+    step_index: int,
+    step: dict[str, str],
+    *,
+    exit_code: int | None,
+) -> Any:
+    step_paths = executor._prepare_step_paths(step_index, step)
+    step_paths.step_dir.mkdir(parents=True, exist_ok=True)
+    step_paths.metadata_path.write_text(
+        json.dumps(
+            {
+                "step_index": step_index,
+                "role": step["role"],
+                "agent": step["agent"],
+                "session_name": f"job-{executor.ticket_id}-{step_index + 1:02d}-{step['role']}",
+                "status": "running",
+                "started_at": "2026-01-01T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    step_paths.prompt_path.write_text(step["prompt_markdown"] + "\n", encoding="utf-8")
+    step_paths.log_path.write_text("original run output\n", encoding="utf-8")
+    if exit_code is not None:
+        step_paths.exit_code_path.write_text(f"{exit_code}\n", encoding="utf-8")
+    return step_paths
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "expected_state", "expected_detail"),
+    [(0, "succeeded", "completed_1_steps"), (3, "failed", "step_1_exit_code_3")],
+)
+def test_resume_adopts_existing_exit_code_without_relaunch(
+    tmp_path: Path, exit_code: int, expected_state: str, expected_detail: str
+) -> None:
+    ticket_id = "77777777-7777-4777-8777-777777777777"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    step_paths = _write_interrupted_step(executor, 0, plan[0], exit_code=exit_code)
+
+    executor.run(initial_ticket=ticket)
+
+    assert executor.launched_sessions == []
+    assert not step_paths.script_path.exists()
+    assert ticket["state"] == expected_state
+    assert ticket["result_detail"] == expected_detail
+    summary = json.loads(step_paths.summary_path.read_text(encoding="utf-8"))
+    assert summary["exit_code"] == exit_code
+    assert summary["started_at"] == "2026-01-01T00:00:00Z"
+    assert summary["summary_markdown"] == "original run output"
+
+
+def test_resume_fails_interrupted_step_without_relaunch(tmp_path: Path) -> None:
+    ticket_id = "88888888-8888-4888-8888-888888888888"
+    plan = [
+        {"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"},
+        {"role": "reviewer", "agent": "claude", "prompt_markdown": "review"},
+    ]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    step_paths = _write_interrupted_step(executor, 0, plan[0], exit_code=None)
+
+    executor.run(initial_ticket=ticket)
+
+    assert executor.launched_sessions == []
+    assert not step_paths.script_path.exists()
+    assert not step_paths.summary_path.exists()
+    assert ticket["state"] == "failed"
+    assert ticket["result"] == "failure"
+    assert ticket["result_detail"] == "step_1_interrupted"
+    metadata = json.loads(step_paths.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["status"] == "interrupted"
+    assert metadata["started_at"] == "2026-01-01T00:00:00Z"
+    assert "finished_at" in metadata
+    details = [str(update.get("result_detail", "")) for update in api.updates]
+    assert "step_2_started" not in details
+    assert ticket["tmux_sessions"][0]["status"] == "interrupted"
+
+
+def test_resume_reattaches_live_session_without_relaunch(tmp_path: Path) -> None:
+    ticket_id = "99999999-9999-4999-8999-999999999999"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+
+    class FinishingExecutor(RecordingStubTicketExecutor):
+        def _tmux_has_session(self, session_name: str) -> bool:
+            del session_name
+            # The live session finishes while the resumed runner polls it.
+            step_paths = self._prepare_step_paths(0, plan[0])
+            step_paths.exit_code_path.write_text("0\n", encoding="utf-8")
+            return True
+
+    executor = FinishingExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=True,
+        auto_complete_exit_code=0,
+    )
+    _write_interrupted_step(executor, 0, plan[0], exit_code=None)
+
+    executor.run(initial_ticket=ticket)
+
+    assert executor.launched_sessions == []
+    assert ticket["state"] == "succeeded"
+
+
+def test_resumed_summary_appears_once_in_next_step_context(tmp_path: Path) -> None:
+    ticket_id = "abababab-abab-4bab-8bab-abababababab"
+    plan = [
+        {"role": "investigator", "agent": "codex", "prompt_markdown": "inspect"},
+        {"role": "reviewer", "agent": "claude", "prompt_markdown": "review"},
+    ]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    first_step_paths = executor._prepare_step_paths(0, plan[0])
+    first_step_paths.step_dir.mkdir(parents=True, exist_ok=True)
+    first_step_paths.summary_path.write_text(
+        '{"status":"succeeded","summary_markdown":"already done"}\n',
+        encoding="utf-8",
+    )
+
+    executor.run(initial_ticket=ticket)
+
+    second_step_paths = executor._prepare_step_paths(1, plan[1])
+    context = json.loads(second_step_paths.context_path.read_text(encoding="utf-8"))
+    assert context["step_index"] == 1
+    assert context["prior_step_summaries"] == [{"status": "succeeded", "summary_markdown": "already done"}]
+    assert len(executor.launched_sessions) == 1
+    assert ticket["state"] == "succeeded"
+
+
+def test_runner_shutdown_marks_running_step_interrupted(tmp_path: Path) -> None:
+    ticket_id = "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+    stop_event = threading.Event()
+
+    class StoppingExecutor(RecordingStubTicketExecutor):
+        def _tmux_new_session(self, *, session_name: str, script_path: Path) -> None:
+            super()._tmux_new_session(session_name=session_name, script_path=script_path)
+            self._has_session = True
+            stop_event.set()
+
+    executor = StoppingExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=stop_event,
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=None,
+    )
+
+    executor.run(initial_ticket=ticket)
+
+    step_paths = executor._prepare_step_paths(0, plan[0])
+    metadata = json.loads(step_paths.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["status"] == "interrupted"
+    assert executor.killed_sessions == [executor.launched_sessions[0]]
+    assert ticket["state"] == "running"
+
+
+@pytest.mark.parametrize("failure", ["malformed_json", "invalid_utf8", "read_error"])
+def test_resume_fails_closed_on_unreadable_metadata(tmp_path: Path, monkeypatch, failure: str) -> None:
+    ticket_id = "efefefef-efef-4fef-8fef-efefefefefef"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    step_paths = _write_interrupted_step(executor, 0, plan[0], exit_code=None)
+    if failure == "malformed_json":
+        step_paths.metadata_path.write_text("{not json", encoding="utf-8")
+    elif failure == "invalid_utf8":
+        step_paths.metadata_path.write_bytes(b"\xff\xfe{")
+    else:
+        original_read_text = Path.read_text
+        metadata_path = step_paths.metadata_path
+
+        def _read_text(self: Path, *args: Any, **kwargs: Any) -> str:
+            if self == metadata_path:
+                raise PermissionError("denied")
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _read_text)
+
+    executor.run(initial_ticket=ticket)
+
+    assert executor.launched_sessions == []
+    assert ticket["state"] == "failed"
+    assert ticket["result_detail"] == "step_1_interrupted"
+
+
+def test_resume_adopts_exit_code_written_during_session_probe(tmp_path: Path) -> None:
+    ticket_id = "fafafafa-fafa-4afa-8afa-fafafafafafa"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    api = FakeApi(ticket)
+
+    class RacingExecutor(RecordingStubTicketExecutor):
+        def _tmux_has_session(self, session_name: str) -> bool:
+            del session_name
+            # The session writes exit_code and exits right as the runner probes it.
+            self._prepare_step_paths(0, plan[0]).exit_code_path.write_text("0\n", encoding="utf-8")
+            return False
+
+    executor = RacingExecutor(
+        settings=_runner_settings(tmp_path),
+        api=api,
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    _write_interrupted_step(executor, 0, plan[0], exit_code=None)
+
+    executor.run(initial_ticket=ticket)
+
+    assert executor.launched_sessions == []
+    assert ticket["state"] == "succeeded"
 
 
 @pytest.mark.parametrize("error_code", ["invalid_state", "state_changed"])

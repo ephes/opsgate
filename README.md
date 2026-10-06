@@ -118,6 +118,10 @@ just run
 just run-runner
 ```
 
+GitHub Actions (`.github/workflows/ci.yml`) runs the `just check` commands (tests,
+mypy, ruff) on Python 3.11 and 3.14 for every push and pull request. It needs no
+secrets.
+
 Default UI routes:
 
 - `GET /login`

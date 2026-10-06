@@ -13,6 +13,7 @@ Phase 4B implementation scope in this repository:
 - Runner uses tmux sessions per step and writes disk artifacts (`context.json`, `prompt.md`, `session.log`, `summary.json`).
 - Runner enforces ticket-wide timeout and deterministic timeout results.
 - Runner supports restart recovery from local runner state files under `{{ execution_data_dir }}/runner-state`.
+- Runner restart recovery never launches a step a second time; see [Runner restart recovery](#runner-restart-recovery).
 - OpenClaw submit token is optional for this slice (Nyxmon producer is primary).
 - Login supports safe deep-link redirect (`/login?next=/tickets/<id>`) for approval-link UX.
 - Authenticated approvers can create manual tickets in the web UI with a mobile-first multi-step workflow editor.
@@ -61,6 +62,32 @@ say so explicitly and explain how source-of-truth will be reconciled afterward.
 - API/UI process is expected to run as `control_service_user`.
 - Runner process is expected to run as `ops`.
 - v1 access assumptions are Tailscale-only context.
+
+## Runner restart recovery
+
+Step sessions run in a separate tmux server, so a step can keep running, or finish, while the runner is down.
+On restart the runner re-drives every `running` ticket it finds (runner state files, live `job-<ticket>-*` tmux
+sessions, and session artifact directories). Steps whose `summary.json` says `succeeded` are skipped and their
+summaries are passed once to later steps. For the first unfinished step the runner writes
+`session_metadata.json` (status `running`, `started_at`) before it ever launches the step, and uses it as the
+resume marker:
+
+- `exit_code` exists: the runner adopts it, writes `summary.json` from the existing log and continues or fails
+  the ticket by that code. The step is not launched again.
+- The step's tmux session is still alive: the runner re-attaches, polls it and keeps tracking it for
+  cancel/timeout.
+- Metadata exists (even if unreadable), but there is no `exit_code` and no session: the step is failed as interrupted. Its metadata
+  status becomes `interrupted` and the ticket fails with `result_detail = step_<n>_interrupted`. Nothing is
+  re-run; to retry, submit and approve a new ticket after checking what the half-run step already changed.
+
+A graceful runner shutdown (SIGTERM/SIGINT) kills the active step session and marks the step `interrupted`, so
+the restarted runner fails that ticket rather than repeating the step. A step that wrote its `exit_code` before
+shutdown is adopted on restart. A crash between writing the metadata and starting the tmux session is also
+treated as interrupted, even though the agent may never have run; this errs on the side of not running a
+privileged step twice.
+
+There is no setting to restore automatic re-runs. One could be added later (off by default); it would still
+need to adopt an existing `exit_code` rather than relaunch.
 
 ## Configuration
 

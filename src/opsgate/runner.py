@@ -220,7 +220,9 @@ class TicketExecutor:
 
         tmux_sessions_raw = ticket.get("tmux_sessions", [])
         tmux_sessions = tmux_sessions_raw if isinstance(tmux_sessions_raw, list) else []
-        prior_summaries = self._load_completed_summaries(execution_plan)
+        # Summaries of steps that already succeeded are collected exactly once,
+        # as the loop below walks past them.
+        prior_summaries: list[dict[str, Any]] = []
 
         for step_index, step in enumerate(execution_plan):
             if self.stop_event.is_set():
@@ -284,18 +286,6 @@ class TicketExecutor:
             tmux_sessions=tmux_sessions,
         )
 
-    def _load_completed_summaries(self, execution_plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        summaries: list[dict[str, Any]] = []
-        for step_index, step in enumerate(execution_plan):
-            step_paths = self._prepare_step_paths(step_index, step)
-            summary = self._load_summary(step_paths.summary_path)
-            if summary is None:
-                break
-            if str(summary.get("status", "")).lower() != "succeeded":
-                break
-            summaries.append(summary)
-        return summaries
-
     def _prepare_step_paths(self, step_index: int, step: dict[str, Any]) -> StepPaths:
         role_slug = _slugify(str(step.get("role", "step")))
         step_name = f"{step_index + 1:02d}-{role_slug}"
@@ -344,21 +334,46 @@ class TicketExecutor:
             tmux_tmpdir=self.settings.tmux_tmpdir,
         )
 
-        context_payload = {
-            "ticket_id": self.ticket_id,
-            "step_index": step_index,
-            "step_role": step_role,
-            "step_agent": step_agent,
-            "prior_step_summaries": prior_summaries,
-        }
-        _atomic_write_json(step_paths.context_path, context_payload)
-        _atomic_write_json(self._ticket_root / "context.json", context_payload)
-        step_paths.prompt_path.write_text(prompt_markdown + "\n", encoding="utf-8")
-        if prior_summaries:
-            previous_summary = json.dumps(prior_summaries[-1], sort_keys=True, indent=2)
-            step_paths.previous_summary_path.write_text(previous_summary + "\n", encoding="utf-8")
+        # Resume rule: session metadata is written (status "running") before a
+        # step is ever launched, so its presence means an earlier runner already
+        # started this step. Such a step is never launched a second time:
+        # - an existing exit_code is adopted as the step result;
+        # - a still-live tmux session is re-attached and polled;
+        # - otherwise the step is failed as interrupted and the ticket needs a
+        #   fresh, explicitly approved submission.
+        # The marker is the file's existence: unreadable metadata still means the
+        # step was started, so it fails closed instead of relaunching.
+        metadata_present = step_paths.metadata_path.exists()
+        previous_meta = self._load_summary(step_paths.metadata_path) if metadata_present else None
+        exit_code_present = step_paths.exit_code_path.exists()
+        session_alive = False if exit_code_present else self._tmux_has_session(session_name)
+        if not exit_code_present and not session_alive:
+            # The session may have written exit_code and exited between the two checks.
+            exit_code_present = step_paths.exit_code_path.exists()
+        resuming = metadata_present or exit_code_present or session_alive
 
-        session_meta = {
+        if not resuming:
+            context_payload = {
+                "ticket_id": self.ticket_id,
+                "step_index": step_index,
+                "step_role": step_role,
+                "step_agent": step_agent,
+                "prior_step_summaries": prior_summaries,
+            }
+            _atomic_write_json(step_paths.context_path, context_payload)
+            _atomic_write_json(self._ticket_root / "context.json", context_payload)
+            step_paths.prompt_path.write_text(prompt_markdown + "\n", encoding="utf-8")
+            if prior_summaries:
+                previous_summary = json.dumps(prior_summaries[-1], sort_keys=True, indent=2)
+                step_paths.previous_summary_path.write_text(previous_summary + "\n", encoding="utf-8")
+
+        started_at = isoformat_z(utc_now())
+        if previous_meta is not None:
+            previous_started_at = str(previous_meta.get("started_at", "")).strip()
+            if previous_started_at:
+                started_at = previous_started_at
+
+        session_meta: dict[str, Any] = {
             "step_index": step_index,
             "role": step_role,
             "agent": step_agent,
@@ -369,18 +384,28 @@ class TicketExecutor:
             "log_path": str(step_paths.log_path),
             "summary_path": str(step_paths.summary_path),
             "status": "running",
-            "started_at": isoformat_z(utc_now()),
+            "started_at": started_at,
         }
+        if resuming:
+            session_meta["resumed_at"] = isoformat_z(utc_now())
+
+        if resuming and not exit_code_present and not session_alive:
+            session_meta["status"] = "interrupted"
+            session_meta["finished_at"] = isoformat_z(utc_now())
+            _atomic_write_json(step_paths.metadata_path, session_meta)
+            self._upsert_tmux_session(tmux_sessions, session_meta)
+            return StepOutcome(kind="failed", detail=f"step_{step_index + 1}_interrupted")
+
         _atomic_write_json(step_paths.metadata_path, session_meta)
 
         tmux_entry = self._upsert_tmux_session(tmux_sessions, session_meta)
         self._post_status(
             event="step_started",
-            result_detail=f"step_{step_index + 1}_started",
+            result_detail=f"step_{step_index + 1}_{'resumed' if resuming else 'started'}",
             tmux_sessions=tmux_sessions,
         )
 
-        if not self._tmux_has_session(session_name):
+        if not resuming:
             try:
                 self._create_step_script(
                     step_paths=step_paths,
@@ -397,10 +422,16 @@ class TicketExecutor:
         heartbeat_interval = max(1, self.settings.runner_heartbeat_interval_seconds)
         next_heartbeat = time.monotonic() + heartbeat_interval
 
-        while True:
+        while not exit_code_present:
             if self.stop_event.is_set():
+                if step_paths.exit_code_path.exists():
+                    # The step finished just before shutdown; leave its exit code
+                    # for the next runner to adopt instead of marking it interrupted.
+                    return StepOutcome(kind="canceled", detail="runner_shutdown")
                 self._tmux_kill_session(session_name)
-                tmux_entry["status"] = "canceled"
+                tmux_entry["status"] = "interrupted"
+                tmux_entry["finished_at"] = isoformat_z(utc_now())
+                _atomic_write_json(step_paths.metadata_path, tmux_entry)
                 return StepOutcome(kind="canceled", detail="runner_shutdown")
 
             if utc_now() >= deadline:
@@ -546,7 +577,9 @@ class TicketExecutor:
             return None
         try:
             loaded = json.loads(summary_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, ValueError):
+            # Unreadable, undecodable or malformed JSON (JSONDecodeError and
+            # UnicodeDecodeError are ValueErrors) is treated as unavailable.
             return None
         if not isinstance(loaded, dict):
             return None

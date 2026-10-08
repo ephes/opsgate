@@ -524,7 +524,10 @@ def create_app(
             return
         session_token = ensure_csrf_token()
         form_token = request.form.get("csrf_token", "")
-        if not isinstance(form_token, str) or not hmac.compare_digest(session_token, form_token):
+        # Compare bytes: compare_digest raises TypeError on non-ASCII str.
+        if not isinstance(form_token, str) or not hmac.compare_digest(
+            session_token.encode("utf-8"), form_token.encode("utf-8")
+        ):
             raise ServiceError("Invalid form token", 400, "invalid_csrf")
 
     @app.context_processor

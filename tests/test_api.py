@@ -2463,3 +2463,86 @@ def test_login_throttle_bounds_tracked_clients() -> None:
     # The most recent offender is still tracked.
     throttle.record_failure("10.0.0.4")
     assert throttle.is_locked("10.0.0.4")
+
+
+NON_ASCII_TOKEN = "té-über"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "error"),
+    [
+        ("post", "/api/v1/tickets", "invalid_submit_token"),
+        ("get", "/api/v1/tickets/missing-ticket", "auth_required"),
+        ("post", "/api/v1/runner/claim", "invalid_runner_token"),
+        ("post", "/api/v1/runner/missing-ticket/status", "invalid_runner_token"),
+    ],
+)
+def test_api_bearer_endpoints_reject_non_ascii_token(client: Any, method: str, path: str, error: str) -> None:
+    response = getattr(client, method)(path, headers=auth_headers(NON_ASCII_TOKEN), json={})
+
+    assert response.status_code == 401
+    assert response.get_json()["error"] == error
+
+
+@pytest.mark.parametrize("action", ["approve", "reject", "cancel", "archive", "unarchive"])
+def test_api_session_actions_reject_non_ascii_csrf_header(client: Any, action: str) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Non-ASCII CSRF",
+        summary="API CSRF header with non-ASCII characters",
+        task_ref=f"non-ascii-api-csrf-{action}",
+    )
+    login(client)
+
+    response = client.post(
+        f"/api/v1/tickets/{ticket_id}/{action}",
+        headers={"X-CSRF-Token": NON_ASCII_TOKEN},
+        json={"reason": "nope"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "invalid_csrf"
+
+
+@pytest.mark.parametrize("action", ["approve", "reject", "cancel", "archive", "unarchive"])
+def test_ui_ticket_actions_reject_non_ascii_form_token(client: Any, action: str) -> None:
+    ticket_id = create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Non-ASCII form token",
+        summary="UI form CSRF token with non-ASCII characters",
+        task_ref=f"non-ascii-ui-csrf-{action}",
+    )
+    login(client)
+
+    response = client.post(
+        f"/tickets/{ticket_id}/{action}",
+        data={"csrf_token": NON_ASCII_TOKEN, "reason": "nope"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"/tickets/{ticket_id}"
+    assert "Invalid form token" in client.get(response.headers["Location"]).get_data(as_text=True)
+
+
+@pytest.mark.parametrize("path", ["/login", "/logout", "/tickets"])
+def test_ui_forms_reject_non_ascii_form_token(client: Any, path: str) -> None:
+    if path != "/login":
+        login(client)
+    else:
+        client.get("/login")
+
+    response = client.post(
+        path,
+        data={"csrf_token": NON_ASCII_TOKEN, "username": "opsgate-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    if path != "/login":
+        # The rejected POST must not have logged the approver out.
+        assert client.get("/tickets", follow_redirects=False).status_code == 200
+    else:
+        assert client.get("/tickets", follow_redirects=False).status_code == 302

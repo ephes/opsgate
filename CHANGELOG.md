@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- A submit or runner bearer token, or a UI form CSRF token, with non-ASCII characters no longer causes a
+  500. `hmac.compare_digest` raises `TypeError` on non-ASCII `str`, so these checks now compare UTF-8 bytes,
+  like the API CSRF header check already did. Such tokens get the normal 401 or invalid-form-token response.
 - Ticket transitions no longer overwrite a concurrent change. Approve, reject, cancel, archive, unarchive and
   runner status updates read the ticket and then wrote it without a guard, so a cancel racing an approve
   could end as `approved` and get claimed and run, and a cancel of a running ticket could be overwritten by a

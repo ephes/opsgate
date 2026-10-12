@@ -65,11 +65,16 @@ class SettingsError(RuntimeError):
     pass
 
 
-def parse_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
+def parse_bool(value: str | None, default: bool = False, *, env_name: str | None = None) -> bool:
+    if value is None or not value.strip():
         return default
     normalized = value.strip().lower()
-    return normalized in {"1", "true", "yes", "on"}
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    setting_name = env_name or "boolean setting"
+    raise SettingsError(f"{setting_name} must be a boolean (1/true/yes/on or 0/false/no/off)")
 
 
 def parse_int(value: str | None, default: int, *, env_name: str | None = None) -> int:
@@ -128,15 +133,23 @@ def load_settings() -> OpsGateSettings:
     session_secret = os.environ.get("OPSGATE_SESSION_SECRET", "").strip()
     if len(session_secret) < 20:
         raise SettingsError("OPSGATE_SESSION_SECRET is required and must be at least 20 characters")
-    trust_proxy_headers = parse_bool(os.environ.get("OPSGATE_TRUST_PROXY_HEADERS"), default=False)
-    session_cookie_secure = parse_bool(os.environ.get("OPSGATE_SESSION_COOKIE_SECURE"), default=False)
+    trust_proxy_headers = parse_bool(
+        os.environ.get("OPSGATE_TRUST_PROXY_HEADERS"), default=False, env_name="OPSGATE_TRUST_PROXY_HEADERS"
+    )
+    session_cookie_secure = parse_bool(
+        os.environ.get("OPSGATE_SESSION_COOKIE_SECURE"), default=False, env_name="OPSGATE_SESSION_COOKIE_SECURE"
+    )
 
     max_duration_default = parse_int(
         os.environ.get("OPSGATE_MAX_DURATION_SECONDS_DEFAULT"),
         3600,
         env_name="OPSGATE_MAX_DURATION_SECONDS_DEFAULT",
     )
-    policy_floor = parse_bool(os.environ.get("OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP"), default=False)
+    policy_floor = parse_bool(
+        os.environ.get("OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP"),
+        default=False,
+        env_name="OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP",
+    )
     session_timeout_seconds = parse_int(
         os.environ.get("OPSGATE_UI_SESSION_TIMEOUT_SECONDS"),
         28800,
@@ -158,16 +171,18 @@ def load_settings() -> OpsGateSettings:
     if len(operator_token) < 20:
         raise SettingsError("Submit token for operator must be at least 20 characters")
 
+    openclaw_policy_floor = parse_bool(
+        os.environ.get("OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP"),
+        default=policy_floor,
+        env_name="OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP",
+    )
     submitter_policies_list: list[SubmitterPolicy] = []
     if openclaw_token:
         submitter_policies_list.append(
             SubmitterPolicy(
                 source="openclaw",
                 token=openclaw_token,
-                require_reviewer_step_floor=parse_bool(
-                    os.environ.get("OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP"),
-                    default=policy_floor,
-                ),
+                require_reviewer_step_floor=openclaw_policy_floor,
             )
         )
     submitter_policies_list.append(
@@ -177,6 +192,7 @@ def load_settings() -> OpsGateSettings:
             require_reviewer_step_floor=parse_bool(
                 os.environ.get("OPSGATE_SUBMIT_POLICY_NYXMON_REQUIRE_REVIEWER_STEP"),
                 default=policy_floor,
+                env_name="OPSGATE_SUBMIT_POLICY_NYXMON_REQUIRE_REVIEWER_STEP",
             ),
         )
     )
@@ -187,12 +203,15 @@ def load_settings() -> OpsGateSettings:
             require_reviewer_step_floor=parse_bool(
                 os.environ.get("OPSGATE_SUBMIT_POLICY_OPERATOR_REQUIRE_REVIEWER_STEP"),
                 default=policy_floor,
+                env_name="OPSGATE_SUBMIT_POLICY_OPERATOR_REQUIRE_REVIEWER_STEP",
             ),
         )
     )
     submitter_policies = tuple(submitter_policies_list)
 
-    require_tailscale = parse_bool(os.environ.get("OPSGATE_REQUIRE_TAILSCALE_CONTEXT"), default=True)
+    require_tailscale = parse_bool(
+        os.environ.get("OPSGATE_REQUIRE_TAILSCALE_CONTEXT"), default=True, env_name="OPSGATE_REQUIRE_TAILSCALE_CONTEXT"
+    )
     allowed_cidrs_raw = os.environ.get("OPSGATE_ALLOWED_CIDRS", ",".join(DEFAULT_ALLOWED_CIDRS))
     allowed_cidrs = tuple(c.strip() for c in allowed_cidrs_raw.split(",") if c.strip())
     if not allowed_cidrs:

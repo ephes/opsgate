@@ -192,6 +192,14 @@ matches the state it read (compare-and-set).
   oldest failure is 15 minutes old, even for the correct password. A successful login clears the counter. The
   counter is held in memory and resets when the service restarts.
 
+## Log previews
+
+Ticket detail previews and runner step summaries read only the final 64 KiB of a log,
+show up to 40 lines, and retain at most the final 2 KiB of each line. Omitted bytes
+or lines add a `[log preview truncated]` notice. UTF-8 characters split by a byte
+boundary are safely replaced. The dedicated **Open full log** page still shows the
+complete retained log.
+
 ## Local development
 
 ```bash

@@ -44,6 +44,8 @@
 
 ### Fixed
 
+- JSON nesting beyond 64 object/array levels and decoder recursion errors now return a bounded validation error in API requests and manual context forms.
+
 - Runner JSON publication cleans up owned temporary files on failure while preserving the prior destination
   and original error.
 

@@ -2753,3 +2753,104 @@ def test_non_ascii_username_is_rejected_without_error(client: Any) -> None:
     )
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/login")
+
+
+def database_snapshot(client: Any) -> list[list[tuple[Any, ...]]]:
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        return [conn.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+                for table in ("tickets", "audit_events", "runner_heartbeats")]
+
+
+@pytest.mark.parametrize("body", ['{"context":' + '[' * 2000 + '0' + ']' * 2000 + '}'], ids=['deep'])
+@pytest.mark.parametrize("endpoint", [
+    "/api/v1/tickets", "/api/v1/runner/missing/status", "/api/v1/runner/claim",
+    "/api/v1/tickets/{id}/reject", "/api/v1/tickets/{id}/cancel",
+])
+def test_json_decode_errors_are_domain_responses(
+    client: Any, endpoint: str, body: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = runner_headers() if "runner" in endpoint else auth_headers("nyxmon-token-000000000000")
+    if "{id}" in endpoint:
+        ticket_id = create_ticket(client, token="nyxmon-token-000000000000", title="Deep", summary="Reject deep JSON")
+        login(client)
+        headers = csrf_headers(client)
+        endpoint = endpoint.replace("{id}", ticket_id)
+    before = database_snapshot(client)
+    with monkeypatch.context() as patch:
+        if body != "{":
+            def too_deep(*args: Any, **kwargs: Any) -> Any:
+                raise RecursionError("decoder nesting limit")
+            original_loads = client.application.json.loads
+            def request_loads(value: Any, *args: Any, **kwargs: Any) -> Any:
+                if isinstance(value, bytes) and value.startswith(b'{"context":'):
+                    return too_deep()
+                return original_loads(value, *args, **kwargs)
+            patch.setattr(client.application.json, "loads", request_loads)
+        response = client.post(endpoint, headers=headers, data=body, content_type="application/json")
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_json"
+    assert database_snapshot(client) == before
+
+
+def test_manual_context_rejects_excessive_nesting(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    login(client)
+    before = database_snapshot(client)
+    def too_deep(*args: Any, **kwargs: Any) -> Any:
+        raise RecursionError("decoder nesting limit")
+
+    original_loads = json.loads
+
+    def context_loads(value: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(value, str) and value.startswith('{"nested":'):
+            return too_deep()
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(json, "loads", context_loads)
+    response = client.post("/tickets", data={
+        "csrf_token": session_csrf_token(client), "title": "Nested", "summary": "Nested context",
+        "steps-0-role": "investigator", "steps-0-agent": "codex", "steps-0-prompt_markdown": "Inspect",
+        "context_json": '{"nested":' + '[' * 2000 + '0' + ']' * 2000 + '}',
+    })
+    assert response.status_code == 400
+    assert "context_json must be valid JSON" in response.get_data(as_text=True)
+    assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("depth", [64, 65, 2000])
+def test_real_json_nesting_limit(client: Any, depth: int) -> None:
+    before = database_snapshot(client)
+    body = ('{"title":"Nesting","summary":"Boundary","execution_plan":'
+            '[{"role":"investigator","agent":"codex","prompt_markdown":"Inspect"}],'
+            '"context":{"nested":' + '[' * (depth - 2) + '0' + ']' * (depth - 2) + '}}')
+    response = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"),
+                           data=body, content_type="application/json")
+    if depth == 64:
+        assert response.status_code == 201
+    else:
+        assert response.status_code == 400
+        assert response.get_json()["error"] == "invalid_json"
+        assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("depth", [64, 65, 2000])
+def test_real_manual_context_nesting_limit(client: Any, depth: int) -> None:
+    login(client)
+    before = database_snapshot(client)
+    response = client.post("/tickets", data={
+        "csrf_token": session_csrf_token(client), "title": "Nested", "summary": "Nested context",
+        "steps-0-role": "investigator", "steps-0-agent": "codex", "steps-0-prompt_markdown": "Inspect",
+        "context_json": '{"nested":' + '[' * (depth - 1) + '0' + ']' * (depth - 1) + '}',
+    })
+    assert response.status_code == (302 if depth == 64 else 400)
+    if depth != 64:
+        assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("endpoint", ["/api/v1/tickets", "/api/v1/runner/missing/status"])
+def test_malformed_required_json_retains_domain_response(client: Any, endpoint: str) -> None:
+    before = database_snapshot(client)
+    headers = runner_headers() if "runner" in endpoint else auth_headers("nyxmon-token-000000000000")
+    response = client.post(endpoint, headers=headers, data="{", content_type="application/json")
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_json"
+    assert database_snapshot(client) == before

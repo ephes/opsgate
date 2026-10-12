@@ -419,6 +419,17 @@ def create_app(
 
         return []
 
+    def check_json_depth(value: Any, *, code: str) -> None:
+        pending = [(value, 0)]
+        while pending:
+            item, depth = pending.pop()
+            if isinstance(item, dict | list):
+                depth += 1
+                if depth > 64:
+                    raise ServiceError("JSON nesting exceeds 64 levels", 400, code)
+                children = item.values() if isinstance(item, dict) else item
+                pending.extend((child, depth) for child in children)
+
     def build_manual_ticket_payload() -> dict[str, object]:
         operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")
         title = request.form.get("title", "").strip()
@@ -443,8 +454,12 @@ def create_app(
         if context_raw:
             try:
                 context = json.loads(context_raw)
+            except RecursionError as exc:
+                raise ServiceError("context_json must be valid JSON: nesting is too deep",
+                                   400, "invalid_context_json") from exc
             except json.JSONDecodeError as exc:
                 raise ServiceError(f"context_json must be valid JSON: {exc.msg}", 400, "invalid_context_json") from exc
+            check_json_depth(context, code="invalid_context_json")
             if not isinstance(context, dict):
                 raise ServiceError("context_json must decode to an object", 400, "invalid_context_json")
             payload["context"] = context
@@ -649,6 +664,14 @@ def create_app(
             return jsonify({"error": "forbidden", "message": "Access denied"}), 403
         return render_template("forbidden.html"), 403
 
+    def parse_request_json() -> Any:
+        try:
+            payload = request.get_json(silent=True)
+        except RecursionError as exc:
+            raise ServiceError("JSON nesting is too deep", 400, "invalid_json") from exc
+        check_json_depth(payload, code="invalid_json")
+        return payload
+
     @app.get("/api/v1/health")
     def api_health() -> ResponseReturnValue:
         return jsonify(service.health()), 200
@@ -660,7 +683,7 @@ def create_app(
         if submitter is None:
             raise ServiceError("Submit token required", 401, "invalid_submit_token")
 
-        payload = request.get_json(silent=True)
+        payload = parse_request_json()
         if not isinstance(payload, dict):
             raise ServiceError("JSON object required", 400, "invalid_json")
 
@@ -700,7 +723,7 @@ def create_app(
     @require_approver_session
     def api_reject_ticket(ticket_id: str) -> ResponseReturnValue:
         approver = str(request.environ["opsgate.approver"])
-        payload = request.get_json(silent=True) or {}
+        payload = parse_request_json() or {}
         reason = str(payload.get("reason", "")).strip()
         ticket = service.reject_ticket(
             ticket_id,
@@ -715,7 +738,7 @@ def create_app(
     @require_approver_session
     def api_cancel_ticket(ticket_id: str) -> ResponseReturnValue:
         approver = str(request.environ["opsgate.approver"])
-        payload = request.get_json(silent=True) or {}
+        payload = parse_request_json() or {}
         reason = str(payload.get("reason", "")).strip()
         ticket = service.cancel_ticket(
             ticket_id,
@@ -753,7 +776,7 @@ def create_app(
     @app.post("/api/v1/runner/claim")
     @require_runner_token
     def api_runner_claim() -> ResponseReturnValue:
-        payload = request.get_json(silent=True) or {}
+        payload = parse_request_json() or {}
         runner_host = str(payload.get("runner_host", "")).strip() or get_client_ip() or "runner"
         ticket = service.claim_ticket(
             runner_host=runner_host,
@@ -767,7 +790,7 @@ def create_app(
     @app.post("/api/v1/runner/<ticket_id>/status")
     @require_runner_token
     def api_runner_status(ticket_id: str) -> ResponseReturnValue:
-        payload = request.get_json(silent=True)
+        payload = parse_request_json()
         if not isinstance(payload, dict):
             raise ServiceError("JSON object required", 400, "invalid_json")
 

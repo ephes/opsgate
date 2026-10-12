@@ -108,6 +108,12 @@ need to adopt an existing `exit_code` rather than relaunch.
 
 The service reads `OPSGATE_ENV_FILE` first (if set), then environment variables.
 
+Boolean configuration accepts `1`, `true`, `yes`, `on` and `0`, `false`, `no`, `off`,
+case-insensitively with surrounding whitespace ignored. Missing or blank values use the documented
+default (submitter reviewer policies inherit the global floor). Other values fail startup with
+`SettingsError` naming the setting, without echoing its value. This applies to proxy trust, secure
+cookies, Tailscale context and all reviewer-policy booleans.
+
 Required keys:
 
 - `OPSGATE_UI_USERNAME`

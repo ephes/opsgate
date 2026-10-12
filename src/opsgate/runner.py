@@ -134,11 +134,21 @@ def _slugify(value: str) -> str:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        json.dump(payload, handle, sort_keys=True, indent=2)
-        handle.write("\n")
-        temp_path = Path(handle.name)
-    temp_path.replace(path)
+    temp_path: Path | None = None
+    try:
+        with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temp_path = Path(handle.name)
+            json.dump(payload, handle, sort_keys=True, indent=2)
+            handle.write("\n")
+        temp_path.replace(path)
+    except BaseException:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                # Cleanup must not replace the original publication error.
+                pass
+        raise
 
 
 def _sha256(path: Path) -> str:

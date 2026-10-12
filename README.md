@@ -86,6 +86,16 @@ shutdown is adopted on restart. A crash between writing the metadata and startin
 treated as interrupted, even though the agent may never have run; this errs on the side of not running a
 privileged step twice.
 
+Status reports retry server failures up to three attempts, one second apart. If reporting remains
+unavailable, the worker leaves its state and session artifacts for recovery to adopt the existing execution.
+Transport failures and invalid JSON responses are normalized to safe runner API errors; recovery skips
+unavailable tickets and continues with independent tickets. API error diagnostics omit raw bodies and
+transport exception text. A genuine executor exception is reported as terminal failure only after owned
+tmux sessions have been stopped and their absence verified. If cleanup cannot be verified, the ticket's
+state file remains for retry; operators should inspect the retained session artifacts. Permanent API
+rejections follow this same cleanup-and-failure path rather than outage recovery. Swallowed reporting
+and claim errors log only their safe HTTP status and error category.
+
 There is no setting to restore automatic re-runs. One could be added later (off by default); it would still
 need to adopt an existing `exit_code` rather than relaunch.
 

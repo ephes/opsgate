@@ -223,6 +223,7 @@ def test_ticket_executor_resumes_from_existing_step_summary(tmp_path: Path) -> N
 def test_worker_keeps_state_file_when_status_update_unavailable(tmp_path: Path, monkeypatch) -> None:
     ticket_id = "11111111-2222-4333-8444-555555555555"
     runner = OpsGateRunner(_runner_settings(tmp_path))
+    monkeypatch.setattr(runner, "_kill_tmux_sessions_for_ticket", lambda _: None)
     runner._write_state_file(ticket_id)
 
     class FailingApi:
@@ -250,6 +251,7 @@ def test_worker_keeps_state_file_when_status_update_unavailable(tmp_path: Path, 
 def test_worker_exception_report_includes_runner_host(tmp_path: Path, monkeypatch) -> None:
     ticket_id = "66666666-6666-4666-8666-666666666666"
     runner = OpsGateRunner(_runner_settings(tmp_path))
+    monkeypatch.setattr(runner, "_kill_tmux_sessions_for_ticket", lambda _: None)
 
     class CaptureApi:
         def __init__(self) -> None:
@@ -760,3 +762,217 @@ def test_post_status_raises_other_conflicts(tmp_path: Path) -> None:
 
     with pytest.raises(RunnerApiError):
         executor._post_status(event="heartbeat")
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_worker_cleans_session_before_terminal_failure(tmp_path: Path, monkeypatch, cleanup_fails: bool) -> None:
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    ticket_id = "aaaaaaaa-1111-4111-8111-111111111111"
+    api = FakeApi({"state": "running"})
+    runner.api = api  # type: ignore[assignment]
+    runner._write_state_file(ticket_id)
+    live = [True]
+
+    def cleanup(_: str) -> None:
+        if cleanup_fails:
+            raise RuntimeError("cleanup failed")
+        live[0] = False
+
+    def explode(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("executor failed")
+
+    original_update = api.update_status
+
+    def update(ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert not live[0]
+        return original_update(ticket_id, payload)
+
+    monkeypatch.setattr(api, "update_status", update)
+    monkeypatch.setattr(TicketExecutor, "run", explode)
+    monkeypatch.setattr(runner, "_kill_tmux_sessions_for_ticket", cleanup)
+    runner._run_worker(ticket_id=ticket_id, initial_ticket=api.ticket)
+    assert runner._worker_cleanup[ticket_id] is (not cleanup_fails)
+    assert bool(api.updates) is (not cleanup_fails)
+    assert runner._worker_state_path(ticket_id).exists()
+
+
+@pytest.mark.parametrize("failures", [1, 3])
+def test_status_outage_retries_and_retains_execution(tmp_path: Path, monkeypatch, failures: int) -> None:
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    ticket_id = "aaaaaaaa-1111-4111-8111-111111111111"
+    api = FakeApi({"state": "running"})
+    runner.api = api  # type: ignore[assignment]
+    runner._write_state_file(ticket_id)
+    attempts = []
+    original_update = api.update_status
+
+    def update(ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        attempts.append(payload)
+        if len(attempts) <= failures:
+            raise RunnerApiError("outage", status_code=500, error_code="http_error")
+        return original_update(ticket_id, payload)
+
+    def run(executor: TicketExecutor, **kwargs: Any) -> None:
+        executor._post_status(event="heartbeat")
+
+    monkeypatch.setattr(api, "update_status", update)
+    monkeypatch.setattr(TicketExecutor, "run", run)
+    monkeypatch.setattr(runner.stop_event, "wait", lambda _: False)
+    runner._run_worker(ticket_id=ticket_id, initial_ticket=api.ticket)
+    assert len(attempts) == (2 if failures == 1 else 3)
+    assert api.ticket["state"] == "running"
+    assert runner._worker_cleanup[ticket_id] is (failures == 1)
+    assert runner._worker_state_path(ticket_id).exists()
+
+
+@pytest.mark.parametrize("failure", ["url", "timeout", "json", "unicode", "shape"])
+def test_api_normalizes_transport_and_response_errors(tmp_path: Path, monkeypatch, failure: str) -> None:
+    from io import BytesIO
+    from urllib.error import URLError
+
+    from opsgate.runner import RunnerApiClient
+
+    def open_response(*args: Any, **kwargs: Any) -> BytesIO:
+        if failure == "url":
+            raise URLError("secret diagnostic")
+        if failure == "timeout":
+            raise TimeoutError("secret diagnostic")
+        return BytesIO({"json": b"secret malformed body", "unicode": b"\xff", "shape": b"[]"}[failure])
+
+    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    with pytest.raises(RunnerApiError) as caught:
+        RunnerApiClient(_runner_settings(tmp_path)).get_ticket("ticket")
+    assert caught.value.error_code == ("transport_error" if failure in {"url", "timeout"} else "invalid_response")
+    assert "secret" not in str(caught.value)
+
+
+def test_recovery_transport_outage_isolated_and_state_retained(tmp_path: Path, monkeypatch) -> None:
+    from urllib.error import URLError
+
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    ids = ["aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222"]
+    for ticket_id in ids:
+        runner._write_state_file(ticket_id)
+    calls = []
+
+    def open_response(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args[0].full_url)
+        raise URLError("offline")
+
+    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: set())
+    runner._recover_inflight_tickets(include_artifacts=False)
+    assert len(calls) == 2
+    assert all(runner._worker_state_path(ticket_id).exists() for ticket_id in ids)
+
+
+@pytest.mark.parametrize("outage_persists", [False, True])
+def test_running_heartbeat_outage_never_fails_live_session(tmp_path: Path, monkeypatch, outage_persists: bool) -> None:
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    ticket_id = "aaaaaaaa-1111-4111-8111-111111111111"
+    ticket: dict[str, Any] = {
+        "id": ticket_id, "state": "running", "max_duration_seconds": 120,
+        "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "inspect"}],
+        "tmux_sessions": [],
+    }
+    api = FakeApi(ticket)
+    runner.api = api  # type: ignore[assignment]
+    runner._write_state_file(ticket_id)
+    executor = StubTicketExecutor(
+        settings=runner.settings, api=api, stop_event=runner.stop_event, ticket_id=ticket_id,
+        has_session=True, auto_complete_exit_code=None,
+    )
+    heartbeats = []
+    original_update = api.update_status
+
+    def update(ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload["event"] == "heartbeat":
+            heartbeats.append(payload)
+            if outage_persists or len(heartbeats) == 1:
+                raise RunnerApiError("outage", status_code=500, error_code="http_error")
+            paths = executor._prepare_step_paths(0, ticket["execution_plan"][0])
+            paths.exit_code_path.write_text("0\n")
+        assert payload.get("state") != "failed"
+        return original_update(ticket_id, payload)
+
+    ticks = iter(range(100))
+    monkeypatch.setattr("opsgate.runner.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("opsgate.runner.time.sleep", lambda _: None)
+    monkeypatch.setattr(runner.stop_event, "wait", lambda _: False)
+    monkeypatch.setattr("opsgate.runner.TicketExecutor", lambda **kwargs: executor)
+    monkeypatch.setattr(api, "update_status", update)
+    runner._run_worker(ticket_id=ticket_id, initial_ticket=ticket)
+    assert len(heartbeats) == (3 if outage_persists else 2)
+    assert ticket["state"] == ("running" if outage_persists else "succeeded")
+    assert not executor.killed_sessions
+    assert runner._worker_cleanup[ticket_id] is (not outage_persists)
+
+
+@pytest.mark.parametrize("status_code", [400, 404, 409])
+def test_permanent_api_error_stops_session_before_failure(tmp_path: Path, monkeypatch, status_code: int) -> None:
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    api = FakeApi({"state": "running"})
+    runner.api = api  # type: ignore[assignment]
+    cleaned: list[str] = []
+
+    def run(*args: Any, **kwargs: Any) -> None:
+        raise RunnerApiError("rejected", status_code=status_code, error_code="http_error")
+
+    original_update = api.update_status
+
+    def update(ticket_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert cleaned == [ticket_id]
+        return original_update(ticket_id, payload)
+
+    monkeypatch.setattr(TicketExecutor, "run", run)
+    monkeypatch.setattr(runner, "_kill_tmux_sessions_for_ticket", cleaned.append)
+    monkeypatch.setattr(api, "update_status", update)
+    runner._run_worker(ticket_id="ticket", initial_ticket=api.ticket)
+    assert api.ticket["state"] == "failed"
+    assert runner._worker_cleanup["ticket"] is True
+
+
+@pytest.mark.parametrize("diagnostic", ["no server running", "No such file or directory", "Connection refused"])
+def test_cleanup_accepts_absent_tmux_server(tmp_path: Path, monkeypatch, diagnostic: str) -> None:
+    import subprocess
+
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    monkeypatch.setattr(
+        "opsgate.runner.subprocess.run", lambda *a, **kw: subprocess.CompletedProcess([], 1, "", diagnostic),
+    )
+    runner._kill_tmux_sessions_for_ticket("ticket")
+
+
+@pytest.mark.parametrize("missing_binary", [False, True])
+def test_cleanup_rejects_unverifiable_tmux(tmp_path: Path, monkeypatch, missing_binary: bool) -> None:
+    import subprocess
+
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        if missing_binary:
+            raise FileNotFoundError("tmux missing")
+        return subprocess.CompletedProcess([], 1, "", "Permission denied")
+
+    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    with pytest.raises(RuntimeError):
+        runner._kill_tmux_sessions_for_ticket("ticket")
+
+
+def test_cleanup_verifies_sessions_are_gone(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    calls = []
+
+    def run(command: list[str], **kwargs: Any) -> Any:
+        calls.append(command)
+        sessions = "job-ticket-01-investigator: 1 windows\njob-other-01-reviewer: 1 windows\n"
+        return subprocess.CompletedProcess(command, 0, sessions, "")
+
+    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    with pytest.raises(RuntimeError, match="remain"):
+        runner._kill_tmux_sessions_for_ticket("ticket")
+    assert [command[3:] for command in calls] == [
+        ["ls"], ["kill-session", "-t", "job-ticket-01-investigator"], ["ls"],
+    ]

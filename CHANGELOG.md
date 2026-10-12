@@ -29,6 +29,11 @@
 
 ### Fixed
 
+- Execution-plan role, agent and prompt fields now require nonempty strings instead of
+  coercing arbitrary JSON values to text, including when revalidating persisted plans.
+- Expiry timestamps whose timezone offsets overflow UTC datetime bounds now return
+  `400 invalid_expires_at` instead of an internal error; shared timestamp readers receive `ValueError`.
+
 - Ticket log previews and runner summaries now read a bounded 64 KiB tail and cap each
   line at 2 KiB, with a truncation notice; full log pages retain complete content.
 

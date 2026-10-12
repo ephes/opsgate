@@ -31,6 +31,7 @@ from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import OpsGateSettings, load_settings
+from .log_preview import read_tail_lines
 from .service import (
     LIST_ARCHIVED_EXCLUDE,
     LIST_ARCHIVED_INCLUDE,
@@ -557,13 +558,6 @@ def create_app(
             return False
         return True
 
-    def read_tail_lines(path: Path, *, max_lines: int = LOG_PREVIEW_LINE_LIMIT) -> list[str]:
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
-        return [line.rstrip("\n") for line in lines[-max_lines:]]
-
     def resolve_session_log_path(*, ticket_id: str, session_meta: dict[str, Any]) -> Path:
         raw_log_path = str(session_meta.get("log_path", "")).strip()
         if not raw_log_path:
@@ -602,7 +596,7 @@ def create_app(
             except ServiceError:
                 session_views.append(view)
                 continue
-            preview_lines = read_tail_lines(log_path)
+            preview_lines = read_tail_lines(log_path, max_lines=LOG_PREVIEW_LINE_LIMIT)
             view["log_available"] = step_number is not None
             view["log_preview"] = "\n".join(preview_lines)
             session_views.append(view)

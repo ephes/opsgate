@@ -10,7 +10,6 @@ import subprocess
 import threading
 import time
 import traceback
-from collections import deque
 from dataclasses import dataclass
 from datetime import timedelta
 from http.client import HTTPException
@@ -21,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .config import RunnerSettings, load_runner_settings
+from .log_preview import read_tail_lines
 from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_datetime, utc_now
 
 logger = logging.getLogger(__name__)
@@ -153,10 +153,7 @@ def _sha256(path: Path) -> str:
 
 
 def _tail_lines(path: Path, max_lines: int = 40) -> list[str]:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8", errors="replace") as handle:
-        return [line.rstrip("\n") for line in deque(handle, maxlen=max_lines)]
+    return read_tail_lines(path, max_lines=max_lines)
 
 
 def _build_agent_command(agent: str, prompt_path: Path) -> str:

@@ -807,7 +807,8 @@ def test_ui_archive_routes_require_csrf_token(client: Any) -> None:
     assert "Invalid form token" in unarchive_detail.get_data(as_text=True)
 
 
-def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any) -> None:
+@pytest.mark.parametrize("large_line", [False, True])
+def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any, large_line: bool) -> None:
     ticket_id = create_ticket(
         client,
         token="nyxmon-token-000000000000",
@@ -817,7 +818,8 @@ def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any) -> Non
     log_path = write_ticket_log(
         ticket_id,
         relative_path="steps/01-reviewer-claude/session.log",
-        content="\n".join(f"line-{index:03d}" for index in range(1, 46)) + "\n",
+        content="\n".join(f"line-{index:03d}" for index in range(1, 46)) + "\n"
+        + ("x" * 5000 + "\n" if large_line else ""),
     )
     set_ticket_tmux_sessions(
         client,
@@ -843,6 +845,10 @@ def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any) -> Non
     assert f"/tickets/{ticket_id}/steps/1/log" in body
     assert "line-045" in body
     assert "line-001" not in body
+    assert "[log preview truncated]" in body
+    assert "x" * 2049 not in body
+    if large_line:
+        assert "x" * 2048 in body
 
 
 def test_ticket_step_log_view_renders_full_log(client: Any) -> None:

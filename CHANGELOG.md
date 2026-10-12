@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- Ticket log previews and runner summaries now read a bounded 64 KiB tail and cap each
+  line at 2 KiB, with a truncation notice; full log pages retain complete content.
+
 - Runner status reporting retries temporary server failures and retains recovery state after exhausted
   reports. Executor exceptions stop and verify owned sessions before publishing terminal failure;
   unsuccessful cleanup retains evidence for retry.

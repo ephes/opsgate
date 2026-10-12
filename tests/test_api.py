@@ -841,7 +841,7 @@ def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any, large_
     response = client.get(f"/tickets/{ticket_id}")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "Open full log" in body
+    assert "Open step log" in body
     assert f"/tickets/{ticket_id}/steps/1/log" in body
     assert "line-045" in body
     assert "line-001" not in body
@@ -851,7 +851,8 @@ def test_ticket_detail_renders_log_preview_and_full_log_link(client: Any, large_
         assert "x" * 2048 in body
 
 
-def test_ticket_step_log_view_renders_full_log(client: Any) -> None:
+@pytest.mark.parametrize("large_log", [False, True])
+def test_ticket_step_log_view_renders_bounded_log(client: Any, large_log: bool) -> None:
     ticket_id = create_ticket(
         client,
         token="nyxmon-token-000000000000",
@@ -861,7 +862,7 @@ def test_ticket_step_log_view_renders_full_log(client: Any) -> None:
     log_path = write_ticket_log(
         ticket_id,
         relative_path="steps/01-reviewer-claude/session.log",
-        content="first line\nsecond line\nthird line\n",
+        content="first line\n" + ("x" * (2 * 1024 * 1024) if large_log else "second line\n") + "third line\n",
     )
     set_ticket_tmux_sessions(
         client,
@@ -884,7 +885,8 @@ def test_ticket_step_log_view_renders_full_log(client: Any) -> None:
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "Step 1 Log" in body
-    assert "first line" in body
+    assert ("first line" in body) is (not large_log)
+    assert ("[step log truncated]" in body) is large_log
     assert "third line" in body
     assert str(log_path) in body
 
@@ -955,7 +957,7 @@ def test_ticket_detail_hides_full_log_link_for_session_without_numeric_step_inde
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "preview line" in body
-    assert "Open full log" not in body
+    assert "Open step log" not in body
 
 
 def test_ticket_step_log_view_rejects_missing_step_number(client: Any) -> None:

@@ -4,6 +4,8 @@
 
 ### Security
 
+- Dedicated step log pages read at most the final 2 MiB and mark truncated logs, bounding web-worker memory.
+
 - Cookie-authenticated API actions (`POST /api/v1/tickets/<id>/approve|reject|cancel|archive|unarchive`) now
   need CSRF proof: an `X-CSRF-Token` header with the session token, or a browser-reported same-origin request
   (`Sec-Fetch-Site: same-origin`, falling back to `Origin`). Before, `SameSite=Lax` alone let any page on a
@@ -45,7 +47,7 @@
   `400 invalid_expires_at` instead of an internal error; shared timestamp readers receive `ValueError`.
 
 - Ticket log previews and runner summaries now read a bounded 64 KiB tail and cap each
-  line at 2 KiB, with a truncation notice; full log pages retain complete content.
+  line at 2 KiB, with a truncation notice; dedicated step log pages show at most the final 2 MiB.
 
 - Runner status reporting retries temporary server failures and retains recovery state after exhausted
   reports. Executor exceptions stop and verify owned sessions before publishing terminal failure;

@@ -1,4 +1,4 @@
-"""Bounded previews of retained UTF-8 logs; full log views remain separate."""
+"""Bounded previews of retained UTF-8 logs; step log views."""
 
 from pathlib import Path
 
@@ -34,3 +34,18 @@ def read_tail_lines(path: Path, max_lines: int = 40) -> list[str]:
     if truncated:
         result.insert(0, TRUNCATION_MARKER)
     return result
+
+
+STEP_LOG_BYTE_LIMIT = 2 * 1024 * 1024
+STEP_LOG_TRUNCATION_MARKER = "[step log truncated]"
+
+
+def read_step_log(path: Path) -> str:
+    """Read at most the final 2 MiB, preserving small logs in full."""
+    with path.open("rb") as handle:
+        size = handle.seek(0, 2)
+        start = max(0, size - STEP_LOG_BYTE_LIMIT)
+        handle.seek(start)
+        data = handle.read(STEP_LOG_BYTE_LIMIT)
+    text = data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return f"{STEP_LOG_TRUNCATION_MARKER}\n{text}" if start else text

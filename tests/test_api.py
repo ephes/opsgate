@@ -2599,3 +2599,72 @@ def test_ui_forms_reject_non_ascii_form_token(client: Any, path: str) -> None:
         assert client.get("/tickets", follow_redirects=False).status_code == 200
     else:
         assert client.get("/tickets", follow_redirects=False).status_code == 302
+
+
+@pytest.mark.parametrize("field", ["role", "agent", "prompt_markdown"])
+@pytest.mark.parametrize("value", [None, True, 42, [], {}, "", "   "])
+def test_api_rejects_non_text_plan_fields(client: Any, field: str, value: Any) -> None:
+    step: dict[str, Any] = {"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}
+    step[field] = value
+    response = client.post(
+        "/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"),
+        json={"title": "Invalid plan", "summary": "Validate text", "execution_plan": [step]},
+    )
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_execution_plan"
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        assert conn.execute("SELECT count(*) FROM tickets").fetchone()[0] == 0
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "test"})
+    assert claim.get_json()["ticket"] is None
+
+
+@pytest.mark.parametrize("field", ["role", "agent", "prompt_markdown"])
+def test_claim_rejects_non_text_stored_plan(client: Any, field: str) -> None:
+    ticket_id = create_ticket(client, token="nyxmon-token-000000000000", title="Stored", summary="Invalid text")
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    step: dict[str, Any] = {"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}
+    step[field] = None
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        conn.execute("UPDATE tickets SET execution_plan_json = ? WHERE id = ?", (json.dumps([step]), ticket_id))
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "test"})
+    assert claim.get_json()["ticket"] is None
+    detail = client.get(f"/api/v1/tickets/{ticket_id}").get_json()
+    assert detail["state"] == "failed"
+    assert detail["result_detail"] == "invalid_stored_plan"
+
+
+@pytest.mark.parametrize("expiry", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"])
+def test_api_rejects_utc_expiry_overflow(client: Any, expiry: str) -> None:
+    response = client.post(
+        "/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"),
+        json={"title": "Expiry", "summary": "Bounds", "expires_at": expiry,
+              "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}]},
+    )
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "invalid_expires_at", "message": "Datetime is outside supported UTC bounds"}
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        assert conn.execute("SELECT count(*) FROM tickets").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("raw", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"])
+def test_datetime_overflow_is_value_error(raw: str) -> None:
+    with pytest.raises(ValueError, match="outside supported UTC bounds"):
+        parse_iso_datetime(raw)
+
+
+@pytest.mark.parametrize("expiry", [None, "2099-01-01T01:00:00+01:00"])
+def test_api_accepts_trimmed_plan_and_optional_expiry(client: Any, expiry: str | None) -> None:
+    payload: dict[str, Any] = {
+        "title": "Valid", "summary": "Normalization",
+        "execution_plan": [{"role": " investigator ", "agent": " CODEX ", "prompt_markdown": " Inspect "}],
+    }
+    if expiry is not None:
+        payload["expires_at"] = expiry
+    response = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json=payload)
+    assert response.status_code == 201
+    detail = client.get(
+        f"/api/v1/tickets/{response.get_json()['id']}", headers=auth_headers("nyxmon-token-000000000000"),
+    ).get_json()
+    assert detail["execution_plan"] == [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}]
+    assert detail["expires_at"] == ("2099-01-01T00:00:00Z" if expiry else None)

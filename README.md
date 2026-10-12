@@ -148,6 +148,20 @@ Useful keys:
 - `POST /api/v1/runner/:id/status`
 - `GET /api/v1/health`
 
+### Ticket input validation
+
+`execution_plan` must be a nonempty array of objects. Each step requires `role`, `agent`,
+and `prompt_markdown` as strings containing non-whitespace text. Surrounding whitespace
+is trimmed; agents are lowercased and must be `codex` or `claude`. Other JSON types
+return `400 invalid_execution_plan`. The same validation applies before approving or
+claiming persisted plans; invalid claimed plans fail with `invalid_stored_plan`.
+
+`expires_at` is optional. Supplied timestamps must include a timezone and normalize
+to a UTC datetime within years 0001 through 9999 (inclusive). Offset conversions
+outside those bounds return `400 invalid_expires_at` without creating a ticket.
+The shared timestamp parser reports invalid formats, missing timezones and UTC overflow
+as `ValueError` for session, UI and runner readers.
+
 ### API authentication
 
 - `POST /api/v1/tickets` takes a submitter bearer token; `GET /api/v1/tickets/:id` takes a submitter

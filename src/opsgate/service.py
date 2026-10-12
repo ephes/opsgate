@@ -69,7 +69,10 @@ def parse_iso_datetime(raw: str) -> datetime:
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         raise ValueError("Datetime must include timezone information")
-    return parsed.astimezone(UTC)
+    try:
+        return parsed.astimezone(UTC)
+    except OverflowError as exc:
+        raise ValueError("Datetime is outside supported UTC bounds") from exc
 
 
 def optional_iso_datetime(raw: str | None) -> datetime | None:
@@ -107,15 +110,21 @@ def parse_execution_plan(raw_plan: Any) -> list[dict[str, str]]:
         if not isinstance(step, dict):
             raise ServiceError(f"execution_plan[{idx}] must be an object", 400, "invalid_execution_plan")
 
-        role = str(step.get("role", "")).strip()
-        agent_raw = str(step.get("agent", "")).strip()
-        prompt_markdown = str(step.get("prompt_markdown", "")).strip()
-        if not role or not agent_raw or not prompt_markdown:
+        role = step.get("role")
+        agent_raw = step.get("agent")
+        prompt_markdown = step.get("prompt_markdown")
+        if (
+            not isinstance(role, str) or not role.strip()
+            or not isinstance(agent_raw, str) or not agent_raw.strip()
+            or not isinstance(prompt_markdown, str) or not prompt_markdown.strip()
+        ):
             raise ServiceError(
                 f"execution_plan[{idx}] requires role, agent, and prompt_markdown",
                 400,
                 "invalid_execution_plan",
             )
+        role = role.strip()
+        prompt_markdown = prompt_markdown.strip()
         agent = normalize_agent(agent_raw)
 
         normalized_steps.append(

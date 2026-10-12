@@ -1105,6 +1105,9 @@ class OpsGateService:
                     ).fetchone()
 
                     if row is None:
+                        # An idle poll still counts as a heartbeat; otherwise health cannot tell an
+                        # idle runner from a dead one.
+                        self._update_runner_heartbeat(conn, runner_host=runner_host)
                         conn.commit()
                         return None
 

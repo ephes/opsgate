@@ -2153,6 +2153,53 @@ def test_health_endpoint_reports_ok(client: Any) -> None:
     assert body["db"] == "ok"
 
 
+def test_health_reports_no_runner_heartbeat_before_first_poll(client: Any) -> None:
+    body = client.get("/api/v1/health").get_json()
+    assert body["runner_last_heartbeat"] is None
+    assert body["runner_host"] is None
+
+
+def test_idle_runner_claim_poll_records_heartbeat(client: Any) -> None:
+    # Nothing is approved, so the poll claims nothing. It must still count as a heartbeat:
+    # otherwise health shows a live, idle runner as stale since its last ticket.
+    create_ticket(
+        client,
+        token="nyxmon-token-000000000000",
+        title="Still pending",
+        summary="Never approved",
+        task_ref="idle-heartbeat-1",
+        execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+        policy_requirements={"require_reviewer_step": True},
+    )
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-idle"})
+    assert claim.status_code == 200
+    assert claim.get_json()["ticket"] is None
+
+    first = client.get("/api/v1/health").get_json()
+    assert first["runner_host"] == "runner-idle"
+    assert first["runner_last_heartbeat"] is not None
+    assert first["ticket_counters"] == {"pending_approval": 1}
+
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-idle"})
+    assert claim.status_code == 200
+    second = client.get("/api/v1/health").get_json()
+    assert second["runner_last_heartbeat"] >= first["runner_last_heartbeat"]
+
+    db_file = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_file) as conn:
+        rows = conn.execute("SELECT runner_host FROM runner_heartbeats").fetchall()
+        audit_rows = conn.execute("SELECT COUNT(*) FROM audit_events WHERE actor = 'runner:runner-idle'").fetchone()
+    assert rows == [("runner-idle",)]
+    assert audit_rows[0] == 0
+
+
+def test_runner_claim_without_token_records_no_heartbeat(client: Any) -> None:
+    claim = client.post("/api/v1/runner/claim", json={"runner_host": "runner-anon"})
+    assert claim.status_code == 401
+    assert client.get("/api/v1/health").get_json()["runner_last_heartbeat"] is None
+
+
 def test_api_rejects_non_tailscale_source_ip(client: Any) -> None:
     payload = {
         "title": "Forbidden source",

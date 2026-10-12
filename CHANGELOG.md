@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- `runner_last_heartbeat` in `GET /api/v1/health` now advances on every runner claim poll. Before, it was only
+  written when the runner claimed a ticket or posted a status, so a live runner with nothing approved looked
+  dead since its last ticket. A runner paused by the disable file does not poll and so does not heartbeat.
 - A submit or runner bearer token, or a UI form CSRF token, with non-ASCII characters no longer causes a
   500. `hmac.compare_digest` raises `TypeError` on non-ASCII `str`, so these checks now compare UTF-8 bytes,
   like the API CSRF header check already did. Such tokens get the normal 401 or invalid-form-token response.

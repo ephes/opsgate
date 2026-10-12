@@ -161,6 +161,9 @@ Useful keys:
 
 ### Ticket input validation
 
+JSON deeper than 64 object/array levels (including the root) is rejected with `400 invalid_json` before API mutations.
+The manual form rejects excessively nested context JSON with `400 invalid_context_json`.
+
 `execution_plan` must be a nonempty array of objects. Each step requires `role`, `agent`,
 and `prompt_markdown` as strings containing non-whitespace text. Surrounding whitespace
 is trimmed; agents are lowercased and must be `codex` or `claude`. Other JSON types

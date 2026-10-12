@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from opsgate.config import SettingsError, load_env_file, load_runner_settings, load_settings
+from opsgate.config import (
+    OpsGateSettings,
+    RunnerSettings,
+    SettingsError,
+    load_env_file,
+    load_runner_settings,
+    load_settings,
+)
 
 
 def test_load_env_file_strips_wrapping_quotes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,3 +274,28 @@ def test_explicit_submitter_policy_overrides_global_floor(
     settings = load_settings()
     for policy in settings.submitter_policies:
         assert policy.require_reviewer_step_floor is (not floor if policy.source == source else floor)
+
+
+@pytest.mark.parametrize("loader", [load_settings, load_runner_settings])
+@pytest.mark.parametrize("duration", ["0", "-1", "31536001", "999999999999999999999999999", "1.5", "1", "31536000"])
+def test_duration_default_validates_supported_bounds(
+    monkeypatch: pytest.MonkeyPatch, loader: Callable[[], OpsGateSettings | RunnerSettings], duration: str,
+) -> None:
+    for name in list(os.environ):
+        if name.startswith("OPSGATE_"):
+            monkeypatch.delenv(name)
+    for name, value in {
+        "OPSGATE_UI_USERNAME": "admin", "OPSGATE_UI_PASSWORD_BCRYPT": "hash",
+        "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+        "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+        "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+        "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+        "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": duration,
+    }.items():
+        monkeypatch.setenv(name, value)
+    if duration in {"1", "31536000"}:
+        settings = loader()
+        assert settings.max_duration_seconds_default == int(duration)
+    else:
+        with pytest.raises(SettingsError, match="OPSGATE_MAX_DURATION_SECONDS_DEFAULT"):
+            loader()

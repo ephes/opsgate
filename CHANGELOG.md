@@ -25,6 +25,18 @@
 
 ### Upgrade notes
 
+- If `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` is set, check it is an integer from 1 to
+  31,536,000 for both service and runner before upgrading; unsupported defaults now prevent startup.
+  Unset or blank values still use 3600.
+- Submitters must send `max_duration_seconds` as a JSON integer in that range, rather than
+  a string, boolean or float. Missing/null values still use the configured default.
+- Runner reports must omit terminal results on running/heartbeat updates and match terminal
+  states: succeeded/success, failed/failure or timeout, canceled/canceled. Other pairs now return 400.
+- These duration bounds apply to new tickets; previously stored durations are not migrated or
+  revalidated by this change. Inspect `max_duration_seconds` through `GET /api/v1/tickets/<id>`
+  for legacy pending, approved and running tickets. Check unsupported durations before approving
+  or allowing queued legacy tickets to run.
+
 - Check boolean settings in env files before upgrading: unrecognized nonempty values now prevent startup.
   Values such as `y`, `enabled`, or `true # comment` are invalid; use the documented spellings without inline
   comments. Blank values now use defaults rather than always disabling a setting: blank Tailscale context enables its default check, and blank
@@ -43,6 +55,11 @@
   restore the old re-run behaviour. See "Runner restart recovery" in the README.
 
 ### Fixed
+
+- New ticket durations now require integers from 1 to 31,536,000 seconds; invalid API values cannot
+  truncate, overflow or create audit data. Service and runner defaults enforce the same bounds.
+
+- Runner status rejects contradictory state/result pairs before writing ticket or audit data; failed/timeout remains supported.
 
 - JSON nesting beyond 64 object/array levels and decoder recursion errors now return a bounded validation error in API requests and manual context forms.
 

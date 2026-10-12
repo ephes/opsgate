@@ -131,7 +131,7 @@ Useful keys:
 - `OPSGATE_DB_PATH` (default `/usr/local/var/opsgate/run/opsgate.sqlite3`)
 - `OPSGATE_BIND_HOST` (default `0.0.0.0`)
 - `OPSGATE_BIND_PORT` (default `8711`)
-- `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` (default `3600`)
+- `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` (default `3600`; integer from `1` to `31536000`)
 - `OPSGATE_MAX_PARALLEL_JOBS` (default `3`)
 - `OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP` (default `false`)
 - `OPSGATE_SUBMIT_POLICY_*_REQUIRE_REVIEWER_STEP`
@@ -170,6 +170,13 @@ is trimmed; agents are lowercased and must be `codex` or `claude`. Other JSON ty
 return `400 invalid_execution_plan`. The same validation applies before approving or
 claiming persisted plans; invalid claimed plans fail with `invalid_stored_plan`.
 
+`max_duration_seconds` must be a JSON integer from 1 to 31,536,000 seconds (365 days).
+Booleans, strings, all floating-point numbers (including integral values such as `900.0`)
+and out-of-range integers return
+`400 invalid_ticket` before any ticket or audit write. Missing or null values use the
+configured default, which must satisfy the same bounds for both service and runner.
+The manual form accepts decimal integer text and applies the same bounds.
+
 `expires_at` is optional. Supplied timestamps must include a timezone and normalize
 to a UTC datetime within years 0001 through 9999 (inclusive). Offset conversions
 outside those bounds return `400 invalid_expires_at` without creating a ticket.
@@ -191,6 +198,14 @@ as `ValueError` for session, UI and runner readers.
   Otherwise they answer `403` with `csrf_required` (no proof) or `invalid_csrf` (wrong token). Bearer-token
   callers are unaffected. The web UI uses its own form routes (`/tickets/:id/<action>`), which already carry
   the form token.
+
+### Runner status contract
+
+Runner status `result` values must match the terminal transition: `succeeded` accepts
+`success`, `failed` accepts `failure` or `timeout`, and `canceled` accepts `canceled`.
+Omitting `result` derives the canonical result from the terminal state. Running updates
+and heartbeats must omit terminal results. Incompatible pairs return `400 invalid_runner_result`
+without changing the ticket, heartbeat or audit history.
 
 ### Concurrent ticket transitions
 

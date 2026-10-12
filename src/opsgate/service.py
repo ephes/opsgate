@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .config import OpsGateSettings, SubmitterPolicy
+from .config import MAX_DURATION_SECONDS, OpsGateSettings, SubmitterPolicy
 
 OPEN_TICKET_STATES = {"pending_approval", "approved", "running"}
 TERMINAL_STATES = {"succeeded", "failed", "rejected", "canceled", "expired"}
@@ -549,17 +549,13 @@ class OpsGateService:
             except ValueError as exc:
                 raise ServiceError(str(exc), 400, "invalid_expires_at") from exc
 
-        max_duration_seconds_raw = payload.get("max_duration_seconds")
-        if max_duration_seconds_raw is None:
+        max_duration_seconds = payload.get("max_duration_seconds")
+        if max_duration_seconds is None:
             max_duration_seconds = self.settings.max_duration_seconds_default
-        else:
-            try:
-                max_duration_seconds = int(max_duration_seconds_raw)
-            except (TypeError, ValueError) as exc:
-                raise ServiceError("max_duration_seconds must be an integer", 400, "invalid_ticket") from exc
-
-        if max_duration_seconds <= 0:
-            raise ServiceError("max_duration_seconds must be > 0", 400, "invalid_ticket")
+        if type(max_duration_seconds) is not int or not 1 <= max_duration_seconds <= MAX_DURATION_SECONDS:
+            raise ServiceError(
+                f"max_duration_seconds must be an integer from 1 to {MAX_DURATION_SECONDS}", 400, "invalid_ticket"
+            )
 
         payload_for_checksum = self._ticket_payload_from_fields(
             source=raw_source,
@@ -1314,6 +1310,13 @@ class OpsGateService:
                 requested_result = str(new_result_raw).strip().lower()
                 if requested_result not in {"success", "failure", "timeout", "canceled"}:
                     raise ServiceError("Invalid runner result", 400, "invalid_runner_result")
+                compatible_results = {
+                    "succeeded": {"success"},
+                    "failed": {"failure", "timeout"},
+                    "canceled": {"canceled"},
+                }
+                if requested_result not in compatible_results.get(next_state, set()):
+                    raise ServiceError("Runner result is incompatible with state", 400, "invalid_runner_result")
                 result_value = requested_result
 
             if result_value is not None:

@@ -2854,3 +2854,89 @@ def test_malformed_required_json_retains_domain_response(client: Any, endpoint: 
     assert response.status_code == 400
     assert response.get_json()["error"] == "invalid_json"
     assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("state", [None, "running", "succeeded", "failed", "canceled"])
+@pytest.mark.parametrize("result", [None, "success", "failure", "timeout", "canceled"])
+def test_runner_state_result_matrix(client: Any, state: str | None, result: str | None) -> None:
+    ticket_id = create_ticket(client, token="nyxmon-token-000000000000", title="Matrix", summary="State/result")
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    assert client.post("/api/v1/runner/claim", headers=runner_headers(),
+                       json={"runner_host": "runner-a"}).status_code == 200
+    before = database_snapshot(client)
+    payload: dict[str, Any] = {"runner_host": "runner-a"}
+    if state is not None:
+        payload["state"] = state
+    if result is not None:
+        payload["result"] = result
+    compatible = {"succeeded": {"success"}, "failed": {"failure", "timeout"}, "canceled": {"canceled"}}
+    valid = result is None or result in compatible.get(state or "running", set())
+    response = client.post(f"/api/v1/runner/{ticket_id}/status", headers=runner_headers(), json=payload)
+    if valid:
+        assert response.status_code == 200
+        assert response.get_json()["state"] == (state or "running")
+        defaults = {"succeeded": "success", "failed": "failure", "canceled": "canceled"}
+        assert response.get_json()["result"] == (result or defaults.get(state or "running"))
+    else:
+        assert response.status_code == 400
+        assert response.get_json()["error"] == "invalid_runner_result"
+        assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("duration", [True, False, 1.5, 900.0, float("inf"), 10**100, 0, -1, "900", 31536001])
+def test_ticket_duration_rejects_invalid_values(client: Any, duration: Any) -> None:
+    before = database_snapshot(client)
+    response = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json={
+        "title": "Duration", "summary": "Invalid duration", "max_duration_seconds": duration,
+        "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}],
+    })
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_ticket"
+    assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("duration", [1, 31536000, None])
+def test_ticket_duration_accepts_boundaries(client: Any, duration: int | None) -> None:
+    response = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"), json={
+        "title": "Duration", "summary": "Valid duration", "max_duration_seconds": duration,
+        "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}],
+    })
+    assert response.status_code == 201
+    assert response.get_json()["max_duration_seconds"] == (duration or 3600)
+
+
+def test_ticket_duration_rejects_json_exponent_overflow(client: Any) -> None:
+    before = database_snapshot(client)
+    response = client.post("/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"),
+                           content_type="application/json", data=(
+                               '{"title":"Overflow","summary":"Duration","max_duration_seconds":1e309,'
+                               '"execution_plan":[{"role":"investigator","agent":"codex",'
+                               '"prompt_markdown":"Inspect"}]}'
+                           ))
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_ticket"
+    assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("duration", ["1.5", "0", "31536001", "1_000"])
+def test_manual_ticket_duration_rejects_invalid_values(client: Any, duration: str) -> None:
+    login(client)
+    before = database_snapshot(client)
+    response = client.post("/tickets", data={
+        "csrf_token": session_csrf_token(client), "title": "Duration", "summary": "Invalid",
+        "steps-0-role": "investigator", "steps-0-agent": "codex", "steps-0-prompt_markdown": "Inspect",
+        "max_duration_seconds": duration,
+    })
+    assert response.status_code == 400
+    assert database_snapshot(client) == before
+
+
+@pytest.mark.parametrize("duration", [True, 1.5, 0, 31536001])
+def test_direct_settings_duration_default_is_validated(tmp_path: Path, duration: Any) -> None:
+    from dataclasses import replace
+
+    from opsgate.config import SettingsError
+
+    with pytest.raises(SettingsError, match="OPSGATE_MAX_DURATION_SECONDS_DEFAULT"):
+        replace(_build_settings(str(tmp_path / "settings.sqlite3")), max_duration_seconds_default=duration)

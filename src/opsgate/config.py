@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from ipaddress import ip_network
 from pathlib import Path
 
+MAX_DURATION_SECONDS = 31_536_000
+
 DEFAULT_ALLOWED_CIDRS = (
     "127.0.0.1/32",
     "::1/128",
@@ -42,6 +44,9 @@ class OpsGateSettings:
     execution_data_dir: str
     disable_file_path: str
 
+    def __post_init__(self) -> None:
+        validate_duration_default(self.max_duration_seconds_default)
+
 
 @dataclass(frozen=True)
 class RunnerSettings:
@@ -60,9 +65,17 @@ class RunnerSettings:
     tmux_tmpdir: str
     disable_file_path: str
 
+    def __post_init__(self) -> None:
+        validate_duration_default(self.max_duration_seconds_default)
+
 
 class SettingsError(RuntimeError):
     pass
+
+
+def validate_duration_default(value: int) -> None:
+    if type(value) is not int or not 1 <= value <= MAX_DURATION_SECONDS:
+        raise SettingsError(f"OPSGATE_MAX_DURATION_SECONDS_DEFAULT must be an integer from 1 to {MAX_DURATION_SECONDS}")
 
 
 def parse_bool(value: str | None, default: bool = False, *, env_name: str | None = None) -> bool:
@@ -286,8 +299,6 @@ def load_runner_settings() -> RunnerSettings:
         raise SettingsError("OPSGATE_RUNNER_HEARTBEAT_INTERVAL_SECONDS must be > 0")
     if max_parallel_jobs <= 0:
         raise SettingsError("OPSGATE_MAX_PARALLEL_JOBS must be > 0")
-    if max_duration_seconds_default <= 0:
-        raise SettingsError("OPSGATE_MAX_DURATION_SECONDS_DEFAULT must be > 0")
 
     execution_data_dir = os.environ.get("OPSGATE_EXECUTION_DATA_DIR", "/Users/ops/remediation").strip()
     if not execution_data_dir:

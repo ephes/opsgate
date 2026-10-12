@@ -30,7 +30,7 @@ from flask import (
 from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from .config import OpsGateSettings, load_settings
+from .config import MAX_DURATION_SECONDS, OpsGateSettings, load_settings
 from .log_preview import read_step_log, read_tail_lines
 from .service import (
     LIST_ARCHIVED_EXCLUDE,
@@ -450,7 +450,12 @@ def create_app(
         if expires_at:
             payload["expires_at"] = expires_at
         if max_duration_raw:
-            payload["max_duration_seconds"] = max_duration_raw
+            try:
+                if re.fullmatch(r"[0-9]+", max_duration_raw) is None:
+                    raise ValueError
+                payload["max_duration_seconds"] = int(max_duration_raw)
+            except ValueError as exc:
+                raise ServiceError("max_duration_seconds must be an integer", 400, "invalid_ticket") from exc
         if context_raw:
             try:
                 context = json.loads(context_raw)
@@ -507,6 +512,7 @@ def create_app(
                 ticket_view=ticket_view,
                 form_data=form_data,
                 operator_requires_reviewer=operator_requires_reviewer,
+                max_duration_seconds_limit=MAX_DURATION_SECONDS,
                 role_agent_defaults=DEFAULT_AGENT_BY_ROLE,
                 role_prompt_scaffolding=ROLE_PROMPT_SCAFFOLDING,
                 supported_agents=SUPPORTED_AGENTS,

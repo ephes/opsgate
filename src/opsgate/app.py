@@ -31,7 +31,7 @@ from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import OpsGateSettings, load_settings
-from .log_preview import read_tail_lines
+from .log_preview import read_step_log, read_tail_lines
 from .service import (
     LIST_ARCHIVED_EXCLUDE,
     LIST_ARCHIVED_INCLUDE,
@@ -893,7 +893,7 @@ def create_app(
         ticket = service.get_ticket(ticket_id)
         session_meta = get_ticket_session_for_step(ticket=ticket, step_number=step_number)
         log_path = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
-        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        log_text = read_step_log(log_path)
         return Response(
             render_template(
                 "ticket_log.html",

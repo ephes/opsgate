@@ -228,8 +228,9 @@ A reverse proxy in front of OpsGate must not remove these headers.
 Ticket detail previews and runner step summaries read only the final 64 KiB of a log,
 show up to 40 lines, and retain at most the final 2 KiB of each line. Omitted bytes
 or lines add a `[log preview truncated]` notice. UTF-8 characters split by a byte
-boundary are safely replaced. The dedicated **Open full log** page still shows the
-complete retained log.
+boundary are safely replaced. The dedicated **Open step log** page shows the
+final 2 MiB with a `[step log truncated]` notice when earlier bytes are omitted.
+Smaller logs appear in full; retained files on disk are unchanged.
 
 ## Local development
 

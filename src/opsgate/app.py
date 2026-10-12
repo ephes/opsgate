@@ -153,6 +153,16 @@ LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_THROTTLE_MAX_TRACKED_CLIENTS = 10_000
 CSRF_HEADER_NAME = "X-CSRF-Token"
+# Sent with every response. The approval UI must never render inside another page: SameSite=Lax does not
+# stop a same-site sibling origin from framing it and collecting a disguised click on Approve.
+SECURITY_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    # Ticket pages, logs and API answers are per-approver data; keep them out of shared and disk caches.
+    "Cache-Control": "no-store",
+}
 SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -531,6 +541,12 @@ def create_app(
         ):
             raise ServiceError("Invalid form token", 400, "invalid_csrf")
 
+    @app.after_request
+    def add_security_headers(response: Response) -> Response:
+        for name, value in SECURITY_HEADERS.items():
+            response.headers[name] = value
+        return response
+
     @app.context_processor
     def inject_template_globals() -> dict[str, str]:
         return {"csrf_token": ensure_csrf_token()}
@@ -787,22 +803,20 @@ def create_app(
             flash("Too many failed login attempts. Try again later.", "error")
             return Response(render_template("login.html", next_path=next_path), 429)
 
-        if username != resolved_settings.ui_username:
-            throttle.record_failure(throttle_key)
-            flash("Invalid username or password", "error")
-            if next_path is not None:
-                return redirect(url_for("ui_login", next=next_path))
-            return redirect(url_for("ui_login"))
-
+        # Always run the password check, so a wrong username costs the same as a wrong password and
+        # response time does not reveal the approver name.
+        username_matches = hmac.compare_digest(
+            username.encode("utf-8"), resolved_settings.ui_username.encode("utf-8")
+        )
         try:
-            valid = bcrypt.checkpw(
+            password_matches = bcrypt.checkpw(
                 password.encode("utf-8"),
                 resolved_settings.ui_password_bcrypt.encode("utf-8"),
             )
         except ValueError:
-            valid = False
+            password_matches = False
 
-        if not valid:
+        if not (username_matches and password_matches):
             throttle.record_failure(throttle_key)
             flash("Invalid username or password", "error")
             if next_path is not None:

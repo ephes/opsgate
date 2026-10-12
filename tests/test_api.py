@@ -2668,3 +2668,86 @@ def test_api_accepts_trimmed_plan_and_optional_expiry(client: Any, expiry: str |
     ).get_json()
     assert detail["execution_plan"] == [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}]
     assert detail["expires_at"] == ("2099-01-01T00:00:00Z" if expiry else None)
+
+
+# --- Security headers and constant-work login -----------------------------------------------------
+
+EXPECTED_SECURITY_HEADERS = {
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    "Cache-Control": "no-store",
+}
+
+
+def _assert_security_headers(response: Any) -> None:
+    for name, value in EXPECTED_SECURITY_HEADERS.items():
+        assert response.headers.get(name) == value, name
+    policy = response.headers.get("Content-Security-Policy", "")
+    directives = {part.strip() for part in policy.split(";")}
+    assert "frame-ancestors 'none'" in directives
+    assert "form-action 'self'" in directives
+    assert "base-uri 'self'" in directives
+    assert "object-src 'none'" in directives
+
+
+def test_ui_pages_cannot_be_framed(client: Any) -> None:
+    _assert_security_headers(client.get("/login"))
+    login(client)
+    ticket_id = _pending_ticket(client, "headers-ui")
+    _assert_security_headers(client.get("/tickets"))
+    _assert_security_headers(client.get(f"/tickets/{ticket_id}"))
+
+
+def test_api_error_and_redirect_responses_carry_security_headers(client: Any) -> None:
+    _assert_security_headers(client.get("/api/v1/health"))
+    unauthenticated = client.get("/api/v1/tickets/does-not-exist")
+    assert unauthenticated.status_code == 401
+    _assert_security_headers(unauthenticated)
+    redirect_response = client.get("/tickets", follow_redirects=False)
+    assert redirect_response.status_code == 302
+    _assert_security_headers(redirect_response)
+    missing = client.get("/no-such-page")
+    assert missing.status_code == 404
+    _assert_security_headers(missing)
+
+
+def test_forbidden_network_response_carries_security_headers(client: Any) -> None:
+    response = client.get("/tickets", environ_base={"REMOTE_ADDR": "203.0.113.9"})
+    assert response.status_code == 403
+    _assert_security_headers(response)
+
+
+def test_wrong_username_still_runs_the_password_check(client: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    import opsgate.app as app_module
+
+    calls: list[bytes] = []
+    real_checkpw = app_module.bcrypt.checkpw
+
+    def counting_checkpw(password: bytes, hashed: bytes) -> bool:
+        calls.append(password)
+        return real_checkpw(password, hashed)
+
+    monkeypatch.setattr(app_module.bcrypt, "checkpw", counting_checkpw)
+    client.get("/login")
+    response = client.post(
+        "/login",
+        data={"csrf_token": session_csrf_token(client), "username": "someone-else", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")
+    assert calls == [b"secret-password"]
+    # The right password with the wrong username must not sign anyone in.
+    assert client.get("/tickets", follow_redirects=False).status_code == 302
+
+
+def test_non_ascii_username_is_rejected_without_error(client: Any) -> None:
+    client.get("/login")
+    response = client.post(
+        "/login",
+        data={"csrf_token": session_csrf_token(client), "username": "opsgäte-admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/login")

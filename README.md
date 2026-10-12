@@ -206,6 +206,18 @@ matches the state it read (compare-and-set).
   oldest failure is 15 minutes old, even for the correct password. A successful login clears the counter. The
   counter is held in memory and resets when the service restarts.
 
+### Response headers
+
+Every response (UI pages, redirects, errors and API answers) carries:
+
+- `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; form-action
+  'self'; object-src 'none'`: the approval UI never renders inside another page, and its forms only post back
+  to OpsGate. The pages use inline styles and scripts, so the policy does not restrict `script-src`.
+- `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`.
+- `Cache-Control: no-store`: ticket pages, logs and API answers are not kept by browsers or proxies.
+
+A reverse proxy in front of OpsGate must not remove these headers.
+
 ## Log previews
 
 Ticket detail previews and runner step summaries read only the final 64 KiB of a log,

@@ -12,6 +12,13 @@
   copied cookie no longer stays valid until the session timeout. Logout signs the approver out of every
   browser. Changing the UI password hash revokes existing sessions on the next start.
 - `/login` locks a client IP out for 15 minutes after 5 failed attempts (`429`).
+- Every response now carries `X-Frame-Options: DENY`, a `Content-Security-Policy` with
+  `frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` and `Cache-Control: no-store`. Before, no
+  such header was sent, so a page on a same-site origin could show the approval UI in a frame and collect a
+  disguised click on *Approve*. API clients are unaffected.
+- `/login` runs the password check for every attempt, also when the username is wrong, so response time no
+  longer tells whether a username is the approver name.
 
 ### Upgrade notes
 

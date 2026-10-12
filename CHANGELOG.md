@@ -4,6 +4,8 @@
 
 ### Security
 
+- Security boolean configuration now rejects unrecognized values at startup instead of silently disabling
+  protections. Missing or blank values use defaults; explicit true and false spellings remain supported.
 - Cookie-authenticated API actions (`POST /api/v1/tickets/<id>/approve|reject|cancel|archive|unarchive`) now
   need CSRF proof: an `X-CSRF-Token` header with the session token, or a browser-reported same-origin request
   (`Sec-Fetch-Site: same-origin`, falling back to `Origin`). Before, `SameSite=Lax` alone let any page on a
@@ -21,6 +23,11 @@
   longer tells whether a username is the approver name.
 
 ### Upgrade notes
+
+- Check boolean settings in env files before upgrading: unrecognized nonempty values now prevent startup.
+  Use the documented spellings and avoid inline comments in boolean values. Blank values now use defaults
+  rather than always disabling a setting: blank Tailscale context enables its default check, and blank
+  submitter reviewer policies inherit the global floor.
 
 - Existing approver sessions are invalidated once on deploy; sign in again.
 - Any script that calls the approve/reject/cancel/archive/unarchive API with a session cookie must send the

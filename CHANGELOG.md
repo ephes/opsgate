@@ -36,6 +36,9 @@
 
 ### Fixed
 
+- Runner JSON publication cleans up owned temporary files on failure while preserving the prior destination
+  and original error.
+
 - Execution-plan role, agent and prompt fields now require nonempty strings instead of
   coercing arbitrary JSON values to text, including when revalidating persisted plans.
 - Expiry timestamps whose timezone offsets overflow UTC datetime bounds now return

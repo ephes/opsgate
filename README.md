@@ -96,6 +96,11 @@ state file remains for retry; operators should inspect the retained session arti
 rejections follow this same cleanup-and-failure path rather than outage recovery. Swallowed reporting
 and claim errors log only their safe HTTP status and error category.
 
+Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
+files. Failed serialization, writes or replacement leave the previous destination intact and remove the
+owned temporary file. If the filesystem also refuses cleanup, the original publication error is preserved
+and operators may need to remove the leftover temporary file.
+
 There is no setting to restore automatic re-runs. One could be added later (off by default); it would still
 need to adopt an existing `exit_code` rather than relaunch.
 

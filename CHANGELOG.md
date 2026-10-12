@@ -26,8 +26,8 @@
 ### Upgrade notes
 
 - Check boolean settings in env files before upgrading: unrecognized nonempty values now prevent startup.
-  Use the documented spellings and avoid inline comments in boolean values. Blank values now use defaults
-  rather than always disabling a setting: blank Tailscale context enables its default check, and blank
+  Values such as `y`, `enabled`, or `true # comment` are invalid; use the documented spellings without inline
+  comments. Blank values now use defaults rather than always disabling a setting: blank Tailscale context enables its default check, and blank
   submitter reviewer policies inherit the global floor.
 
 - Existing approver sessions are invalidated once on deploy; sign in again.

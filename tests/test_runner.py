@@ -12,14 +12,21 @@ import pytest
 from opsgate.config import RunnerSettings
 from opsgate.runner import OpsGateRunner, RunnerApiError, TicketExecutor, _build_agent_command, _build_attach_command
 
-RUNNER_NOW = datetime(2026, 1, 1, tzinfo=UTC)
+CLOCK_START = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
-def fixed_runner_clock(monkeypatch: Any) -> None:
-    # Ticket deadlines and executor timestamps share a clock, independent of
-    # machine speed or wall-clock adjustments.
-    monkeypatch.setattr("opsgate.runner.utc_now", lambda: RUNNER_NOW)
+def runner_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Advance polling time without sleeping or depending on scheduler speed."""
+    elapsed = 0.0
+
+    def sleep(seconds: float) -> None:
+        nonlocal elapsed
+        elapsed += seconds
+
+    monkeypatch.setattr("opsgate.runner.utc_now", lambda: CLOCK_START + timedelta(seconds=elapsed))
+    monkeypatch.setattr("opsgate.runner.time.monotonic", lambda: elapsed)
+    monkeypatch.setattr("opsgate.runner.time.sleep", sleep)
 
 
 class FakeApi:
@@ -95,7 +102,7 @@ def _runner_settings(tmp_path: Path) -> RunnerSettings:
 
 
 def test_ticket_executor_runs_steps_sequentially(tmp_path: Path) -> None:
-    now = RUNNER_NOW
+    now = CLOCK_START
     ticket_id = "aaaaaaaa-1111-4111-8111-111111111111"
     ticket: dict[str, Any] = {
         "id": ticket_id,
@@ -130,14 +137,14 @@ def test_ticket_executor_runs_steps_sequentially(tmp_path: Path) -> None:
     assert "step_2_started" in details
 
 
-@pytest.mark.parametrize("elapsed_seconds", [1, 10])
-def test_ticket_executor_reports_timeout_result(tmp_path: Path, elapsed_seconds: int) -> None:
-    now = RUNNER_NOW
+@pytest.mark.parametrize("already_elapsed", [0, 10])
+def test_ticket_executor_reports_timeout_result(tmp_path: Path, already_elapsed: int) -> None:
+    now = CLOCK_START
     ticket_id = "bbbbbbbb-2222-4222-8222-222222222222"
     ticket: dict[str, Any] = {
         "id": ticket_id,
         "state": "running",
-        "started_at": (now - timedelta(seconds=elapsed_seconds)).isoformat().replace("+00:00", "Z"),
+        "started_at": (now - timedelta(seconds=already_elapsed)).isoformat().replace("+00:00", "Z"),
         "max_duration_seconds": 1,
         "execution_plan": [
             {"role": "investigator", "agent": "codex", "prompt_markdown": "sleep 10"},
@@ -162,7 +169,7 @@ def test_ticket_executor_reports_timeout_result(tmp_path: Path, elapsed_seconds:
 
 
 def test_ticket_executor_reports_step_failure_detail(tmp_path: Path) -> None:
-    now = RUNNER_NOW
+    now = CLOCK_START
     ticket_id = "dddddddd-4444-4444-8444-444444444444"
     ticket: dict[str, Any] = {
         "id": ticket_id,
@@ -192,7 +199,7 @@ def test_ticket_executor_reports_step_failure_detail(tmp_path: Path) -> None:
 
 
 def test_ticket_executor_resumes_from_existing_step_summary(tmp_path: Path) -> None:
-    now = RUNNER_NOW
+    now = CLOCK_START
     ticket_id = "cccccccc-3333-4333-8333-333333333333"
     ticket: dict[str, Any] = {
         "id": ticket_id,
@@ -427,7 +434,7 @@ def test_build_attach_command_includes_tmux_tmpdir() -> None:
 
 
 def test_ticket_executor_rejects_unsupported_agent(tmp_path: Path) -> None:
-    now = RUNNER_NOW
+    now = CLOCK_START
     ticket_id = "eeeeeeee-5555-4555-8555-555555555555"
     ticket: dict[str, Any] = {
         "id": ticket_id,
@@ -467,7 +474,7 @@ class RecordingStubTicketExecutor(StubTicketExecutor):
 
 
 def _resume_ticket(ticket_id: str, plan: list[dict[str, str]]) -> dict[str, Any]:
-    now = RUNNER_NOW
+    now = CLOCK_START
     return {
         "id": ticket_id,
         "state": "running",
@@ -905,19 +912,10 @@ def test_running_heartbeat_outage_never_fails_live_session(tmp_path: Path, monke
         assert payload.get("state") != "failed"
         return original_update(ticket_id, payload)
 
-    clock = 0.0
-
-    def advance(seconds: float) -> None:
-        nonlocal clock
-        clock += seconds
-
-    def wait(seconds: float) -> bool:
-        advance(seconds)
-        return runner.stop_event.is_set()
-
-    monkeypatch.setattr("opsgate.runner.time.monotonic", lambda: clock)
-    monkeypatch.setattr("opsgate.runner.time.sleep", advance)
-    monkeypatch.setattr(runner.stop_event, "wait", wait)
+    ticks = iter(range(100))
+    monkeypatch.setattr("opsgate.runner.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("opsgate.runner.time.sleep", lambda _: None)
+    monkeypatch.setattr(runner.stop_event, "wait", lambda _: False)
     monkeypatch.setattr("opsgate.runner.TicketExecutor", lambda **kwargs: executor)
     monkeypatch.setattr(api, "update_status", update)
     runner._run_worker(ticket_id=ticket_id, initial_ticket=ticket)

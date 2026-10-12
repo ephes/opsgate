@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import shlex
 import signal
@@ -12,14 +13,17 @@ import traceback
 from collections import deque
 from dataclasses import dataclass
 from datetime import timedelta
+from http.client import HTTPException
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .config import RunnerSettings, load_runner_settings
 from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_datetime, utc_now
+
+logger = logging.getLogger(__name__)
 
 TICKET_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
@@ -69,24 +73,36 @@ class RunnerApiClient:
         request = Request(url=url, method=method, headers=headers, data=data)
         try:
             with urlopen(request, timeout=15) as response:
-                raw = response.read().decode("utf-8") or "{}"
-                parsed = json.loads(raw)
+                response_bytes = response.read()
+                try:
+                    raw = response_bytes.decode("utf-8") or "{}"
+                    parsed = json.loads(raw)
+                except ValueError:
+                    raise RunnerApiError(
+                        "Invalid JSON response", status_code=502, error_code="invalid_response",
+                    ) from None
                 if not isinstance(parsed, dict):
                     raise RunnerApiError("Invalid JSON response", status_code=500, error_code="invalid_response")
                 return parsed
         except HTTPError as error:
-            body_text = error.read().decode("utf-8")
+            # Only known protocol codes are exposed; bodies and exception text may
+            # contain credentials or arbitrary server diagnostics.
+            error_code = "http_error"
             try:
-                body = json.loads(body_text) if body_text else {}
-            except json.JSONDecodeError:
-                body = {}
-            if isinstance(body, dict):
-                message = str(body.get("message", error.reason))
-                error_code = str(body.get("error", "http_error"))
-            else:
-                message = str(error.reason)
-                error_code = "http_error"
-            raise RunnerApiError(message, status_code=error.code, error_code=error_code) from error
+                body = json.loads(error.read().decode("utf-8"))
+                if isinstance(body, dict) and isinstance(body.get("error"), str) and body["error"] in {
+                    "invalid_state", "state_changed", "runner_host_mismatch",
+                }:
+                    error_code = body["error"]
+            except (OSError, ValueError, HTTPException):
+                pass
+            raise RunnerApiError(
+                "Runner API HTTP error", status_code=error.code, error_code=error_code,
+            ) from None
+        except (URLError, OSError, HTTPException):
+            raise RunnerApiError(
+                "Runner API transport failure", status_code=503, error_code="transport_error",
+            ) from None
 
     def claim_ticket(self, runner_host: str) -> dict[str, Any] | None:
         payload = {"runner_host": runner_host}
@@ -556,12 +572,16 @@ class TicketExecutor:
             payload["result_detail"] = result_detail
         if tmux_sessions is not None:
             payload["tmux_sessions"] = tmux_sessions
-        try:
-            self.api.update_status(self.ticket_id, payload)
-        except RunnerApiError as error:
-            if error.status_code == 409 and error.error_code in {"invalid_state", "state_changed"}:
+        for attempt in range(3):
+            try:
+                self.api.update_status(self.ticket_id, payload)
                 return
-            raise
+            except RunnerApiError as error:
+                if error.status_code == 409 and error.error_code in {"invalid_state", "state_changed"}:
+                    return
+                if error.status_code < 500 or attempt == 2:
+                    raise
+                self.stop_event.wait(1)
 
     def _upsert_tmux_session(self, tmux_sessions: list[dict[str, Any]], entry: dict[str, Any]) -> dict[str, Any]:
         step_index = int(entry["step_index"])
@@ -657,7 +677,11 @@ class OpsGateRunner:
 
             claimed_any = False
             while self._active_worker_count() < self.settings.max_parallel_jobs and not self.stop_event.is_set():
-                claimed_ticket = self.api.claim_ticket(self.settings.runner_host)
+                try:
+                    claimed_ticket = self.api.claim_ticket(self.settings.runner_host)
+                except RunnerApiError as error:
+                    logger.warning("Runner claim failed: status=%s category=%s", error.status_code, error.error_code)
+                    break
                 if claimed_ticket is None:
                     break
                 claimed_any = True
@@ -720,9 +744,14 @@ class OpsGateRunner:
             )
             executor.run(initial_ticket=initial_ticket)
             remove_state = True
-        except Exception as exc:  # pragma: no cover - exercised via monkeypatch test
+        except Exception as exc:
+            if isinstance(exc, RunnerApiError) and exc.status_code >= 500:
+                # Outages are resumable; recovery adopts the existing execution.
+                logger.warning("Runner API unavailable: status=%s category=%s", exc.status_code, exc.error_code)
+                return
             traceback.print_exc()
             try:
+                self._kill_tmux_sessions_for_ticket(ticket_id)
                 self.api.update_status(
                     ticket_id,
                     {
@@ -734,16 +763,17 @@ class OpsGateRunner:
                     },
                 )
                 remove_state = True
-            except RunnerApiError:
-                # API unavailable: keep state file so restart recovery can re-drive the ticket.
+            except (RunnerApiError, OSError, RuntimeError):
+                # API or cleanup unavailable: keep state file so restart recovery can re-drive the ticket.
                 remove_state = False
         finally:
             if not remove_state:
                 try:
                     latest = self.api.get_ticket(ticket_id)
                     if str(latest.get("state", "")) in TERMINAL_STATES:
+                        self._kill_tmux_sessions_for_ticket(ticket_id)
                         remove_state = True
-                except RunnerApiError:
+                except (RunnerApiError, OSError, RuntimeError):
                     pass
             with self._lock:
                 self._worker_cleanup[ticket_id] = remove_state
@@ -779,12 +809,18 @@ class OpsGateRunner:
 
             ticket_state = str(ticket.get("state", "")).strip().lower()
             if ticket_state in TERMINAL_STATES:
+                try:
+                    self._kill_tmux_sessions_for_ticket(ticket_id)
+                except (OSError, RuntimeError):
+                    continue
                 self._remove_state_file(ticket_id)
-                self._kill_tmux_sessions_for_ticket(ticket_id)
                 continue
             if ticket_state != "running":
+                try:
+                    self._kill_tmux_sessions_for_ticket(ticket_id)
+                except (OSError, RuntimeError):
+                    continue
                 self._remove_state_file(ticket_id)
-                self._kill_tmux_sessions_for_ticket(ticket_id)
                 continue
 
             self._write_state_file(ticket_id)
@@ -838,9 +874,13 @@ class OpsGateRunner:
                 check=False,
             )
         except FileNotFoundError:
-            return []
+            raise RuntimeError("Cannot verify tmux cleanup") from None
         if result.returncode != 0:
-            return []
+            if any(message in result.stderr for message in (
+                "no server running", "No such file or directory", "Connection refused",
+            )):
+                return []
+            raise RuntimeError("Cannot list tmux sessions for cleanup")
 
         session_prefix = f"job-{ticket_id}-"
         matches: list[str] = []
@@ -858,6 +898,9 @@ class OpsGateRunner:
                 text=True,
                 check=False,
             )
+
+        if self._tmux_sessions_for_ticket(ticket_id):
+            raise RuntimeError("Ticket sessions remain after cleanup")
 
     def _active_worker_count(self) -> int:
         with self._lock:

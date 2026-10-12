@@ -29,6 +29,12 @@
 
 ### Fixed
 
+- Runner status reporting retries temporary server failures and retains recovery state after exhausted
+  reports. Executor exceptions stop and verify owned sessions before publishing terminal failure;
+  unsuccessful cleanup retains evidence for retry.
+- Runner API transport, timeout and malformed-response failures now use safe `RunnerApiError` categories,
+  allowing recovery to continue across independent tickets without discarding their state files.
+
 - `runner_last_heartbeat` in `GET /api/v1/health` now advances on every runner claim poll. Before, it was only
   written when the runner claimed a ticket or posted a status, so a live runner with nothing approved looked
   dead since its last ticket. A runner paused by the disable file does not poll and so does not heartbeat.

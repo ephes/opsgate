@@ -268,6 +268,15 @@ GitHub Actions (`.github/workflows/ci.yml`) runs the `just check` commands (test
 mypy, ruff) on Python 3.11 and 3.14 for every push and pull request. It needs no
 secrets.
 
+The dev lock uses pytest 9 and Pygments 2.21 to address development dependency
+advisories. To audit the locked runtime and dev dependencies (excluding the local
+project), run:
+
+```bash
+uv export --frozen --extra dev --no-emit-project --format requirements-txt -o /tmp/opsgate-dev-requirements.txt
+uvx pip-audit -r /tmp/opsgate-dev-requirements.txt --no-deps --disable-pip
+```
+
 Default UI routes:
 
 - `GET /login`

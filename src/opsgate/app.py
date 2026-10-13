@@ -39,6 +39,7 @@ from .service import (
     SUPPORTED_AGENTS,
     OpsGateService,
     ServiceError,
+    check_json_depth,
     isoformat_z,
     parse_iso_datetime,
     utc_now,
@@ -418,17 +419,6 @@ def create_app(
             ]
 
         return []
-
-    def check_json_depth(value: Any, *, code: str) -> None:
-        pending = [(value, 0)]
-        while pending:
-            item, depth = pending.pop()
-            if isinstance(item, dict | list):
-                depth += 1
-                if depth > 64:
-                    raise ServiceError("JSON nesting exceeds 64 levels", 400, code)
-                children = item.values() if isinstance(item, dict) else item
-                pending.extend((child, depth) for child in children)
 
     def build_manual_ticket_payload() -> dict[str, object]:
         operator_requires_reviewer = service.require_reviewer_step_floor_for_source("operator")

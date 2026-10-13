@@ -1416,6 +1416,115 @@ def test_runner_claim_fails_invalid_stored_agent_and_moves_on(client: Any) -> No
 
 
 @pytest.mark.parametrize(
+    ("column", "stored_json", "error_code"),
+    [
+        ("execution_plan_json", "{broken", "invalid_stored_json"),
+        ("execution_plan_json", "[42]", "invalid_execution_plan"),
+        ("policy_requirements_json", "{broken", "invalid_stored_json"),
+        ("policy_requirements_json", "[]", "invalid_policy_requirements"),
+        ("policy_requirements_json", "null", "invalid_policy_requirements"),
+        ("policy_requirements_json", '{"require_reviewer_step": "false"}', "invalid_policy_requirements"),
+        ("context_json", "{broken", "invalid_stored_json"),
+        ("context_json", "[]", "invalid_ticket"),
+        ("context_json", "null", "invalid_ticket"),
+        pytest.param("context_json", '{"nested":' + '[' * 100000 + '0' + ']' * 100000 + '}',
+                     "invalid_stored_json", id="context-recursion-exhaustion"),
+        ("tmux_sessions_json", "{broken", "invalid_stored_json"),
+        ("tmux_sessions_json", "null", "invalid_tmux_sessions"),
+        pytest.param("context_json", '{"nested":' + '[' * 64 + '0' + ']' * 64 + '}',
+                     "invalid_stored_json", id="context-depth-limit"),
+        pytest.param("tmux_sessions_json", '[' * 65 + '0' + ']' * 65,
+                     "invalid_stored_json", id="tmux-depth-limit"),
+
+    ],
+)
+@pytest.mark.parametrize("with_successor", [True, False])
+def test_runner_claim_isolates_corrupt_stored_json(
+    client: Any, column: str, stored_json: str, error_code: str, with_successor: bool,
+) -> None:
+    bad_id = create_ticket(client, token="nyxmon-token-000000000000", task_ref="corrupt-oldest",
+                           title="Corrupt stored ticket", summary="Never execute")
+    good_id = (
+        create_ticket(client, token="nyxmon-token-000000000000", task_ref="valid-successor",
+                      title="Valid stored ticket", summary="Claim after corruption")
+        if with_successor else None
+    )
+    login(client)
+    for ticket_id in [bad_id, *([good_id] if good_id else [])]:
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        # column comes only from the fixed test allowlist above.
+        conn.execute(f"UPDATE tickets SET {column} = ?, approved_at = ? WHERE id = ?",
+                     (stored_json, "2020-01-01T00:00:00Z", bad_id))
+
+    response = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert response.status_code == 200
+    claimed = response.get_json()["ticket"]
+    if good_id:
+        assert claimed["id"] == good_id
+        assert claimed["state"] == "running"
+    else:
+        assert claimed is None
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        bad = conn.execute("SELECT * FROM tickets WHERE id = ?", (bad_id,)).fetchone()
+        assert bad["state"] == "failed"
+        assert bad["result"] == "failure"
+        assert bad["result_detail"] == "invalid_stored_plan"
+        assert bad["finished_at"] is not None
+        assert bad["runner_host"] is None
+        assert bad["started_at"] is None
+        events = conn.execute(
+            "SELECT * FROM audit_events WHERE ticket_id = ? AND event_type IN ('ticket_failed', 'runner_claimed')",
+            (bad_id,),
+        ).fetchall()
+        assert len(events) == 1
+        event = events[0]
+        assert event["event_type"] == "ticket_failed"
+        assert event["actor"] == "runner:runner-a"
+        assert event["previous_state"] == "approved"
+        assert event["new_state"] == "failed"
+        assert json.loads(event["metadata_json"]) == {"reason": "invalid_stored_plan", "error": error_code}
+
+    # A later idle poll must not fail or audit the corrupt row again.
+    assert client.post("/api/v1/runner/claim", headers=runner_headers(),
+                       json={"runner_host": "runner-a"}).get_json()["ticket"] is None
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE ticket_id = ? AND event_type = 'ticket_failed'", (bad_id,),
+        ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize(
+    ("column", "stored_json", "response_field"),
+    [
+        ("context_json", '{"nested":' + '[' * 63 + '0' + ']' * 63 + '}', "context"),
+        ("tmux_sessions_json", '[' * 64 + '0' + ']' * 64, "tmux_sessions"),
+    ],
+)
+def test_runner_claim_accepts_stored_json_at_depth_limit(
+    client: Any, column: str, stored_json: str, response_field: str,
+) -> None:
+    ticket_id = create_ticket(client, token="nyxmon-token-000000000000",
+                              title="Depth boundary", summary="Valid legacy stored JSON")
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(f"UPDATE tickets SET {column} = ? WHERE id = ?", (stored_json, ticket_id))
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    response = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert response.status_code == 200
+    claimed = response.get_json()["ticket"]
+    assert claimed["id"] == ticket_id
+    assert claimed["state"] == "running"
+    assert claimed[response_field] == json.loads(stored_json)
+    assert "ticket_failed" not in audit_event_types(client, ticket_id)
+
+
+@pytest.mark.parametrize(
     ("route_name", "path_builder", "data_builder"),
     [
         ("logout", lambda ticket_id: "/logout", lambda _ticket_id: {}),

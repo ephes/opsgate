@@ -110,6 +110,15 @@ def compute_payload_checksum(payload: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
 
 
+def validate_storage_text(value: str | None, *, field: str) -> None:
+    if value is None:
+        return
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ServiceError(f"{field} must be valid UTF-8 text", 400, "invalid_ticket") from exc
+
+
 def normalize_agent(raw_agent: Any) -> str:
     normalized = str(raw_agent).strip().lower()
     if normalized not in SUPPORTED_AGENTS:
@@ -550,6 +559,9 @@ class OpsGateService:
             task_ref_value = str(task_ref_raw).strip()
             task_ref = task_ref_value if task_ref_value else None
 
+        for field, value in (("source", raw_source), ("title", title), ("summary", summary), ("task_ref", task_ref)):
+            validate_storage_text(value, field=field)
+
         execution_plan = parse_execution_plan(payload.get("execution_plan"))
         ticket_policy = parse_policy_requirements(payload.get("policy_requirements"))
         token_floor = {"require_reviewer_step": require_reviewer_step_floor}
@@ -614,6 +626,11 @@ class OpsGateService:
     ) -> dict[str, Any]:
         ticket_id = str(uuid4())
         created_at = isoformat_z(utc_now())
+
+        for field, value in (
+            ("created_by", created_by), ("actor", actor), ("source_ip", source_ip), ("user_agent", user_agent),
+        ):
+            validate_storage_text(value, field=field)
 
         with self._write_transaction() as conn:
             self._expire_open_tickets_for_task_ref(

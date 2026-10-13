@@ -161,6 +161,15 @@ Useful keys:
 
 ### Ticket input validation
 
+Ticket `title`, `summary` and optional `task_ref` must be valid UTF-8 text;
+unpaired Unicode surrogates return `400 invalid_ticket` before checksum construction
+or any ticket/audit write. The same encoding contract applies to the authenticated
+source, creator and creation audit metadata (actor, source IP and user agent).
+Diagnostics name the field without echoing its contents. Valid non-ASCII text,
+including German characters and emoji in titles and step prompts, is preserved.
+This storage check covers direct text columns; JSON-stored `execution_plan` and
+`context` strings retain their existing validation rules.
+
 JSON deeper than 64 object/array levels (including the root) is rejected with `400 invalid_json` before API mutations.
 The manual form rejects excessively nested context JSON with `400 invalid_context_json`.
 

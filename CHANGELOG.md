@@ -59,6 +59,11 @@
 
 ### Fixed
 
+- Ticket creation rejects unpaired Unicode surrogates in direct ticket and audit
+  text columns with `400 invalid_ticket` before persistence, avoiding SQLite
+  encoding failures. Valid non-ASCII titles, summaries, task references and prompts
+  remain unchanged.
+
 - Runner claims isolate corrupt stored plan, policy, context and tmux-session JSON:
   fail and audit the affected ticket with `invalid_stored_plan`, then continue to
   the next approved ticket without launching the invalid plan. The existing intake

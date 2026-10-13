@@ -78,6 +78,7 @@ def _build_client(tmp_path: Path, *, operator_require_reviewer_step_floor: bool 
     app = create_app(settings)
     app.config.update(TESTING=True)
     app.config["OPSGATE_TEST_DB_PATH"] = db_file
+    app.config["OPSGATE_TEST_SETTINGS"] = settings
     return app.test_client()
 
 
@@ -3049,3 +3050,68 @@ def test_direct_settings_duration_default_is_validated(tmp_path: Path, duration:
 
     with pytest.raises(SettingsError, match="OPSGATE_MAX_DURATION_SECONDS_DEFAULT"):
         replace(_build_settings(str(tmp_path / "settings.sqlite3")), max_duration_seconds_default=duration)
+
+
+@pytest.mark.parametrize("field", ["title", "summary", "task_ref"])
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udfff"])
+def test_ticket_text_rejects_unpaired_surrogates(client: Any, field: str, surrogate: str) -> None:
+    before = database_snapshot(client)
+    payload = {
+        "title": "Title", "summary": "Summary", "task_ref": "task",
+        "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}],
+    }
+    payload[field] = "private text " + surrogate * 1000
+    response = client.post(
+        "/api/v1/tickets", headers=auth_headers("nyxmon-token-000000000000"),
+        content_type="application/json", data=json.dumps(payload, ensure_ascii=True),
+    )
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "invalid_ticket", "message": f"{field} must be valid UTF-8 text",
+    }
+    assert database_snapshot(client) == before
+
+
+def test_ticket_unicode_text_persists_and_passes_checksum_validation(client: Any) -> None:
+    text = "Grüße aus Köln 🛠️"
+    plan = [{"role": "investigator", "agent": "codex", "prompt_markdown": text}]
+    ticket_id = create_ticket(
+        client, token="nyxmon-token-000000000000", title=text, summary=text, task_ref=text,
+        execution_plan=plan,
+    )
+    ticket = client.get(f"/api/v1/tickets/{ticket_id}", headers=runner_headers()).get_json()
+    for field in ("title", "summary", "task_ref"):
+        assert ticket[field] == text
+    assert ticket["execution_plan"] == plan
+    login(client)
+    approved = client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client))
+    assert approved.status_code == 200
+    assert approved.get_json()["approved_payload_checksum"] == ticket["payload_checksum"]
+    claim = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "test"})
+    assert claim.status_code == 200
+    assert claim.get_json()["ticket"]["id"] == ticket_id
+    assert claim.get_json()["ticket"]["state"] == "running"
+
+
+@pytest.mark.parametrize("field", ["source", "creator", "source_ip", "user_agent"])
+def test_ticket_creation_metadata_rejects_unpaired_surrogates(client: Any, field: str) -> None:
+    from opsgate.service import OpsGateService, ServiceError, SubmitterContext
+
+    before = database_snapshot(client)
+    service = OpsGateService(client.application.config["OPSGATE_TEST_SETTINGS"])
+    payload = {
+        "title": "Title", "summary": "Summary",
+        "execution_plan": [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect"}],
+    }
+    with pytest.raises(ServiceError) as caught:
+        if field == "source":
+            service.create_ticket(payload, SubmitterContext("bad\ud800", "unused", False), None, None)
+        else:
+            metadata = {"creator": "admin", "source_ip": "127.0.0.1", "user_agent": "test"}
+            metadata[field] = "bad\ud800"
+            service.create_manual_ticket(payload, **metadata)
+    assert caught.value.status_code == 400
+    assert caught.value.error_code == "invalid_ticket"
+    expected_field = "created_by" if field == "creator" else field
+    assert str(caught.value) == f"{expected_field} must be valid UTF-8 text"
+    assert database_snapshot(client) == before

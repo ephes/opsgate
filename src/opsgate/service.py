@@ -84,6 +84,27 @@ def optional_iso_datetime(raw: str | None) -> datetime | None:
     return parse_iso_datetime(stripped)
 
 
+def check_json_depth(value: Any, *, code: str) -> None:
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if isinstance(item, dict | list):
+            depth += 1
+            if depth > 64:
+                raise ServiceError("JSON nesting exceeds 64 levels", 400, code)
+            children = item.values() if isinstance(item, dict) else item
+            pending.extend((child, depth) for child in children)
+
+
+def parse_stored_json(raw: Any) -> Any:
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise ServiceError("Stored JSON cannot be decoded", 400, "invalid_stored_json") from exc
+    check_json_depth(value, code="invalid_stored_json")
+    return value
+
+
 def compute_payload_checksum(payload: dict[str, Any]) -> str:
     canonical_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
@@ -1126,9 +1147,31 @@ class OpsGateService:
                         continue
 
                     try:
-                        execution_plan = parse_execution_plan(json.loads(row["execution_plan_json"]))
-                        policy_requirements = json.loads(row["policy_requirements_json"])
+                        execution_plan = parse_execution_plan(parse_stored_json(row["execution_plan_json"]))
+                        policy_requirements = parse_stored_json(row["policy_requirements_json"])
+                        if not isinstance(policy_requirements, dict):
+                            raise ServiceError("Stored policy must be an object", 400, "invalid_policy_requirements")
+                        # Validate without dropping keys from the approved checksum payload.
+                        parse_policy_requirements(policy_requirements)
                         enforce_policy_against_plan(policy_requirements, execution_plan)
+                        context = parse_stored_json(row["context_json"])
+                        if not isinstance(context, dict):
+                            raise ServiceError("Stored context must be an object", 400, "invalid_ticket")
+                        tmux_sessions = parse_stored_json(row["tmux_sessions_json"])
+                        if not isinstance(tmux_sessions, list):
+                            raise ServiceError("Stored tmux sessions must be an array", 400, "invalid_tmux_sessions")
+                        payload_for_checksum = self._ticket_payload_from_fields(
+                            source=row["source"],
+                            task_ref=row["task_ref"],
+                            title=row["title"],
+                            summary=row["summary"],
+                            execution_plan=execution_plan,
+                            policy_requirements=policy_requirements,
+                            context=context,
+                            expires_at=row["expires_at"],
+                            max_duration_seconds=int(row["max_duration_seconds"]),
+                        )
+                        current_checksum = compute_payload_checksum(payload_for_checksum)
                     except ServiceError as error:
                         cursor = conn.execute(
                             """
@@ -1152,22 +1195,13 @@ class OpsGateService:
                             user_agent=user_agent,
                             previous_state="approved",
                             new_state="failed",
-                            metadata={"reason": "invalid_stored_plan", "error": error.error_code},
+                            metadata={
+                                "reason": "invalid_stored_plan",
+                                "error": error.error_code,
+                            },
                         )
                         continue
 
-                    payload_for_checksum = self._ticket_payload_from_fields(
-                        source=row["source"],
-                        task_ref=row["task_ref"],
-                        title=row["title"],
-                        summary=row["summary"],
-                        execution_plan=execution_plan,
-                        policy_requirements=policy_requirements,
-                        context=json.loads(row["context_json"]),
-                        expires_at=row["expires_at"],
-                        max_duration_seconds=int(row["max_duration_seconds"]),
-                    )
-                    current_checksum = compute_payload_checksum(payload_for_checksum)
                     approved_checksum = row["approved_payload_checksum"]
                     if not approved_checksum or approved_checksum != current_checksum:
                         cursor = conn.execute(

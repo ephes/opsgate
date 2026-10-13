@@ -59,6 +59,12 @@
 
 ### Fixed
 
+- Runner claims isolate corrupt stored plan, policy, context and tmux-session JSON:
+  fail and audit the affected ticket with `invalid_stored_plan`, then continue to
+  the next approved ticket without launching the invalid plan. The existing intake
+  limit of 64 JSON container levels now also applies at claim time. Legacy tickets
+  stored above that limit may still be approved, but are failed when claimed.
+
 - New ticket durations now require integers from 1 to 31,536,000 seconds; invalid API values cannot
   truncate, overflow or create audit data. Service and runner defaults enforce the same bounds.
 

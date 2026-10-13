@@ -169,6 +169,12 @@ and `prompt_markdown` as strings containing non-whitespace text. Surrounding whi
 is trimmed; agents are lowercased and must be `codex` or `claude`. Other JSON types
 return `400 invalid_execution_plan`. The same validation applies before approving or
 claiming persisted plans; invalid claimed plans fail with `invalid_stored_plan`.
+Runner claims also validate stored policy, context and tmux-session JSON before
+starting a ticket. Malformed JSON, invalid shapes/types or nesting beyond 64 levels fail
+only that ticket with `invalid_stored_plan` and a `ticket_failed` audit event;
+the same claim continues to the next approved ticket. Audit diagnostics contain
+an error category, never the corrupt JSON. Corrupt stored values are retained
+for investigation; ticket detail reads may still fail until storage is repaired.
 
 `max_duration_seconds` must be a JSON integer from 1 to 31,536,000 seconds (365 days).
 Booleans, strings, all floating-point numbers (including integral values such as `900.0`)

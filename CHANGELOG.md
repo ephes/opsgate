@@ -4,6 +4,9 @@
 
 ### Security
 
+- Refresh the development lock to pytest 9.1.1 and Pygments 2.21.0 to resolve known
+  advisories; allow pytest versions below 10. Runtime dependencies are unchanged.
+
 - Dedicated step log pages read at most the final 2 MiB and mark truncated logs, bounding web-worker memory.
 - Security boolean configuration now rejects unrecognized values at startup instead of silently disabling
   protections. Missing or blank values use defaults; explicit true and false spellings remain supported.

@@ -4,3 +4,9 @@
 //!
 //! Everything here is pinned by the Python-generated fixtures in
 //! `rust/fixtures` (PLAN.md 7.2). Slices S2a, S2b and S2c fill this crate.
+
+pub mod log_preview;
+pub mod paths;
+pub mod proxy_fix;
+pub mod pytext;
+pub mod settings;

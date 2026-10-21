@@ -5,9 +5,10 @@ and `python -m opsgate runner`) as one binary, `opsgate`. The contract, the
 intentional divergences and the slices are in [`PLAN.md`](PLAN.md); the
 mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 
-**Status:** foundations only (slice S1). The workspace, CI, the fixture
-generator and the command-line skeleton exist; every command is still a stub
-that exits 2. The Python package in `src/opsgate` is the production
+**Status:** foundations (slice S1) and part of the core library (S2b:
+settings, log previews, path containment, proxy header selection). The
+workspace, CI, the fixture generator and the command-line skeleton exist;
+every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
 
@@ -28,9 +29,16 @@ rust/
   fixtures/
     generate.py         writes the fixtures from the Python implementation
     schema.sql          sqlite_master of a Python-initialised database (4.10)
+    settings.json       settings and env-file cases (4.2)
+    log_preview.json    log preview and step log cases (4.12)
+    proxy_fix.json      proxy header cases (4.4)
 ```
 
-The library crates are empty until their slices land. Every crate forbids
+`opsgate-core` has the modules of S2b: `settings` (env file, API and
+runner settings, PLAN.md 4.2), `log_preview` (4.12), `paths` (step-log
+containment, 4.12), `proxy_fix` (4.4) and `pytext` (Python's `str.strip`
+whitespace and `splitlines` boundaries). The other library crates are empty
+until their slices land. Every crate forbids
 `unsafe` code (workspace lint).
 
 ## Toolchain
@@ -84,7 +92,10 @@ builders to `GENERATORS` in `generate.py`.
 
 | Fixture | Content | Used by |
 | --- | --- | --- |
+| `log_preview.json` | file contents (as recipes) and limits → `read_tail_lines` preview lines and `read_step_log` text (long step logs by SHA-256, length, head and tail) | `opsgate-core/tests/log_preview_fixture.rs` |
+| `proxy_fix.json` | request header lines → client address, scheme and `Host` the app sees in production (waitress's proxy-header middleware around the Flask app with and without `ProxyFix`): forwarded headers never apply | `opsgate-core/tests/proxy_fix_fixture.rs` |
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
+| `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 
 ## Command line
 

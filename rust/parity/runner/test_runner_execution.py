@@ -74,6 +74,8 @@ def test_single_step_success(rig: Rig) -> None:
     assert agent_call["env"]["OPSGATE_PARITY_OVERRIDE"] == "env-file-wins"
     assert agent_call["env"]["OPSGATE_PARITY_PROCESS_MARKER"] == "from-process"
     assert agent_call["env"]["OPSGATE_RUNNER_TOKEN"] == RUNNER_TOKEN
+    # The harness passes no shell start-up hooks of its caller to the step scripts.
+    assert agent_call["env"]["BASH_ENV"] is None
     assert agent_call["cwd"] in {str(rig.ws.cwd), str(rig.ws.cwd.resolve())}
 
     # remain-on-exit (production tmux.conf): the finished session stays until a recovery pass of a

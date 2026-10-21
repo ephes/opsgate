@@ -7,7 +7,8 @@ Usage::
 Every record (written by ``pytest rust/parity/runner --records DIR``) names its
 scenario and its stack (API: ``fake``, ``python`` or ``rust``; the runner
 implementations in start order). For each scenario the all-Python stack is
-the baseline; every other stack that ran must have passed and must have
+the baseline (every all-Python record of a scenario must have passed and agree
+with the first); every other stack that ran must have passed and must have
 observed exactly the same normalised values. Skipped stacks are counted, not
 compared. Exit status 1 on any difference, a failed stack, a scenario without
 a passing baseline, or (with ``--require-rust``) when no Rust stack ran.
@@ -80,13 +81,20 @@ def compare(scenarios: dict[str, list[dict[str, Any]]], *, require_rust: bool = 
             if others:
                 problems.append(f"{name}: no all-Python baseline record")
             continue
-        baseline = baselines[0]
-        if baseline["outcome"] != "passed":
-            problems.append(f"{name}: baseline {stack_label(baseline['stack'])} {baseline['outcome']}")
+        failed = [b for b in baselines if b["outcome"] != "passed"]
+        for record in failed:
+            problems.append(f"{name}: baseline {stack_label(record['stack'])} {record['outcome']} ({record['_file']})")
+        if failed:
             continue
-        for record in others:
-            compared += 1
+        baseline = baselines[0]
+        # Further all-Python records (several record directories, cross stacks) must agree with the first.
+        checks = [(record, True) for record in baselines[1:]] + [(record, False) for record in others]
+        for record, is_baseline in checks:
             label = stack_label(record["stack"])
+            if is_baseline:
+                label = f"{label} (second baseline {record['_file']})"
+            else:
+                compared += 1
             if record["outcome"] != "passed":
                 problems.append(f"{name}: {label} {record['outcome']}")
             differences = list(diff(baseline["observed"], record["observed"]))

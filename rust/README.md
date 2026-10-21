@@ -134,8 +134,9 @@ relative to the execution data directory, shell words instead of quoting),
 tmux session names, state files, P1 log lines and agent calls. `compare.py`
 compares every stack of a scenario with its all-Python baseline.
 
-The runner environment is isolated so that a real agent can never run: a
-private `HOME` (whose `.tmux.conf` is production's, from the
+The runner environment is isolated so that a real agent can never run: it is
+built from an allowlist (locale, user, `TMPDIR`; no `BASH_ENV` or exported
+shell functions of the caller), with a private `HOME` (whose `.tmux.conf` is production's, from the
 `opsgate_deploy` role, including `remain-on-exit on`), `SHELL=/bin/sh`, and a
 `PATH` of the fake agents, tmux and the system directories only. Each scenario
 kills its tmux server at the end. CI runs the harness in the `parity-runner`

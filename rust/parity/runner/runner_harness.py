@@ -111,6 +111,15 @@ def opsgate_command(impl: str, *args: str) -> list[str]:
     raise HarnessError(f"unknown implementation {impl!r}")
 
 
+# The only variables of the caller's environment that reach a runner, its tmux server and the
+# agents, or an API process: locale, user and temporary directory.
+INHERITED_ENV = ("LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LOGNAME", "TMPDIR", "TZ", "USER")
+
+
+def base_env() -> dict[str, str]:
+    return {key: os.environ[key] for key in INHERITED_ENV if key in os.environ}
+
+
 def wait_until(predicate: Callable[[], Any], *, timeout: float = 30.0, what: str, interval: float = 0.05) -> Any:
     deadline = time.monotonic() + timeout
     while True:
@@ -237,13 +246,13 @@ class Workspace:
     def tmux_env(self) -> dict[str, str]:
         """Environment of the harness's tmux calls and the base of the runner's.
 
-        ``HOME`` is private (its ``.tmux.conf`` is production's ``TMUX_CONF``; no shell start-up files),
-        ``SHELL`` is ``/bin/sh``
-        (tmux runs the step command through it), and ``PATH`` holds only the fake agents, tmux and the
-        system directories.
+        Built from an allowlist (``BASH_ENV``, ``ENV``, exported shell functions and the like from the
+        caller would reach the ``/bin/bash`` step scripts): ``HOME`` is private (its ``.tmux.conf`` is
+        production's ``TMUX_CONF``; no shell start-up files), ``SHELL`` is ``/bin/sh`` (tmux runs the
+        step command through it), and ``PATH`` holds only the fake agents, tmux and the system
+        directories.
         """
-        dropped = {"TMUX", "TMUX_PANE", "XDG_CONFIG_HOME"}
-        env = {k: v for k, v in os.environ.items() if k not in dropped and not k.startswith("OPSGATE_")}
+        env = base_env()
         env.update(
             {
                 "TMUX_TMPDIR": str(self.tmux_tmpdir),
@@ -548,7 +557,7 @@ class ApiServer:
                 "OPSGATE_EXECUTION_DATA_DIR": str(ws.exec_dir),
             },
         )
-        env = {k: v for k, v in os.environ.items() if not k.startswith("OPSGATE_")}
+        env = {**base_env(), "HOME": str(ws.home), "PATH": os.pathsep.join(SYSTEM_PATH)}
         env["OPSGATE_ENV_FILE"] = str(env_file)
         self.process = Process(name, opsgate_command(impl, "serve"), env=env, cwd=ws.cwd, log_dir=ws.logs)
         client = Client(self.base_url)

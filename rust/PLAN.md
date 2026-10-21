@@ -1280,7 +1280,8 @@ mixed-stack scenarios are parametrised over the stacks; `--impl python` runs
 the all-Python ones, `--impl rust` every stack with Rust, and Rust stacks run
 only once `RUST_SLICES_LANDED` (`runner_harness.py`) lists S6b (runner) or
 S4a + S4b (API: bearer routes, login, cookie-authenticated approve). The
-runner environment is isolated so a real agent can never run: private `HOME`
+runner environment is isolated so a real agent can never run: built from an
+allowlist (locale, user, `TMPDIR`), private `HOME`
 whose `.tmux.conf` is production's (incl. `remain-on-exit on`, 4.13.6),
 `SHELL=/bin/sh` (tmux runs the step command through it), `PATH` = fake
 agents, tmux and the system directories. Recorded and compared: status calls

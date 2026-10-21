@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 ENV_KEYS = (
+    "BASH_ENV",
     "OPSGATE_PARITY_ENV_MARKER",
     "OPSGATE_PARITY_OVERRIDE",
     "OPSGATE_PARITY_PROCESS_MARKER",

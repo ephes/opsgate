@@ -81,3 +81,16 @@ def test_require_rust_fails_without_rust_records(tmp_path: Path) -> None:
     )
     assert compare.main([str(python)]) == 0
     assert compare.main([str(python), "--require-rust"]) == 1
+
+
+def test_every_baseline_is_checked(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    first = write(tmp_path / "a", record("s", "fake", ["python"], {"a": 1}), record("t", "fake", ["python"], {}))
+    second = write(
+        tmp_path / "b",
+        record("s", "fake", ["python"], {"a": 2}),
+        record("t", "fake", ["python"], {}, outcome="failed"),
+    )
+    assert compare.main([str(first), str(second)]) == 1
+    out = capsys.readouterr().out
+    assert "s: api=fake runners=python (second baseline" in out and "differs at /a" in out
+    assert "t: baseline api=fake runners=python failed" in out

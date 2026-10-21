@@ -419,6 +419,13 @@ fn approval_checksum_uses_int_of_the_stored_duration() {
             None,
         ),
         (rusqlite::types::Value::Text("12 hours".to_owned()), None),
+        // int() of a str: Unicode digits and spaces count; U+001C, which
+        // strip() removes, does not.
+        (
+            rusqlite::types::Value::Text("\u{666}\u{660}\u{3000}".to_owned()),
+            Some(60),
+        ),
+        (rusqlite::types::Value::Text("\x1c900".to_owned()), None),
         // The column is NOT NULL: no NULL case.
     ] {
         let (_directory, store) = store();

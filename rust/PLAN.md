@@ -679,7 +679,8 @@ re-validated (400); the stored policy enforced with Python's truthiness
 without being parsed (`{"require_reviewer_step": "no"}` requires a reviewer,
 `0` does not, extra keys stay in the checksum); the context hashed whatever
 its type; `int(max_duration_seconds)` hashed (a REAL is truncated, a text
-parsed as `int()` parses it). Undecodable JSON, a policy that is not an
+parsed as `int()` parses it: Unicode decimal digits and whitespace count,
+U+001C..U+001F, which `str.strip()` removes, do not). Undecodable JSON, a policy that is not an
 object (`AttributeError`) and a duration `int()` rejects are unhandled
 exceptions in Python: 500, nothing written. An empty stored `archived_at`
 counts as not archived for the checks but misses the `archived_at IS NULL`

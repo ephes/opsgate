@@ -8,8 +8,6 @@
 //! Ported Python (`service.py:OpsGateService`): `claim_ticket`,
 //! `_update_runner_heartbeat`, `parse_stored_json` as claim applies it.
 
-use std::path::Path;
-
 use opsgate_core::error::ServiceError;
 use opsgate_core::json::parse_stored;
 use opsgate_core::time::{isoformat_z, utc_now};
@@ -140,19 +138,13 @@ fn fail_ticket(
     Ok(true)
 }
 
-/// `claim_ticket` (4.7.3): the claimed ticket, or `None` when nothing is
-/// claimable. The disable file stops claims before the database is touched
-/// (no heartbeat either).
+/// `claim_ticket` (4.7.3) after the disable-file check: the claimed ticket,
+/// or `None` when nothing is claimable.
 pub(crate) fn claim(
     connection: &mut Connection,
-    disable_file_path: &Path,
     actor: &Actor<'_>,
     runner_host: &str,
 ) -> Result<Option<Ticket>, StoreError> {
-    // `Path.exists()`: follows symlinks; a broken link or an error is no file.
-    if disable_file_path.exists() {
-        return Ok(None);
-    }
     let transaction = write_transaction(connection)?;
     loop {
         let row = transaction

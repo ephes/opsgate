@@ -321,10 +321,15 @@ impl Store {
         source_ip: Option<&str>,
         user_agent: Option<&str>,
     ) -> Result<Option<Ticket>, StoreError> {
+        // The disable file stops claims before the database is opened, as in
+        // Python: no connection, no heartbeat. `Path.exists()` follows
+        // symlinks; a broken link or an error is no file.
+        if Path::new(&self.settings.disable_file_path).exists() {
+            return Ok(None);
+        }
         let actor = format!("runner:{runner_host}");
         claim::claim(
             &mut self.connect()?,
-            Path::new(&self.settings.disable_file_path),
             &Actor {
                 actor: &actor,
                 source_ip,

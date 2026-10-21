@@ -550,6 +550,31 @@ fn disable_file_stops_claims_without_a_heartbeat() {
 }
 
 #[test]
+fn disable_file_is_checked_before_the_database_is_opened() {
+    let (directory, store) = store();
+    // The database cannot be opened: a directory stands at its path.
+    for suffix in ["", "-wal", "-shm"] {
+        let path = format!("{}{suffix}", store.db_path().display());
+        if std::path::Path::new(&path).exists() {
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+    std::fs::create_dir(store.db_path()).unwrap();
+    assert!(store.claim_ticket("runner-a", None, None).is_err());
+    let disable = directory.path().join("remediation").join(".disabled");
+    std::fs::create_dir_all(disable.parent().unwrap()).unwrap();
+    std::fs::write(&disable, "").unwrap();
+    // Python returns None without opening the database.
+    assert!(
+        store
+            .claim_ticket("runner-a", None, None)
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.db_path().is_dir());
+}
+
+#[test]
 fn claim_expires_stale_approved_tickets_and_moves_on() {
     let (_directory, store) = store();
     let stale = create(&store, NYXMON, &ticket_payload("Stale", None, None));

@@ -2176,6 +2176,14 @@ STORE_SCENARIOS: list[dict[str, Any]] = [
             _act("approve", 14),
             _act("archive", 14),
             _act("unarchive", 14),
+            # int() of a stored text: Unicode digits and spaces count, U+001C
+            # (which str.strip() removes) does not.
+            _create("nyxmon", "tr-duration-unicode"),
+            _update(15, max_duration_seconds="\u0666\u0660\u3000"),
+            _act("approve", 15),
+            _create("nyxmon", "tr-duration-separator"),
+            _update(16, max_duration_seconds="\x1c900"),
+            _act("approve", 16),
             _act("approve", "00000000-0000-4000-8000-000000000000"),
             _act("archive", "00000000-0000-4000-8000-000000000000"),
             {"op": "list", "archived": "include", "limit": 100},

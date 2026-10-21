@@ -6,8 +6,7 @@
 //! `list_tickets`.
 
 use opsgate_core::error::ServiceError;
-use opsgate_core::pytext::strip;
-use opsgate_core::settings::{PyInt, parse_py_int};
+use opsgate_core::settings::{PyInt, py_int};
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::{Map, Number, Value};
@@ -169,7 +168,8 @@ impl TicketRow {
     /// `int(row["max_duration_seconds"])`, as approval and claim compute it
     /// for the checksum payload (4.7.2, 4.7.3): an integer as stored, a REAL
     /// truncated toward zero, a text parsed as Python's `int()` parses it
-    /// (whitespace stripped, single underscores between digits). Where
+    /// ([`py_int`]: ASCII and Unicode whitespace around it, Unicode decimal
+    /// digits, single underscores between digits). Where
     /// Python raises (`NULL`, an unparsable text, an infinite REAL) the value
     /// is unreadable, a 500 as Python's `TypeError`/`ValueError`. A value
     /// Python converts to an integer outside `i64` and a BLOB are unreadable
@@ -190,7 +190,7 @@ impl TicketRow {
                     Err(self.unreadable(column, "not an integer within 64 bits"))
                 }
             }
-            SqlValue::Text(text) => match parse_py_int(strip(text)) {
+            SqlValue::Text(text) => match py_int(text) {
                 Some(PyInt::Value(value)) => Ok(value),
                 Some(PyInt::OutOfRange) => {
                     Err(self.unreadable(column, "not an integer within 64 bits"))

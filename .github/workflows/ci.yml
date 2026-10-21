@@ -7,7 +7,8 @@ name: CI
 # drift test of the Rust port's fixtures (rust/fixtures, rust/PLAN.md 7.2).
 # The Rust port in rust/ runs in the `rust` job (`just rs-check` plus
 # cargo-deny, a release build and a `--version` smoke test) on Linux and
-# macOS (rust/PLAN.md 7.6).
+# macOS (rust/PLAN.md 7.6); the black-box API parity harness in
+# rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3).
 
 on:
   push:
@@ -60,6 +61,40 @@ jobs:
         run: uv run mypy src tests
       - name: Lint (just lint)
         run: uv run ruff check src tests
+
+  parity-api:
+    # rust/PLAN.md 7.3: black-box API scenarios against a real `python -m opsgate serve` process per
+    # scenario. The Rust leg (release build, `--impl rust`, record diff with compare.py) is switched on
+    # by slice S4a together with harness.RUST_SLICES_LANDED.
+    name: API parity harness (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.14"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync locked dependencies (just _sync)
+        run: uv sync --extra dev
+      - name: Lint and typecheck the harness
+        run: |
+          uv run ruff check rust/parity
+          uv run ruff format --check rust/parity
+          uv run mypy rust/parity/api
+      - name: Scenarios against Python
+        run: uv run pytest rust/parity/api -rs --impl python --records "$RUNNER_TEMP/parity-api/python"
 
   rust:
     name: Rust port (${{ matrix.os }}; fmt, clippy, deny, tests, release build)

@@ -48,3 +48,12 @@ rs-fixtures: _sync
 # Release build for this host (rust/target/release/opsgate)
 rs-build:
     cd rust && cargo build --release --locked
+
+# API parity harness (rust/PLAN.md 7.3): scenarios against Python and Rust `serve`, then the record diff.
+# Scenarios whose Rust slices have not landed are skipped on the Rust side (harness.RUST_SLICES_LANDED).
+rs-parity-api *args: _sync
+    cd rust && cargo build --release --locked
+    rm -rf rust/target/parity-api && mkdir -p rust/target/parity-api/python rust/target/parity-api/rust
+    uv run pytest rust/parity/api -rs --impl python --records rust/target/parity-api/python {{args}}
+    uv run pytest rust/parity/api -rs --impl rust --records rust/target/parity-api/rust {{args}}
+    uv run python rust/parity/api/compare.py rust/target/parity-api/python rust/target/parity-api/rust --report rust/target/parity-api/report.json

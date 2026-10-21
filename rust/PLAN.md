@@ -1,9 +1,10 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
 Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S6a
-runner I, S6b runner II (`opsgate runner` works; the runner parity harness is
-green against it locally) and the S7b runner parity harness landed); owner
+JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S3b
+store II, S6a runner I, S6b runner II (`opsgate runner` works; the runner
+parity harness is green against it locally) and the S7b runner parity harness
+landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -70,7 +71,7 @@ rust/
   parity/
     api/                  # black-box API scenario suite run against either implementation (7.3)
     runner/               # black-box runner harness: fake API, real tmux, fake agents (7.4)
-    shadow/               # stdlib-only tools for the production-copy checks (11.2)
+    shadow/               # data-parity tools for the production-copy checks (11.2, S3b): serialize_python.py (deployed venv), compare_dump.py (stdlib)
   scripts/release_checks.py
 ```
 
@@ -672,6 +673,18 @@ of "one open ticket per `(source, task_ref)`" outside archived tickets.
 States: open `pending_approval, approved, running`; terminal `succeeded,
 failed, rejected, canceled, expired`; archivable terminal ∪ pending.
 
+Approval reads the stored columns as `approve_ticket` does (S3b, pinned by
+`fixtures/store.json`): plain `json.loads` (no depth check); the plan
+re-validated (400); the stored policy enforced with Python's truthiness
+without being parsed (`{"require_reviewer_step": "no"}` requires a reviewer,
+`0` does not, extra keys stay in the checksum); the context hashed whatever
+its type; `int(max_duration_seconds)` hashed (a REAL is truncated, a text
+parsed as `int()` parses it). Undecodable JSON, a policy that is not an
+object (`AttributeError`) and a duration `int()` rejects are unhandled
+exceptions in Python: 500, nothing written. An empty stored `archived_at`
+counts as not archived for the checks but misses the `archived_at IS NULL`
+compare-and-set (409 `state_changed`), as in Python.
+
 #### 4.7.3 Claim (`claim_ticket`)
 
 - If the disable file exists → `{"ticket": null}` without touching the DB
@@ -693,6 +706,10 @@ failed, rejected, canceled, expired`; archivable terminal ∪ pending.
   heartbeat upsert; commit; return the ticket.
 - `runner_host` = body `runner_host` stripped, else client address, else
   `"runner"`. Every CAS miss (`rowcount 0`) continues the loop.
+- An exception other than `ServiceError` inside the loop (an unparsable
+  stored `expires_at`, a stored duration `int()` rejects) is a 500 that rolls
+  the whole claim back, including tickets failed earlier in the same round and
+  the heartbeat (S3b, `fixtures/store.json` scenario `claim_and_status`).
 
 #### 4.7.4 Runner status (`update_runner_status`)
 
@@ -1091,7 +1108,18 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   step 10); `str()` of a number that overflows to ±inf in `title`, `summary`
   or `task_ref` (Python stores `inf`; Rust: `invalid_ticket`, as D-3).
   Validation order is otherwise kept, so `{"max_duration_seconds": 1e309}`
-  still answers `invalid_ticket`.
+  still answers `invalid_ticket`. The same holds for runner `result_detail`
+  (`str()` of an overflowing number: Python stores `inf`; Rust:
+  `invalid_json`, as D-3) and, in the web slices, `reason` and `runner_host`.
+  Stored rows (S3b): a stored `NaN`/`Infinity` literal makes approval a 500
+  and claim fail the ticket (`invalid_stored_plan`, error
+  `invalid_stored_json`), where Python approves and claims it; a stored float
+  that overflows to infinity makes approval 400 `invalid_json` and claim fail
+  the ticket (error `invalid_json`), where Python hashes `Infinity`; a stored
+  `max_duration_seconds` whose `int()` lies outside `i64` (or a BLOB) is a
+  500 at approval and claim, where Python hashes the big integer; stored JSON
+  nested deeper than 128 levels cannot be read (get, approval: 500; claim's
+  depth check rejects it in both).
   `check-db` reports stored rows Rust cannot read; production has none
   (section 1: every column `json_valid`, no non-finite numbers).
 - **D-3 `str()` of arrays/objects.** Where Python stores the `repr` of a JSON
@@ -1219,7 +1247,12 @@ implementations by the parity harness.
   the formatter (round trip through `serde_json`).
 - `opsgate-store`: every operation of 4.7 against temp databases; race tests
   porting `tests/test_ticket_transition_races.py` with two connections and a
-  hook between the read and the CAS write; schema contract test (4.10).
+  hook between the read and the CAS write (S3b: `Store::with_read_hook`, a
+  hidden test seam the server never sets; `OPSGATE_RACE_REPEAT=<n>` repeats
+  each race); schema contract test (4.10); a round trip with the Python
+  service on the same database (`tests/python_roundtrip.rs` runs
+  `python3 -I tests/python_peer.py`, standard library only; skipped without
+  Python ≥ 3.11 unless `OPSGATE_REQUIRE_PYTHON=1`, which CI sets).
 - `opsgate-web`: in-process tests with `tower::ServiceExt::oneshot` (the
   Flask test-client equivalent) for every route, gate, header, auth, CSRF,
   throttle (injected clock) and session case of `tests/test_api.py`.
@@ -1253,8 +1286,9 @@ generated with pyca bcrypt 4.3 incl. long and NUL passwords),
 (Python-initialised `sqlite_master`), `store.json` (S3a: store scenarios run
 by `OpsGateService` — creation with lazy expiry and dedupe, manual tickets and
 the operator floor, get/list/serialisation of rows written by older code,
-health, session generation — with every step result and the final tables,
-generated ids and timestamps masked after a format check).
+health, session generation; S3b: transitions, claim and runner status — with
+every step result and the final tables, generated ids and timestamps masked
+after a format check unless a step wrote the value itself).
 
 S1 ships the generator with `schema.sql` as its first fixture (tables, then
 indexes, so it runs as one script; the S3a contract test uses it) and the
@@ -1359,7 +1393,8 @@ harness column says whether a black-box scenario also covers it.
 `macos-15`): `cargo fmt --check`, `clippy -D warnings`, `cargo test --locked`,
 `cargo deny check` (pinned, sha256-verified cargo-deny 0.20.2 as in nyxmon,
 the release binary for each runner OS; `deny.toml` checks the release target
-`aarch64-apple-darwin` only, so both legs check the same graph), release
+`aarch64-apple-darwin` only, so both legs check the same graph), Python 3.14
+for the store's round trip (`OPSGATE_REQUIRE_PYTHON=1`, S3b), release
 build, `opsgate --version` smoke test against the checked-out commit,
 binary-size report; and parity jobs running 7.3 (`parity-api`, S7a) and 7.4
 (`parity-runner`, S7b; Linux and macOS, Python now, Rust from S8). `justfile`:
@@ -1516,10 +1551,14 @@ About 2 h, root SSH session in tmux, no production unit touched:
 1. **Data parity on a copy**: SQLite online backup of the production DB into
    `/usr/local/var/opsgate/shadow/` (0700, `control_service_user`); as
    `control_service_user`: `parity/shadow/serialize_python.py` (imports the
-   deployed venv's `opsgate.service`) and `opsgate check-db --dump` write every
-   ticket's serialisation, recomputed checksum and `approved_payload_checksum`
-   comparison; the comparison must show zero differences and every
-   `approved_payload_checksum` that matched in Python matches in Rust.
+   deployed venv's `opsgate.service`) and `opsgate check-db --db <copy> --dump
+   <file>` write every ticket's serialisation, recomputed checksum and
+   `approved_payload_checksum` comparison (JSON lines, files created 0600);
+   `parity/shadow/compare_dump.py` (stdlib) compares them; the comparison must
+   show zero differences and every `approved_payload_checksum` that matched in
+   Python matches in Rust. The role's rsync excludes `rust/` (S1o), so the
+   two scripts are copied to the host for the run. (Landed with S3b; the
+   format is in `opsgate-store/src/dump.rs`.)
 2. **Shadow API**: `opsgate serve --db <copy> --bind-host 127.0.0.1
    --bind-port 8712` as `control_service_user` with **shadow env files** (API
    and runner, root-owned 0640 with the respective service group: the API

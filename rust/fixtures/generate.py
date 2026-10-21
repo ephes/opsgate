@@ -1794,18 +1794,22 @@ def build_validation() -> str:
     return render_json({"generated_by": GENERATED_BY, "cases": cases})
 
 
-# --- store.json (PLAN.md 4.5.2, 4.6, 4.7.1 step 12, 4.10; slice S3a) ---------
+# --- store.json (PLAN.md 4.5.2, 4.6, 4.7, 4.10; slices S3a, S3b) ------------
 #
 # Scenarios run against a real ``OpsGateService`` on a temporary database:
 # ticket creation (lazy expiry, dedupe, manual tickets, the operator floor),
 # get/list/serialisation of rows written by this and by older code, health,
-# and the approver's session generation. Every step records its result, every
-# scenario the final content of all four tables. Values the service generates
-# are masked after their format is checked: ticket ids become ``ticket-<n>``
-# in creation order, timestamps (``created_at``/``finished_at`` of created
-# tickets, audit ``timestamp``, session ``updated_at``) ``<timestamp>``. The
-# Rust test replays the steps against ``opsgate_store::Store`` and compares
-# results and tables (JSON values compared by their canonical text).
+# the approver's session generation (S3a), and the transitions, claim and
+# runner status updates (S3b). Every step records its result, every scenario
+# the final content of all four tables. Values the service generates are
+# masked after their format is checked: ticket ids become ``ticket-<n>`` in
+# creation order; the audit ``timestamp`` and session ``updated_at`` always,
+# and the ticket timestamps (``_STORE_GENERATED_COLUMNS``), heartbeat stamps,
+# health's ``runner_last_heartbeat`` and the archive stamps in audit metadata
+# unless a step wrote that exact value itself (``_store_fixed_values``),
+# become ``<timestamp>``. The Rust test replays the steps against
+# ``opsgate_store::Store`` and compares results and tables (JSON values
+# compared by their canonical text).
 
 #: The format ``isoformat_z(utc_now())`` writes (PLAN.md 4.9).
 STORE_TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?Z$"
@@ -1900,6 +1904,31 @@ def _row(ticket_id: str, created_at: str, state: str, **columns: Any) -> dict[st
 def _heartbeat(host: str, at: str) -> dict[str, Any]:
     return {"op": "insert", "table": "runner_heartbeats",
             "row": {"runner_host": host, "last_heartbeat_at": at, "updated_at": at}}
+
+
+def _act(op: str, ticket: int | str, approver: str = "opsgate-admin", **fields: Any) -> dict[str, Any]:
+    """An approver's transition (``approve``, ``reject``, ``cancel``,
+    ``archive``, ``unarchive``; ``reason`` for reject/cancel) on the n-th
+    created ticket or a literal id."""
+    target = {"ticket": ticket} if isinstance(ticket, int) else {"id": ticket}
+    return {"op": op, **target, "approver": approver, "source_ip": "100.64.0.9", "user_agent": "browser/1.0",
+            **fields}
+
+
+def _claim(host: str = "runner-a", ip: str | None = "127.0.0.1") -> dict[str, Any]:
+    return {"op": "claim", "runner_host": host, "source_ip": ip, "user_agent": "opsgate-runner"}
+
+
+def _status(ticket: int, body: dict[str, Any], host: str = "runner-a") -> dict[str, Any]:
+    """``POST /api/v1/runner/<id>/status`` with ``body`` (``null`` values
+    kept)."""
+    return {"op": "status", "ticket": ticket, "runner_host": host, "body": json.dumps(body),
+            "source_ip": "127.0.0.1", "user_agent": "opsgate-runner"}
+
+
+def _disable(present: bool) -> dict[str, Any]:
+    """Create or remove the disable file (``OPSGATE_DISABLE_FILE_PATH``)."""
+    return {"op": "disable", "present": present}
 
 
 _STORE_CONTEXT = {
@@ -2074,14 +2103,226 @@ STORE_SCENARIOS: list[dict[str, Any]] = [
             {"op": "health"},
         ],
     },
+    {
+        "name": "transitions",
+        "steps": [
+            _create("nyxmon", "tr-approve", context=_STORE_CONTEXT, expires_at=_STORE_FUTURE,
+                    execution_plan=_STORE_REVIEW, policy_requirements={"require_reviewer_step": True}),
+            # The approval checksum of a production-shaped float context.
+            _act("approve", 1),
+            _act("approve", 1),
+            _act("reject", 1, reason="late"),
+            _act("archive", 1),
+            _create("nyxmon", "tr-reject"),
+            _act("reject", 2, reason="not needed"),
+            _act("reject", 2, reason="again"),
+            _create("nyxmon", "tr-reject-default"),
+            _act("reject", 3, reason=""),
+            _create("nyxmon", "tr-cancel"),
+            _act("cancel", 4, reason=""),
+            _act("cancel", 4, reason="again"),
+            _act("cancel", 1, reason="operator canceled"),
+            # Archive and restore terminal tickets.
+            _act("archive", 2),
+            _act("archive", 2),
+            _act("unarchive", 2, approver="second-admin"),
+            _act("unarchive", 2),
+            # An archived pending ticket is shelved and does not block a replacement.
+            _create("openclaw", "tr-shelved"),
+            _act("archive", 5),
+            _act("approve", 5),
+            _act("reject", 5, reason="nope"),
+            _act("cancel", 5, reason="nope"),
+            _create("openclaw", "tr-shelved"),
+            _act("unarchive", 5),
+            _act("archive", 6),
+            _act("unarchive", 5),
+            # Lazy expiry blocks the approval and is kept.
+            _create("nyxmon", "tr-expired", expires_at=_STORE_PAST),
+            _act("approve", 7),
+            # Approval re-validates the stored plan and policy.
+            _create("nyxmon", "tr-agent"),
+            _update(8, execution_plan_json='[{"role":"investigator","agent":"shell","prompt_markdown":"x"}]'),
+            _act("approve", 8),
+            _create("operator", "tr-reviewer", execution_plan=_STORE_REVIEW,
+                    policy_requirements={"require_reviewer_step": True}),
+            _update(9, execution_plan_json='[{"role":"investigator","agent":"codex","prompt_markdown":"x"}]'),
+            _act("approve", 9),
+            _update(9, policy_requirements_json='{"require_reviewer_step": "no"}'),
+            _act("approve", 9),
+            _update(9, policy_requirements_json='{"require_reviewer_step": 0, "extra": [1.5]}'),
+            _act("approve", 9),
+            # Stored values Python cannot use: unhandled, nothing written.
+            _create("nyxmon", "tr-policy"),
+            _update(10, policy_requirements_json="[]"),
+            _act("approve", 10),
+            _update(10, policy_requirements_json="{}", context_json="{broken"),
+            _act("approve", 10),
+            _update(10, context_json="[1, 2.5]"),
+            _act("approve", 10),
+            # int() of the stored duration goes into the checksum.
+            _create("nyxmon", "tr-duration"),
+            _update(11, max_duration_seconds=" 1_200 "),
+            _act("approve", 11),
+            _create("nyxmon", "tr-duration-real"),
+            _update(12, max_duration_seconds=900.75),
+            _act("approve", 12),
+            _create("nyxmon", "tr-duration-text"),
+            _update(13, max_duration_seconds="n/a"),
+            _act("approve", 13),
+            # An empty archived_at misses the compare-and-set.
+            _create("nyxmon", "tr-legacy-archive"),
+            _update(14, archived_at=""),
+            _act("approve", 14),
+            _act("archive", 14),
+            _act("unarchive", 14),
+            _act("approve", "00000000-0000-4000-8000-000000000000"),
+            _act("archive", "00000000-0000-4000-8000-000000000000"),
+            {"op": "list", "archived": "include", "limit": 100},
+        ],
+    },
+    {
+        "name": "claim_and_status",
+        "steps": [
+            # An idle poll records a heartbeat and nothing else.
+            _claim("runner-idle"),
+            {"op": "health"},
+            _create("nyxmon", "cl-later", title="Approved second"),
+            _create("nyxmon", "cl-first", context=_STORE_CONTEXT, title="Approved first"),
+            _create("nyxmon", "cl-tampered"),
+            _create("nyxmon", "cl-invalid"),
+            _create("nyxmon", "cl-expired", expires_at=_STORE_FUTURE),
+            _create("nyxmon", "cl-archived"),
+            _act("approve", 3),
+            _act("approve", 4),
+            _act("approve", 5),
+            _act("approve", 6),
+            _act("approve", 2),
+            _act("approve", 1),
+            # Oldest approval first: the tampered, invalid and expired ones fail
+            # (or expire) in order, the archived one is skipped.
+            _update(3, title="Tampered title"),
+            _update(4, context_json="[]"),
+            _update(5, expires_at=_STORE_PAST),
+            _update(6, archived_at="2026-10-21T09:00:00Z", archived_by="opsgate-admin"),
+            _update(3, approved_at="2026-10-21T00:00:01Z"),
+            _update(4, approved_at="2026-10-21T00:00:02Z"),
+            _update(5, approved_at="2026-10-21T00:00:03Z"),
+            _update(6, approved_at="2026-10-21T00:00:00Z"),
+            _update(2, approved_at="2026-10-21T00:00:04Z"),
+            _update(1, approved_at="2026-10-21T00:00:05Z"),
+            _claim(),
+            _claim("runner-b", ip=None),
+            _claim(),
+            # The disable file stops claims before the database is touched.
+            _create("nyxmon", "cl-paused"),
+            _act("approve", 7),
+            _disable(True),
+            _claim("runner-c"),
+            _disable(False),
+            _claim("runner-c"),
+            # Runner status of ticket 2 (runner-a).
+            _status(2, {}),
+            _status(2, {"event": " Step_Started ", "result_detail": " step_1_started "}),
+            _status(2, {"event": "", "state": None, "result": None, "tmux_sessions": None,
+                        "result_detail": None}),
+            _status(2, {"event": None}),
+            _status(2, {"event": "ticket_approved"}),
+            _status(2, {"event": False}),
+            _status(2, {"state": "bogus"}),
+            _status(2, {"state": 0}),
+            _status(2, {"result": "success"}),
+            _status(2, {"state": "succeeded", "result": "timeout"}),
+            _status(2, {"result": False}),
+            _status(2, {"tmux_sessions": {"bad": "value"}}),
+            _status(2, {"tmux_sessions": 0}),
+            _status(2, {}, host="runner-b"),
+            _status(2, {"result_detail": False, "tmux_sessions": [
+                {"step_index": 0, "role": "investigator", "agent": "codex", "session_name": "job-x-01-investigator",
+                 "status": "running", "log_size_bytes": 0, "ratio": 0.5}]}),
+            _status(2, {"event": "ticket_succeeded", "state": " Succeeded ", "result_detail": "completed_1_steps"}),
+            _status(2, {"state": "running"}),
+            _status(2, {}),
+            # Ticket 1 (runner-b): timeout, then a canceled running ticket.
+            _status(1, {"event": "timeout", "state": "failed", "result": "timeout",
+                        "result_detail": "max_duration_seconds_exceeded"}, host="runner-b"),
+            _act("cancel", 7, reason="operator"),
+            _status(7, {"state": "failed"}, host="runner-c"),
+            # An approved ticket: heartbeat refused, set running, terminal refused.
+            _create("nyxmon", "cl-approved"),
+            _act("approve", 8),
+            _status(8, {}),
+            _status(8, {"state": "succeeded"}),
+            _status(8, {"state": "running"}, host="runner-d"),
+            _status(8, {"state": "canceled", "result": "canceled"}, host="runner-d"),
+            _create("nyxmon", "cl-pending"),
+            _status(9, {"state": "running"}),
+            # An unhandled error rolls the whole claim back: the tampered
+            # ticket in front stays approved, and no heartbeat is written.
+            _create("nyxmon", "cl-rollback-tampered"),
+            _create("nyxmon", "cl-rollback-duration"),
+            _act("approve", 10),
+            _act("approve", 11),
+            _update(10, title="changed"),
+            _update(11, max_duration_seconds="n/a"),
+            _claim("runner-e"),
+            {"op": "health"},
+        ],
+    },
+    {
+        "name": "legacy_rows",
+        "steps": [
+            # Rows written by older code: durations Python converts with int().
+            _row("bbbbbbbb-0000-4000-8000-000000000001", "2026-03-01T00:00:00Z", "pending_approval",
+                 max_duration_seconds=900.5,
+                 context_json='{"x":1E5,"y":[1.50,-0,2e-7],"z":"\\u00e9\\ud83d\\ude00"}'),
+            _row("bbbbbbbb-0000-4000-8000-000000000002", "2026-03-02T00:00:00Z", "pending_approval",
+                 max_duration_seconds=" 7_200 ", policy_requirements_json="{}"),
+            _row("bbbbbbbb-0000-4000-8000-000000000003", "2026-03-03T00:00:00Z", "approved",
+                 approved_by="opsgate-admin", approved_at="2026-03-03T00:00:01Z"),
+            _row("bbbbbbbb-0000-4000-8000-000000000004", "2026-03-04T00:00:00Z", "running",
+                 runner_host="", started_at="2026-03-04T00:00:01Z"),
+            _act("approve", "bbbbbbbb-0000-4000-8000-000000000001"),
+            _act("approve", "bbbbbbbb-0000-4000-8000-000000000002"),
+            # No approval checksum: tampered.
+            _claim(),
+            _claim(),
+            _claim(),
+            _claim(),
+            # A running ticket without an assigned host accepts any runner.
+            {"op": "status", "id": "bbbbbbbb-0000-4000-8000-000000000004", "runner_host": "runner-z",
+             "body": json.dumps({"event": "heartbeat"}), "source_ip": None, "user_agent": None},
+            {"op": "list", "archived": "include", "limit": 100},
+            {"op": "health"},
+        ],
+    },
 ]
+
+
+#: Ticket timestamps a transition may generate (masked unless a step wrote them).
+_STORE_GENERATED_COLUMNS = ("created_at", "approved_at", "started_at", "last_heartbeat_at", "finished_at",
+                            "archived_at")
+#: Audit metadata keys whose values the archive transitions generate.
+_STORE_GENERATED_METADATA = ("archived_at", "previous_archived_at")
+
+
+def _store_fixed_values(scenario: dict[str, Any]) -> set[str]:
+    """The text values the scenario's ``update`` and ``insert`` steps write:
+    never masked."""
+    values: set[str] = set()
+    for step in scenario["steps"]:
+        for value in {**step.get("set", {}), **step.get("row", {})}.values():
+            if isinstance(value, str):
+                values.add(value)
+    return values
 
 
 class _StoreMasks:
     """Masks the values a scenario's service generated."""
 
-    def __init__(self) -> None:
+    def __init__(self, fixed: set[str]) -> None:
         self.ids: list[str] = []
+        self.fixed = fixed
 
     def ticket_id(self, value: Any) -> Any:
         return f"ticket-{self.ids.index(value) + 1}" if value in self.ids else value
@@ -2094,13 +2335,29 @@ class _StoreMasks:
             raise AssertionError(f"unexpected generated timestamp {value!r}")
         return _STORE_MASK
 
+    def generated(self, value: Any) -> Any:
+        """A value the service may have generated: kept when a step wrote
+        it, else a checked and masked timestamp."""
+        return value if value is None or value in self.fixed else self.timestamp(value)
+
     def ticket(self, ticket: dict[str, Any]) -> dict[str, Any]:
         masked = dict(ticket)
-        if ticket["id"] in self.ids:
-            masked["created_at"] = self.timestamp(ticket["created_at"])
-            masked["finished_at"] = self.timestamp(ticket["finished_at"])
+        for column in _STORE_GENERATED_COLUMNS:
+            masked[column] = self.generated(ticket[column])
         masked["id"] = self.ticket_id(ticket["id"])
         return masked
+
+    def metadata(self, text: str) -> str:
+        metadata = json.loads(text)
+        if not any(key in metadata for key in _STORE_GENERATED_METADATA):
+            return text
+        for key in _STORE_GENERATED_METADATA:
+            if key in metadata:
+                metadata[key] = self.generated(metadata[key])
+        return json.dumps(metadata, sort_keys=True)
+
+    def health(self, health: dict[str, Any]) -> dict[str, Any]:
+        return {**health, "runner_last_heartbeat": self.generated(health["runner_last_heartbeat"])}
 
 
 def _store_tables(db_path: Path, masks: _StoreMasks) -> dict[str, list[dict[str, Any]]]:
@@ -2111,7 +2368,8 @@ def _store_tables(db_path: Path, masks: _StoreMasks) -> dict[str, list[dict[str,
             return [dict(row) for row in connection.execute(sql).fetchall()]
 
         audit = [
-            {**row, "ticket_id": masks.ticket_id(row["ticket_id"]), "timestamp": masks.timestamp(row["timestamp"])}
+            {**row, "ticket_id": masks.ticket_id(row["ticket_id"]), "timestamp": masks.timestamp(row["timestamp"]),
+             "metadata_json": masks.metadata(row["metadata_json"])}
             for row in rows("SELECT * FROM audit_events ORDER BY id")
         ]
         return {
@@ -2121,7 +2379,11 @@ def _store_tables(db_path: Path, masks: _StoreMasks) -> dict[str, list[dict[str,
                 {**row, "updated_at": masks.timestamp(row["updated_at"])}
                 for row in rows("SELECT * FROM ui_session_state ORDER BY username")
             ],
-            "runner_heartbeats": rows("SELECT * FROM runner_heartbeats ORDER BY runner_host"),
+            "runner_heartbeats": [
+                {**row, "last_heartbeat_at": masks.generated(row["last_heartbeat_at"]),
+                 "updated_at": masks.generated(row["updated_at"])}
+                for row in rows("SELECT * FROM runner_heartbeats ORDER BY runner_host")
+            ],
         }
     finally:
         connection.close()
@@ -2162,7 +2424,30 @@ def _store_step(state: dict[str, Any], step: dict[str, Any], masks: _StoreMasks)
         archived = {"exclude": "exclude", "only": "only", "include": "include"}[step["archived"]]
         return [masks.ticket(ticket) for ticket in service.list_tickets(step["limit"], archived=archived)]
     if op == "health":
-        return service.health()
+        return masks.health(service.health())
+    if op in ("approve", "reject", "cancel", "archive", "unarchive"):
+        ticket_id = masks.ids[step["ticket"] - 1] if "ticket" in step else step["id"]
+        method = getattr(service, f"{op}_ticket")
+        extra = {"reason": step["reason"]} if op in ("reject", "cancel") else {}
+        return masks.ticket(method(ticket_id, approver=step["approver"], source_ip=step["source_ip"],
+                                   user_agent=step["user_agent"], **extra))
+    if op == "claim":
+        claimed = service.claim_ticket(runner_host=step["runner_host"], source_ip=step["source_ip"],
+                                       user_agent=step["user_agent"])
+        return None if claimed is None else masks.ticket(claimed)
+    if op == "status":
+        ticket_id = masks.ids[step["ticket"] - 1] if "ticket" in step else step["id"]
+        return masks.ticket(service.update_runner_status(
+            ticket_id, runner_host=step["runner_host"], payload=json.loads(step["body"]),
+            source_ip=step["source_ip"], user_agent=step["user_agent"]))
+    if op == "disable":
+        disable_file = Path(service.settings.disable_file_path)
+        if step["present"]:
+            disable_file.parent.mkdir(parents=True, exist_ok=True)
+            disable_file.write_text("")
+        else:
+            disable_file.unlink()
+        return None
     if op == "generation":
         return service.get_ui_session_generation(step["username"])
     if op == "revoke":
@@ -2174,7 +2459,7 @@ def _store_step(state: dict[str, Any], step: dict[str, Any], masks: _StoreMasks)
 
 
 def _store_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
-    masks = _StoreMasks()
+    masks = _StoreMasks(_store_fixed_values(scenario))
     with tempfile.TemporaryDirectory() as directory:
         db_path = Path(directory) / "run" / "opsgate.sqlite3"
         # OpsGateService creates the missing parent directory.

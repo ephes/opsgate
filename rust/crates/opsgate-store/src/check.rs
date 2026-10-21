@@ -86,7 +86,7 @@ impl fmt::Display for CheckReport {
 /// `-wal`/`-shm` side files when they are missing (owned by the database's
 /// owner when run as root); it cannot remove them, and the next API
 /// connection uses them as usual.
-fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
+pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
     let connection = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,

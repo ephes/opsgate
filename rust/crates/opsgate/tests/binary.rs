@@ -1,7 +1,8 @@
 //! Process-level tests of the `opsgate` binary (PLAN.md 4.1, D-15):
 //! `--version`, the stub commands and usage errors (slice S1), `check-db`
-//! (slice S3a) and `runner` (slice S6b: configuration errors, `--once`, the
-//! P1 log line of a failed claim, SIGTERM/SIGINT).
+//! (slice S3a), `check-db --dump` (slice S3b) and `runner` (slice S6b:
+//! configuration errors, `--once`, the P1 log line of a failed claim,
+//! SIGTERM/SIGINT).
 
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
@@ -127,6 +128,61 @@ fn check_db_reports_and_exits_0_or_1() {
         text(&output.stderr)
     );
     assert!(!missing.exists());
+}
+
+#[test]
+fn check_db_dump_writes_records_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("opsgate.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!("../../../fixtures/schema.sql"))
+        .unwrap();
+    connection
+        .execute_batch(
+            "INSERT INTO tickets (id, source, title, summary, execution_plan_json, \
+             policy_requirements_json, context_json, payload_checksum, state, created_by, \
+             created_at, max_duration_seconds) VALUES ('t-1', 'nyxmon', 'T', 'S', \
+             '[{\"agent\": \"codex\", \"prompt_markdown\": \"p\", \"role\": \"r\"}]', \
+             '{}', '{}', 'x', 'pending_approval', 'submit:nyxmon', '2026-01-01T00:00:00Z', 60)",
+        )
+        .unwrap();
+    let db = path.to_str().unwrap();
+    let dump = directory.path().join("rust.jsonl");
+    let dump_arg = dump.to_str().unwrap();
+
+    let output = opsgate(&["check-db", "--db", db, "--dump", dump_arg]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.ends_with(&format!(
+            "dump: {dump_arg} (1 tickets, 0 with an approval checksum, 0 matching)\n"
+        )),
+        "{stdout}"
+    );
+    let record: serde_json::Value =
+        serde_json::from_str(std::fs::read_to_string(&dump).unwrap().trim()).unwrap();
+    assert_eq!(record["id"], "t-1");
+    assert_eq!(record["ticket"]["title"], "T");
+
+    // An existing dump is never overwritten.
+    let output = opsgate(&["check-db", "--db", db, "--dump", dump_arg]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        text(&output.stderr).starts_with(&format!("opsgate check-db: {dump_arg}: ")),
+        "{}",
+        text(&output.stderr)
+    );
+
+    // A different schema is reported and not dumped.
+    connection
+        .execute_batch("DROP INDEX idx_tickets_state")
+        .unwrap();
+    let other = directory.path().join("other.jsonl");
+    let output = opsgate(&["check-db", "--db", db, "--dump", other.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(text(&output.stderr).contains("not dumped, the schema differs"));
+    assert!(!other.exists());
 }
 
 #[test]

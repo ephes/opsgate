@@ -33,19 +33,19 @@ section ("Rust-only tests") with their paths.
 | `test_manual_ticket_form_defaults_investigator_to_codex` | `web::ui::manual_form` | S5 | A |
 | `test_manual_ticket_form_renders_role_scaffolding` | `web::ui::manual_form` | S5 | A |
 | `test_ticket_list_renders_compact_created_at_timestamp` | `web::ui` | S5 | A |
-| `test_api_archive_and_unarchive_preserve_ticket_access_and_audit` | `store::archive` | S3b | A |
-| `test_archive_rejects_non_archivable_active_states` | `store::archive` | S3b | A |
-| `test_archive_allowed_for_all_terminal_states` | `store::archive` | S3b | A |
-| `test_archive_allowed_for_pending_approval_state` | `store::archive` | S3b | A |
-| `test_archive_rejects_double_archive` | `store::archive` | S3b | A |
-| `test_unarchive_rejects_non_archived_ticket` | `store::archive` | S3b | A |
-| `test_unarchive_rejects_when_replacement_open_ticket_exists` | `store::archive` | S3b | A |
+| `test_api_archive_and_unarchive_preserve_ticket_access_and_audit` | `crates/opsgate-store/tests/transitions.rs::test_api_archive_and_unarchive_preserve_ticket_access_and_audit` | S3b ✓ | A |
+| `test_archive_rejects_non_archivable_active_states` | `crates/opsgate-store/tests/transitions.rs::test_archive_rejects_non_archivable_active_states` | S3b ✓ | A |
+| `test_archive_allowed_for_all_terminal_states` | `crates/opsgate-store/tests/transitions.rs::test_archive_allowed_for_all_terminal_states` | S3b ✓ | A |
+| `test_archive_allowed_for_pending_approval_state` | `crates/opsgate-store/tests/transitions.rs::test_archive_allowed_for_pending_approval_state` | S3b ✓ | A |
+| `test_archive_rejects_double_archive` | `crates/opsgate-store/tests/transitions.rs::test_archive_rejects_double_archive` | S3b ✓ | A |
+| `test_unarchive_rejects_non_archived_ticket` | `crates/opsgate-store/tests/transitions.rs::test_unarchive_rejects_non_archived_ticket` | S3b ✓ | A |
+| `test_unarchive_rejects_when_replacement_open_ticket_exists` | `crates/opsgate-store/tests/transitions.rs::test_unarchive_rejects_when_replacement_open_ticket_exists` | S3b ✓ | A |
 | `test_ui_archive_and_restore_controls_manage_ticket_visibility` | `web::ui` | S5 | A |
 | `test_ticket_list_shows_archive_and_restore_actions_with_list_redirect` | `web::ui` | S5 | A |
 | `test_pending_approval_ticket_shows_archive_action_in_list_and_detail` | `web::ui` | S5 | A |
 | `test_archived_pending_ticket_hides_approve_reject_and_cancel_actions` | `web::ui` | S5 | A |
-| `test_archived_pending_ticket_blocks_lifecycle_actions` | `store::archive` | S3b | A |
-| `test_runner_does_not_claim_archived_approved_ticket` | `store::claim` | S3b | A |
+| `test_archived_pending_ticket_blocks_lifecycle_actions` | `crates/opsgate-store/tests/transitions.rs::test_archived_pending_ticket_blocks_lifecycle_actions` | S3b ✓ | A |
+| `test_runner_does_not_claim_archived_approved_ticket` | `crates/opsgate-store/tests/claim.rs::test_runner_does_not_claim_archived_approved_ticket` | S3b ✓ | A |
 | `test_ticket_list_archive_redirect_sanitizes_invalid_targets` | `web::ui` | S5 | A |
 | `test_ui_archive_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_ticket_detail_renders_log_preview_and_full_log_link` | `web::ui` | S5 | A |
@@ -65,12 +65,12 @@ section ("Rust-only tests") with their paths.
 | `test_manual_ticket_creation_rejects_tampered_csrf_token` | `web::ui::manual_form` | S5 | A |
 | `test_ui_ticket_action_failure_redirects_back_to_ticket_detail` | `web::ui` | S5 | A |
 | `test_api_ticket_creation_rejects_unsupported_agent` | `crates/opsgate-core/tests/validation.rs::test_api_ticket_creation_rejects_unsupported_agent` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_approval_revalidates_stored_agent_allowlist` | `store::transitions` | S3b | A |
-| `test_approval_revalidates_stored_reviewer_requirement` | `store::transitions` | S3b | A |
+| `test_approval_revalidates_stored_agent_allowlist` | `crates/opsgate-store/tests/transitions.rs::test_approval_revalidates_stored_agent_allowlist` | S3b ✓ | A |
+| `test_approval_revalidates_stored_reviewer_requirement` | `crates/opsgate-store/tests/transitions.rs::test_approval_revalidates_stored_reviewer_requirement` | S3b ✓ | A |
 | `test_api_ticket_creation_normalizes_agent_case` | `crates/opsgate-core/tests/validation.rs::test_api_ticket_creation_normalizes_agent_case` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_runner_claim_fails_invalid_stored_agent_and_moves_on` | `store::claim` | S3b | A |
-| `test_runner_claim_isolates_corrupt_stored_json` | `store::claim` | S3b | A |
-| `test_runner_claim_accepts_stored_json_at_depth_limit` | `store::claim` | S3b | A |
+| `test_runner_claim_fails_invalid_stored_agent_and_moves_on` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_fails_invalid_stored_agent_and_moves_on` | S3b ✓ | A |
+| `test_runner_claim_isolates_corrupt_stored_json` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_isolates_corrupt_stored_json` (plus the D-2 cases `NaN` and `1e999`: Rust fails the ticket with `invalid_stored_json` / `invalid_json`) | S3b ✓ | A |
+| `test_runner_claim_accepts_stored_json_at_depth_limit` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_accepts_stored_json_at_depth_limit` | S3b ✓ | A |
 | `test_ui_post_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `web::gate` (production expectation: forwarded headers ignored behind waitress, PLAN.md 4.4 step 1; the Python test bypasses waitress) | S4a | A |
 | `test_login_ignores_external_next_path` | `web::login` | S4b | A |
@@ -81,28 +81,28 @@ section ("Rust-only tests") with their paths.
 | `test_login_ignores_control_chars_in_next_path` | `web::login` | S4b | A |
 | `test_create_and_get_ticket_submit_token` | `web::api` | S4a | A |
 | `test_dedupe_enforced_for_open_task_ref` | `crates/opsgate-store/tests/create.rs::test_dedupe_enforced_for_open_task_ref` (also scenario `dedupe` of fixture `store.json`) | S3a ✓ | A |
-| `test_dedupe_ignores_archived_pending_ticket` | `store::create + store::transitions` | S3b | A |
+| `test_dedupe_ignores_archived_pending_ticket` | `crates/opsgate-store/tests/transitions.rs::test_dedupe_ignores_archived_pending_ticket` | S3b ✓ | A |
 | `test_dedupe_expires_stale_pending_ticket_before_replacement_submit` | `crates/opsgate-store/tests/create.rs::test_dedupe_expires_stale_pending_ticket_before_replacement_submit` (also scenario `lazy_expiry` of fixture `store.json`) | S3a ✓ | A |
-| `test_dedupe_expires_stale_approved_ticket_before_replacement_submit` | `store::create + store::transitions` | S3b | A |
+| `test_dedupe_expires_stale_approved_ticket_before_replacement_submit` | `crates/opsgate-store/tests/transitions.rs::test_dedupe_expires_stale_approved_ticket_before_replacement_submit` | S3b ✓ | A |
 | `test_dedupe_not_applied_when_task_ref_missing` | `crates/opsgate-store/tests/create.rs::test_dedupe_not_applied_when_task_ref_missing` (also scenario `create_get_list` of fixture `store.json`) | S3a ✓ | A |
 | `test_operator_submitter_may_explicitly_require_reviewer_step` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_may_explicitly_require_reviewer_step` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_lazy_expiry_blocks_approval` | `store::transitions` | S3b | A |
-| `test_approve_and_reject_flow` | `store::transitions` | S3b | A |
-| `test_cancel_flow` | `store::transitions` | S3b | A |
-| `test_runner_claim_happy_path` | `store::claim` | S3b | A |
-| `test_runner_claim_detects_checksum_tamper` | `store::claim` | S3b | A |
-| `test_runner_status_rejects_terminal_state_regression` | `store::runner_status` | S3b | A |
-| `test_runner_status_accepts_timeout_result_and_tmux_sessions` | `store::runner_status` | S3b | A |
-| `test_runner_status_rejects_invalid_tmux_sessions_payload` | `store::runner_status` | S3b | A |
-| `test_runner_status_rejects_runner_host_mismatch` | `store::runner_status` | S3b | A |
-| `test_runner_status_rejects_invalid_event_type` | `store::runner_status` | S3b | A |
-| `test_runner_status_accepts_step_failed_event` | `store::runner_status` | S3b | A |
+| `test_lazy_expiry_blocks_approval` | `crates/opsgate-store/tests/transitions.rs::test_lazy_expiry_blocks_approval` | S3b ✓ | A |
+| `test_approve_and_reject_flow` | `crates/opsgate-store/tests/transitions.rs::test_approve_and_reject_flow` | S3b ✓ | A |
+| `test_cancel_flow` | `crates/opsgate-store/tests/transitions.rs::test_cancel_flow` | S3b ✓ | A |
+| `test_runner_claim_happy_path` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_happy_path` | S3b ✓ | A |
+| `test_runner_claim_detects_checksum_tamper` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_detects_checksum_tamper` | S3b ✓ | A |
+| `test_runner_status_rejects_terminal_state_regression` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_terminal_state_regression` | S3b ✓ | A |
+| `test_runner_status_accepts_timeout_result_and_tmux_sessions` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_accepts_timeout_result_and_tmux_sessions` | S3b ✓ | A |
+| `test_runner_status_rejects_invalid_tmux_sessions_payload` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_invalid_tmux_sessions_payload` | S3b ✓ | A |
+| `test_runner_status_rejects_runner_host_mismatch` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_runner_host_mismatch` | S3b ✓ | A |
+| `test_runner_status_rejects_invalid_event_type` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_invalid_event_type` | S3b ✓ | A |
+| `test_runner_status_accepts_step_failed_event` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_accepts_step_failed_event` | S3b ✓ | A |
 | `test_get_ticket_forbidden_for_other_submitter_source` | `web::api` | S4a | A |
 | `test_health_endpoint_reports_ok` | `crates/opsgate-store/tests/create.rs::test_health_endpoint_reports_ok` (store half) + `web::api` | S3a ✓ + S4a | A |
 | `test_health_reports_no_runner_heartbeat_before_first_poll` | `crates/opsgate-store/tests/create.rs::test_health_reports_no_runner_heartbeat_before_first_poll` (store half) + `web::api` | S3a ✓ + S4a | A |
-| `test_idle_runner_claim_poll_records_heartbeat` | `store::claim` | S3b | A |
-| `test_runner_claim_without_token_records_no_heartbeat` | `store::claim` | S3b | A |
+| `test_idle_runner_claim_poll_records_heartbeat` | `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat` | S3b ✓ | A |
+| `test_runner_claim_without_token_records_no_heartbeat` | `web::api` (the 401 is the web layer's; the store records a heartbeat only when a claim reaches it, `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat`) | S4a | A |
 | `test_api_rejects_non_tailscale_source_ip` | `web::gate` | S4a | A |
 | `test_cookie_api_action_without_csrf_header_is_rejected` | `web::csrf` | S4b | A |
 | `test_cookie_approve_with_wrong_csrf_header_is_rejected` | `web::csrf` | S4b | A |
@@ -126,7 +126,7 @@ section ("Rust-only tests") with their paths.
 | `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_api_rejects_non_text_plan_fields` | `crates/opsgate-core/tests/validation.rs::test_api_rejects_non_text_plan_fields` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_claim_rejects_non_text_stored_plan` | `store::claim` | S3b | A |
+| `test_claim_rejects_non_text_stored_plan` | `crates/opsgate-store/tests/claim.rs::test_claim_rejects_non_text_stored_plan` | S3b ✓ | A |
 | `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half, S2a) + `crates/opsgate-core/tests/validation.rs::test_api_rejects_utc_expiry_overflow` (`invalid_expires_at`, S2c) | S2a ✓ + S2c ✓ | A |
 | `test_datetime_overflow_is_value_error` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` | S2a | A |
 | `test_api_accepts_trimmed_plan_and_optional_expiry` | `crates/opsgate-core/tests/validation.rs::test_api_accepts_trimmed_plan_and_optional_expiry` (cases also in fixture `validation.json`) | S2c ✓ | A |
@@ -140,29 +140,29 @@ section ("Rust-only tests") with their paths.
 | `test_real_json_nesting_limit` | `core::json + web::api` | S4a | A |
 | `test_real_manual_context_nesting_limit` | `web::ui::manual_form` | S5 | A |
 | `test_malformed_required_json_retains_domain_response` | `core::json + web::api` | S4a | A |
-| `test_runner_state_result_matrix` | `store::runner_status` | S3b | A |
+| `test_runner_state_result_matrix` | `crates/opsgate-store/tests/runner_status.rs::test_runner_state_result_matrix` | S3b ✓ | A |
 | `test_ticket_duration_rejects_invalid_values` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_invalid_values` (P3 D-2 for the `Infinity` literal: Rust answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_duration_accepts_boundaries` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_accepts_boundaries` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_duration_rejects_json_exponent_overflow` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_json_exponent_overflow` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_manual_ticket_duration_rejects_invalid_values` | `web::ui::manual_form` | S5 | A |
 | `test_direct_settings_duration_default_is_validated` | `crates/opsgate-core/tests/settings_fixture.rs::direct_settings_duration_default_is_validated` | S2b ✓ | - |
 | `test_ticket_text_rejects_unpaired_surrogates` | `crates/opsgate-core/tests/validation.rs::test_ticket_text_rejects_unpaired_surrogates` (P3 D-2: Rust answers `invalid_json` for lone surrogates) (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `core::validate + store::claim` | S3b | A |
+| `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `crates/opsgate-store/tests/claim.rs::test_ticket_unicode_text_persists_and_passes_checksum_validation` (validation half: S2c) | S3b ✓ | A |
 | `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `crates/opsgate-core/tests/validation.rs::test_ticket_creation_metadata_rejects_unpaired_surrogates` (P3 D-2: lone surrogates cannot reach Rust strings; the body path answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | - |
 
 ### `tests/test_ticket_transition_races.py`
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_cancel_during_approve_is_not_overwritten` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_cancel_during_runner_completion_is_reported` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_double_approve_has_one_winner` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_reject_during_approve_is_not_overwritten` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_approve_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
-| `test_runner_completion_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
-| `test_lifecycle_action_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
-| `test_archive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
-| `test_unarchive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
+| `test_cancel_during_approve_is_not_overwritten` | `crates/opsgate-store/tests/races.rs::test_cancel_during_approve_is_not_overwritten` (two threads, the store's read hook between read and write) | S3b ✓ | A |
+| `test_cancel_during_runner_completion_is_reported` | `crates/opsgate-store/tests/races.rs::test_cancel_during_runner_completion_is_reported` | S3b ✓ | A |
+| `test_double_approve_has_one_winner` | `crates/opsgate-store/tests/races.rs::test_double_approve_has_one_winner` | S3b ✓ | A |
+| `test_reject_during_approve_is_not_overwritten` | `crates/opsgate-store/tests/races.rs::test_reject_during_approve_is_not_overwritten` | S3b ✓ | A |
+| `test_approve_with_stale_read_after_cancel_returns_state_changed` | `crates/opsgate-store/tests/races.rs::test_approve_with_stale_read_after_cancel_returns_state_changed` | S3b ✓ | - |
+| `test_runner_completion_with_stale_read_after_cancel_returns_state_changed` | `crates/opsgate-store/tests/races.rs::test_runner_completion_with_stale_read_after_cancel_returns_state_changed` | S3b ✓ | - |
+| `test_lifecycle_action_with_stale_read_returns_state_changed` | `crates/opsgate-store/tests/races.rs::test_lifecycle_action_with_stale_read_returns_state_changed` | S3b ✓ | - |
+| `test_archive_with_stale_read_returns_state_changed` | `crates/opsgate-store/tests/races.rs::test_archive_with_stale_read_returns_state_changed` | S3b ✓ | - |
+| `test_unarchive_with_stale_read_returns_state_changed` | `crates/opsgate-store/tests/races.rs::test_unarchive_with_stale_read_returns_state_changed` | S3b ✓ | - |
 
 ### `tests/test_config.py`
 
@@ -256,7 +256,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 
 | Test | Covers | Slice |
 | --- | --- | --- |
-| `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db`, usage errors exit 2, `--version` text (4.1, D-15) | S1 |
+| `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db [--dump]`, usage errors exit 2, `--version` text (4.1, D-15) | S1, S3b |
 | `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2 (`runner` no longer since S6b), usage errors exit 2, `--help` | S1 |
 | `crates/opsgate/tests/binary.rs` (runner cases) | `opsgate runner [--once]` as a process: configuration errors (one stderr line naming the setting, never its value, exit 1), `--once` with the disable file (no claim, `runner-state/` created, startup line without secrets), the P1 log line of a failed claim (4.15), SIGTERM and SIGINT during the poll-interval sleep end the runner at once with exit 0 (4.1, D-16) | S6b |
 | `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
@@ -283,6 +283,14 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-store/tests/check_db.rs` | `check-db` (3.1, D-15): counts, the database file never written (also with uncheckpointed WAL content, which is read), the Python schema fixture passes, missing/extra/changed tables (columns, collations, constraints) and indexes, unreadable rows (JSON, D-2 overflow, BLOBs, `expires_at`, durations, audit metadata, session and heartbeat rows) reported without their values, a capped problem list, write-protected file, missing or foreign file | S3a |
 | `crates/opsgate/tests/binary.rs::check_db_reports_and_exits_0_or_1` | `opsgate check-db --db`: report on stdout, exit 0/1, an unreadable file is one stderr line and exit 1, never creates the file | S3a |
 | `tests/test_rust_fixtures.py::test_rust_store_ddl_is_the_python_ddl` | the DDL constants of `opsgate-store/src/schema.rs` are the statements of `init_db`, in order (4.10) | S3a |
+| `crates/opsgate-store/tests/store_fixture.rs` (S3b scenarios) | `store.json` scenarios `transitions`, `claim_and_status`, `legacy_rows`: every approver transition and its errors, approval of stored values (truthy policies, `int()` of REAL/text durations, unhandled errors writing nothing, empty `archived_at` → `state_changed`), claim order, tamper, invalid stored JSON, expiry, archived and disabled claims, a claim rolled back by an unhandled error, runner status with explicit `null`/`false`/`0`, rows written by older code; every written row and audit event equal to Python's (4.7.2–4.7.4) | S3b |
+| `crates/opsgate-store/tests/transitions.rs` (other tests) | approval reads stored values as Python does (truthiness, non-object policy and undecodable JSON → 500, D-2 `NaN`/overflow), the approval checksum uses `int()` of the stored duration, unknown tickets 404 in every transition, empty `archived_at` misses the compare-and-set | S3b |
+| `crates/opsgate-store/tests/claim.rs` (other tests) | `COALESCE(started_at)`, oldest approval first with creation order as tie-break, every hashed field and a missing/empty approval checksum are tampering, the disable file (symlinks followed) stops claims without a heartbeat, lazy expiry inside the claim, unhandled errors roll the whole claim back, float contexts pass the tamper check | S3b |
+| `crates/opsgate-store/tests/runner_status.rs` (other tests) | explicit `null`/`false`/`0` of `event`, `state`, `result`, `result_detail`, `tmux_sessions` (D-3 for containers in `result_detail`), approved → running without `started_at`, heartbeat row, actor/address/user agent of the audit event | S3b |
+| `crates/opsgate-store/tests/races.rs::concurrent_claims_have_one_winner` | two concurrent claims hand one approved ticket to one runner (7.3 races) | S3b |
+| `crates/opsgate-store/tests/python_roundtrip.rs` | Python and Rust on one database: created by one, approved by the other, claimed by the first, both ways, with float contexts; status, archive, unarchive, cancel across implementations; identical reads; each `init_db` on the other's database keeps generation 1; `check-db --dump` and `parity/shadow/serialize_python.py` records equal by `compare_dump.py` (4.8, 4.10, 11.2; needs Python ≥ 3.11, `OPSGATE_REQUIRE_PYTHON=1` in CI) | S3b |
+| `crates/opsgate-store/tests/dump.rs` | `check-db --dump` records: serialisation, recomputed approval checksum, match flag, error kinds; database unchanged; file new, 0600, never overwritten, removed when the dump fails (11.2) | S3b |
+| `crates/opsgate/tests/binary.rs::check_db_dump_writes_records_once` | `opsgate check-db --db --dump`: summary line, records, an existing file is refused, a different schema is not dumped | S3b |
 | `rust/parity/runner/test_runner_execution.py` | runner black box over a fake API (7.4): one/three steps, names and slugs, context and previous summary, agent command lines, env-file keys in the agents' environment (4.13.8), file modes, request shapes, exit-code failure, unsupported agent, invalid plan, timeout, cancel/terminal state during a step, session killed externally, heartbeat cadence, `max_parallel_jobs`, state files | S7b |
 | `rust/parity/runner/test_runner_api_faults.py` | status retry (503, dropped connection), status and heartbeat outages (state kept, live session re-attached), permanent 4xx, 409 conflicts, claim errors and their P1 log lines (4.13.1, 4.15) | S7b |
 | `rust/parity/runner/test_runner_supervisor.py` | disable file, `--once`, recovery housekeeping (state files, tmux discovery, terminal/not-running/unknown tickets, no tmux server, no tmux binary, GET outage) | S7b |

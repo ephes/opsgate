@@ -232,7 +232,7 @@ pub fn parse_bool(
 
 /// The result of Python's `int(text)` for a decimal string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PyInt {
+pub enum PyInt {
     Value(i64),
     /// A valid Python integer outside `i64`.
     OutOfRange,
@@ -241,8 +241,9 @@ enum PyInt {
 /// Python `int(text)` for an already stripped text, restricted to ASCII
 /// digits (D-8): optional sign, digits with single underscores between
 /// digits, at most 4300 digits. `None` where Python raises `ValueError` (or,
-/// for non-ASCII digits, accepts: D-8).
-fn parse_py_int(text: &str) -> Option<PyInt> {
+/// for non-ASCII digits, accepts: D-8). The store reads a stored
+/// `max_duration_seconds` text with it (`int(row[...])`, PLAN.md 4.7.2).
+pub fn parse_py_int(text: &str) -> Option<PyInt> {
     let (negative, body) = match text.as_bytes().first() {
         Some(b'+') => (false, &text[1..]),
         Some(b'-') => (true, &text[1..]),

@@ -10,7 +10,8 @@ name: CI
 # macOS (rust/PLAN.md 7.6), with tmux installed for the runner's integration
 # tests and Python for the store's round trip with the Python service; the
 # black-box API parity harness in
-# rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3). The
+# rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3) against
+# Python and, for the landed web slices, the Rust release binary. The
 # `parity-runner` job runs the black-box runner parity harness
 # (rust/parity/runner, rust/PLAN.md 7.4) with real tmux on Linux and macOS:
 # against the Python runner now, against the Rust runner once slice S6b has
@@ -70,11 +71,11 @@ jobs:
 
   parity-api:
     # rust/PLAN.md 7.3: black-box API scenarios against a real `python -m opsgate serve` process per
-    # scenario. The Rust leg (release build, `--impl rust`, record diff with compare.py) is switched on
-    # by slice S4a together with harness.RUST_SLICES_LANDED.
-    name: API parity harness (Python)
+    # scenario, then against the Rust release binary (`--impl rust`; only the scenarios whose web slices
+    # are in harness.RUST_SLICES_LANDED run, since slice S4a) and the record diff with compare.py.
+    name: API parity harness (Python and Rust)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       UV_PYTHON: "3.14"
     steps:
@@ -101,6 +102,30 @@ jobs:
           uv run mypy rust/parity/api rust/parity/shadow rust/crates/opsgate-store/tests/python_peer.py
       - name: Scenarios against Python
         run: uv run pytest rust/parity/api -rs --impl python --records "$RUNNER_TEMP/parity-api/python"
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        working-directory: rust
+        run: |
+          rustup toolchain install
+          rustc --version
+      - name: Cache cargo registry and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rust/target
+          key: parity-api-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}
+          restore-keys: parity-api-rust-${{ runner.os }}-${{ runner.arch }}-
+      - name: Release build of the Rust binary
+        working-directory: rust
+        run: cargo build --release --locked
+      - name: Scenarios against Rust
+        run: uv run pytest rust/parity/api -rs --impl rust --records "$RUNNER_TEMP/parity-api/rust"
+      - name: Record diff (compare.py)
+        run: >-
+          uv run python rust/parity/api/compare.py "$RUNNER_TEMP/parity-api/python" "$RUNNER_TEMP/parity-api/rust"
+          --report "$RUNNER_TEMP/parity-api/report.json"
 
   rust:
     name: Rust port (${{ matrix.os }}; fmt, clippy, deny, tests, release build)

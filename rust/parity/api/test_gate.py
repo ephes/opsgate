@@ -109,7 +109,6 @@ def test_api_error_and_redirect_responses_carry_security_headers(anon: Browser) 
         ("PUT", "/api/v1/tickets", 405),
         ("GET", "/api/v1/runner/claim", 405),
         ("DELETE", "/api/v1/tickets/x", 405),
-        ("GET", "/api/v1/tickets/x/approve", 405),
         ("GET", "/api/v1/health/", 404),
         ("GET", "/api/v1/tickets/a/b", 404),
         ("GET", "/api/v2/health", 404),
@@ -119,6 +118,13 @@ def test_api_error_and_redirect_responses_carry_security_headers(anon: Browser) 
 )
 def test_routing_methods_and_unknown_paths(anon: Browser, method: str, path: str, status: int) -> None:
     assert anon.request(method, path).status == status
+
+
+@S4B
+@pytest.mark.parametrize("action", ["approve", "reject", "cancel", "archive", "unarchive"])
+def test_routing_wrong_method_on_approver_action(anon: Browser, action: str) -> None:
+    # The approver's API actions are slice S4b's routes.
+    assert anon.get(f"/api/v1/tickets/x/{action}").status == 405
 
 
 @S4A

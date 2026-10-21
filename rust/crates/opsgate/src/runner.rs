@@ -50,7 +50,7 @@ pub fn run(once: bool) -> ExitCode {
 }
 
 /// Plain log lines on stderr (PLAN.md 4.15): timestamp, level, message.
-fn init_logging() {
+pub(crate) fn init_logging() {
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)

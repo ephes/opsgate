@@ -21,7 +21,8 @@ clap.workspace = true
 opsgate-core.workspace = true
 opsgate-runner.workspace = true
 opsgate-store.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+opsgate-web.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "time"] }
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

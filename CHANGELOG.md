@@ -4,6 +4,18 @@
 
 ### Development
 
+- Rust port slice S4a (`rust/crates/opsgate-web`, `rust/crates/opsgate`): `opsgate serve` works
+  with the web layer's shared foundations — the request processing order of `app.py` (decoded
+  request path, security headers on every response, the session cookie, error mapping to JSON or
+  flash and redirect, the network gate with the socket peer as client address, the UI-CSRF check of
+  every non-API `POST`), the JSON body rules and the 8 MiB body limit, the approver session check
+  with an encrypted `session` cookie (approvers sign in again when switching implementations, D-1),
+  the template environment rendering the package's Jinja templates, `GET`/`HEAD /login` and the
+  bearer routes (ticket create and get, runner claim and status, health). Graceful shutdown on
+  SIGTERM/SIGINT. The API parity harness runs its S4a scenarios against the Rust binary in CI with
+  no unexplained difference. New divergences D-17 (multipart form bodies) and D-18 (`next` values
+  Python's `urlsplit` raises on). Nothing deploys or runs the Rust API yet; the Python
+  implementation is unchanged.
 - Rust port slice S6b (`rust/crates/opsgate-runner`, `rust/crates/opsgate`): the runner's
   supervisor (claim loop up to `OPSGATE_MAX_PARALLEL_JOBS`, one worker per ticket, restart recovery
   from state files, tmux sessions and, once per start, artifact directories, verified tmux cleanup

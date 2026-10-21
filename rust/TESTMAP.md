@@ -197,10 +197,10 @@ section ("Rust-only tests") with their paths.
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_failed_publication_cleans_temp` | `runner::artifacts::atomic_write` | S6a | - |
-| `test_successful_publication_is_private` | `runner::artifacts::atomic_write` | S6a | - |
-| `test_cleanup_refusal_preserves_publication_error` | `runner::artifacts::atomic_write` | S6a | - |
-| `test_success_does_not_unlink_released_temp_name` | `runner::artifacts::atomic_write` | S6a | - |
+| `test_failed_publication_cleans_temp` | `crates/opsgate-runner/src/artifacts.rs::tests::failed_publication_cleans_temp` + `crates/opsgate-runner/src/artifacts.rs::tests::failed_replace_cleans_temp` | S6a ✓ | - |
+| `test_successful_publication_is_private` | `crates/opsgate-runner/src/artifacts.rs::tests::successful_publication_is_private` | S6a ✓ | - |
+| `test_cleanup_refusal_preserves_publication_error` | `crates/opsgate-runner/src/artifacts.rs::tests::cleanup_refusal_preserves_publication_error` | S6a ✓ | - |
+| `test_success_does_not_unlink_released_temp_name` | `crates/opsgate-runner/src/artifacts.rs::tests::success_does_not_unlink_released_temp_name` | S6a ✓ | - |
 
 ### `tests/test_runner.py`
 
@@ -215,33 +215,33 @@ between two probes) and the `cleanup_fails=True` case of
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_ticket_executor_runs_steps_sequentially` | `runner::executor` | S6a | R |
-| `test_ticket_executor_reports_timeout_result` | `runner::executor` | S6a | R |
-| `test_ticket_executor_reports_step_failure_detail` | `runner::executor` | S6a | R |
-| `test_ticket_executor_resumes_from_existing_step_summary` | `runner::supervisor / runner::resume` | S6b | R |
+| `test_ticket_executor_runs_steps_sequentially` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_runs_steps_sequentially` | S6a ✓ | R |
+| `test_ticket_executor_reports_timeout_result` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_reports_timeout_result` | S6a ✓ | R |
+| `test_ticket_executor_reports_step_failure_detail` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_reports_step_failure_detail` | S6a ✓ | R |
+| `test_ticket_executor_resumes_from_existing_step_summary` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_resumes_from_existing_step_summary` | S6a ✓ | R |
 | `test_worker_keeps_state_file_when_status_update_unavailable` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_worker_exception_report_includes_runner_host` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_worker_success_marks_state_for_cleanup` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_reap_finished_workers_cleans_state_files` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_recovery_restarts_only_running_tickets` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_discover_ticket_ids_from_tmux_handles_missing_binary` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_build_agent_command_rejects_unsupported_agent` | `runner::commands` | S6a | - |
-| `test_build_agent_command_uses_codex_exec_with_stdin` | `runner::commands` | S6a | - |
-| `test_build_agent_command_uses_claude_print_with_bypass_permissions` | `runner::commands` | S6a | - |
-| `test_build_attach_command_includes_tmux_tmpdir` | `runner::commands` | S6a | - |
-| `test_ticket_executor_rejects_unsupported_agent` | `runner::executor` | S6a | R |
-| `test_resume_adopts_existing_exit_code_without_relaunch` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_resume_fails_interrupted_step_without_relaunch` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_resume_reattaches_live_session_without_relaunch` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_resumed_summary_appears_once_in_next_step_context` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_runner_shutdown_marks_running_step_interrupted` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_resume_fails_closed_on_unreadable_metadata` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_resume_adopts_exit_code_written_during_session_probe` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_post_status_ignores_conflict_when_ticket_moved_on` | `runner::executor` | S6a | R |
-| `test_post_status_raises_other_conflicts` | `runner::executor` | S6a | R |
+| `test_build_agent_command_rejects_unsupported_agent` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_rejects_unsupported_agent` | S6a ✓ | - |
+| `test_build_agent_command_uses_codex_exec_with_stdin` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_uses_codex_exec_with_stdin` | S6a ✓ | - |
+| `test_build_agent_command_uses_claude_print_with_bypass_permissions` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_uses_claude_print_with_bypass_permissions` | S6a ✓ | - |
+| `test_build_attach_command_includes_tmux_tmpdir` | `crates/opsgate-runner/src/commands.rs::tests::build_attach_command_includes_tmux_tmpdir` | S6a ✓ | - |
+| `test_ticket_executor_rejects_unsupported_agent` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_rejects_unsupported_agent` | S6a ✓ | R |
+| `test_resume_adopts_existing_exit_code_without_relaunch` | `crates/opsgate-runner/tests/executor.rs::resume_adopts_existing_exit_code_without_relaunch` | S6a ✓ | R |
+| `test_resume_fails_interrupted_step_without_relaunch` | `crates/opsgate-runner/tests/executor.rs::resume_fails_interrupted_step_without_relaunch` | S6a ✓ | R |
+| `test_resume_reattaches_live_session_without_relaunch` | `crates/opsgate-runner/tests/executor.rs::resume_reattaches_live_session_without_relaunch` | S6a ✓ | R |
+| `test_resumed_summary_appears_once_in_next_step_context` | `crates/opsgate-runner/tests/executor.rs::resumed_summary_appears_once_in_next_step_context` | S6a ✓ | R |
+| `test_runner_shutdown_marks_running_step_interrupted` | `crates/opsgate-runner/tests/executor.rs::runner_shutdown_marks_running_step_interrupted` | S6a ✓ | R |
+| `test_resume_fails_closed_on_unreadable_metadata` | `crates/opsgate-runner/tests/executor.rs::resume_fails_closed_on_unreadable_metadata` | S6a ✓ | R |
+| `test_resume_adopts_exit_code_written_during_session_probe` | `crates/opsgate-runner/tests/executor.rs::resume_adopts_exit_code_written_during_session_probe` | S6a ✓ | R |
+| `test_post_status_ignores_conflict_when_ticket_moved_on` | `crates/opsgate-runner/tests/executor.rs::post_status_ignores_conflict_when_ticket_moved_on` | S6a ✓ | R |
+| `test_post_status_raises_other_conflicts` | `crates/opsgate-runner/tests/executor.rs::post_status_raises_other_conflicts` | S6a ✓ | R |
 | `test_worker_cleans_session_before_terminal_failure` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_status_outage_retries_and_retains_execution` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_api_normalizes_transport_and_response_errors` | `runner::api_client` | S6a | R |
+| `test_api_normalizes_transport_and_response_errors` | `crates/opsgate-runner/tests/api_client.rs::api_normalizes_transport_and_response_errors` | S6a ✓ | R |
 | `test_recovery_transport_outage_isolated_and_state_retained` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_running_heartbeat_outage_never_fails_live_session` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_permanent_api_error_stops_session_before_failure` | `runner::supervisor / runner::resume` | S6b | R |
@@ -282,3 +282,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `rust/parity/runner/test_runner_restart.py` | SIGTERM (interrupted), SIGKILL + restart (adopt exit code, re-attach, interrupted, skip finished steps) for every Python/Rust runner pair (cross-implementation recovery), unreadable metadata | S7b |
 | `rust/parity/runner/test_runner_mixed_stacks.py` | real API × real runner, Python/Rust × Python/Rust, one two-step ticket end to end incl. the step log pages | S7b |
 | `tests/test_runner_parity_compare.py` | `rust/parity/runner/compare.py`: equal records pass, differences reported with their path, types compared, failed stacks and missing baselines fail, `--require-rust` | S7b |
+| `crates/opsgate-runner/tests/executor.rs` (Rust-only cases) | executor against a fake API and tmux on paused time: status sequence, artifact names, keys and modes (`context.json` in both roots, `prompt.md`, `previous_step_summary.md`, `run_step.sh` 0750, JSON artifacts 0600), invalid plan, non-running tickets, terminal ticket before a step, cancel and other terminal states during a step, session lost without exit code, heartbeat cadence, post-status retries and the stop-aware retry wait, shutdown after the exit code appeared, error kinds (4.13.4, 4.13.5) | S6a |
+| `crates/opsgate-runner/tests/api_client.rs` (Rust-only cases) | HTTP client against an in-process axum server: bearer header, JSON bodies and paths, claim results, empty bodies, the three passed-on error codes and `http_error` otherwise, no redirects, redacted `Debug` (4.13.1) | S6a |
+| `crates/opsgate-runner/tests/tmux_integration.rs` | real `tmux` on a private socket label and `TMUX_TMPDIR` with fake agents in an isolated environment: a two-step ticket (agent command lines, prompt on stdin, env-file variables reach the step, `session.log`, `exit_code`), `has-session`/`kill-session`, failing `new-session`, missing `tmux` binary (4.13.3, 4.13.8) | S6a |
+| `crates/opsgate-runner/src/{commands,artifacts,executor,values}.rs::tests` | slugs and names, shell quoting round trips, the step script text, artifact JSON text, `_load_summary` rules, SHA-256, Python path joining, session-entry upsert, exit-code parsing, Python `str()`/truthiness/`int()` of ticket values | S6a |

@@ -7,7 +7,8 @@ name: CI
 # drift test of the Rust port's fixtures (rust/fixtures, rust/PLAN.md 7.2).
 # The Rust port in rust/ runs in the `rust` job (`just rs-check` plus
 # cargo-deny, a release build and a `--version` smoke test) on Linux and
-# macOS (rust/PLAN.md 7.6); the black-box API parity harness in
+# macOS (rust/PLAN.md 7.6), with tmux installed for the runner's integration
+# tests; the black-box API parity harness in
 # rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3). The
 # `parity-runner` job runs the black-box runner parity harness
 # (rust/parity/runner, rust/PLAN.md 7.4) with real tmux on Linux and macOS:
@@ -159,7 +160,21 @@ jobs:
           "$RUNNER_TEMP/bin/cargo-deny" --version
       - name: Supply chain (cargo deny, rust/deny.toml)
         run: cargo deny --locked check
+      - name: Install tmux (runner integration tests, rust/PLAN.md 7.1)
+        run: |
+          if ! command -v tmux >/dev/null; then
+            if [ "$RUNNER_OS" = "macOS" ]; then
+              brew install tmux
+            else
+              sudo apt-get update -q
+              sudo apt-get install -y -q tmux
+            fi
+          fi
+          tmux -V
       - name: Tests (cargo test)
+        # The runner's tmux integration tests fail instead of skipping when tmux is missing.
+        env:
+          OPSGATE_REQUIRE_TMUX: "1"
         run: cargo test --workspace --locked
       - name: Release build
         run: cargo build --release --locked

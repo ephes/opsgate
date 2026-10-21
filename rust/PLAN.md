@@ -1,8 +1,8 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
 Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str, S2b core settings/files, S2c core validation and the S7b runner
-parity harness landed); owner
+JSON/time/str, S2b core settings/files, S2c core validation, S6a runner I and
+the S7b runner parity harness landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -325,8 +325,8 @@ else that differs is a bug.
   finishes first (≤ 15 s timeout); the process exits 0 after all workers
   stopped (`_wait_for_workers`). What happens at shutdown (4.13.4: kill the
   active session, metadata `interrupted`, or leave an existing exit code for
-  adoption) is P1; Rust may observe the flag sooner (stop-aware sleeps and
-  cancellable requests, D-16). launchd sends
+  adoption) is P1; Rust may observe the flag sooner (stop-aware sleeps,
+  D-16). launchd sends
   SIGTERM on `bootout`/`kickstart -k`, SIGKILL after its exit timeout.
 - `runner --once`: one recovery pass, one claim round; exits after the
   started workers finished, or immediately if nothing was claimed or the
@@ -856,7 +856,10 @@ body's `error` only if it is one of `invalid_state`, `state_changed`,
 timeout, protocol) → `(503, transport_error)`. Error texts never contain
 response bodies or exception text. Claim body `{"runner_host": <host>}`; a
 `ticket` that is neither null nor an object → `(500, invalid_ticket)`.
-Plain HTTP only (D-10).
+Plain HTTP only (D-10). The Rust client follows no redirects and ignores
+proxy variables (`urlopen` would follow a `GET` redirect and use
+`http_proxy`); the API answers the runner routes on loopback without
+either, so this changes no call.
 
 #### 4.13.2 Paths and names (P1)
 
@@ -1108,10 +1111,13 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   `serve --db/--bind-host/--bind-port` (tests and shadow only). `--once` is
   accepted only after `runner` (argparse also takes `serve --once` and
   ignores it). No command still means `serve`.
-- **D-16 Faster shutdown observation**: the Rust runner's sleeps and HTTP
-  requests are cancellable, so SIGTERM is observed sooner than Python's
-  poll-interval sleep and 15 s request timeout; the shutdown actions
-  themselves are unchanged (4.1, 4.13.4).
+- **D-16 Faster shutdown observation**: the Rust runner's sleeps (the
+  executor's 1 s poll, the post-status retry wait, the supervisor's poll
+  interval) end at SIGTERM, so it is observed sooner than after Python's
+  poll-interval sleep; the shutdown actions themselves are unchanged (4.1,
+  4.13.4). HTTP requests of the executor are not cancelled (a cancelled
+  request would turn into an API error and skip the shutdown actions); they
+  finish within the 15 s timeout as in Python.
 
 ---
 
@@ -1188,10 +1194,16 @@ implementations by the parity harness.
 - `opsgate-web`: in-process tests with `tower::ServiceExt::oneshot` (the
   Flask test-client equivalent) for every route, gate, header, auth, CSRF,
   throttle (injected clock) and session case of `tests/test_api.py`.
-- `opsgate-runner`: executor and supervisor with a fake API (in-process axum)
+- `opsgate-runner`: executor and supervisor with a fake API (in-memory
+  trait implementation; the HTTP client against an in-process axum server)
   and a fake tmux trait, paused tokio time; `tmux` integration tests with a
-  private socket label and `TMUX_TMPDIR` (skipped only if `tmux` is absent;
-  CI installs it).
+  private socket label and `TMUX_TMPDIR` and an isolated environment built
+  from an allowlist (own
+  `HOME`, `SHELL=/bin/sh`, `PATH` with only the fake agents, `tmux` and the
+  system directories, so no real agent and no tmux configuration of the
+  caller is reachable); skipped only if `tmux` is absent, and CI installs
+  it and sets `OPSGATE_REQUIRE_TMUX=1`, which turns the skip into a
+  failure.
 - Every slice updates `rust/TESTMAP.md` (Python test → Rust test, section
   7.5).
 
@@ -1634,8 +1646,8 @@ run with `just test` as today).
 | S4a | Web I (shared foundations): `serve`, router, gate (forwarded headers ignored, 4.4), security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the UI-CSRF layer with `ensure_csrf_token` (4.5.4, applies to every non-API `POST` incl. routes added later), the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
 | S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
 | S5 | Web III: remaining UI pages and UI action routes, manual form, log views (rendered through the S4a environment; authenticated in tests through the S4a session helper with the session's CSRF token in forms) | opsgate | S4a | yes (S4b) | 4 | no |
-| S6a | Runner I: API client, tmux adapter, artifacts/atomic writes, commands/script, executor (fresh path, heartbeats, cancel, timeout, post-status retry) | opsgate | S2a, S2b | yes (S2c, S3-, S4-, S5) | 4 | no |
-| S6b | Runner II: resume rules, shutdown, supervisor loop, recovery, worker failure + verified cleanup, state files, `--once`, log lines, `runner` wiring | opsgate | S6a | yes (S3-, S4-, S5) | 4 | no |
+| S6a | Runner I: API client, tmux adapter, artifacts/atomic writes, commands/script, executor (fresh path, heartbeats, cancel, timeout, post-status retry, and the resume rules and shutdown paths that live inside `_run_step`) | opsgate | S2a, S2b | yes (S2c, S3-, S4-, S5) | 4 | no |
+| S6b | Runner II: supervisor loop, signal handling, recovery, worker failure + verified cleanup, state files, `--once`, log lines, `runner` wiring | opsgate | S6a | yes (S3-, S4-, S5) | 4 | no |
 | S7a | API parity harness (7.3), green against Python; Rust target switched on as routes land | opsgate | S1 | yes (all) | 4 | no |
 | S7b | Runner parity harness (7.4) incl. cross-implementation recovery and mixed stacks, green against Python | opsgate | S1 | yes (all) | 4 | no |
 | S8 | Integration: both harnesses green for Rust and all mixed combinations, fixes, TESTMAP complete, docs (README runtime/config sections incl. the timeout variable name, `rust/README.md`, CHANGELOG) | opsgate | S4b, S5, S6b, S7a, S7b | no | 3 | no |

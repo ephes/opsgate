@@ -39,6 +39,14 @@ ryu = "1"
 sha2 = "0.11"
 chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+# Runner (PLAN.md 6.1, 6.2): one tokio runtime, tmux and probes as
+# `tokio::process` children, the API client over plain HTTP (no TLS, D-10).
+tokio = { version = "1", default-features = false }
+tokio-util = { version = "0.7", default-features = false }
+reqwest = { version = "0.13", default-features = false }
+shlex = "2"
+# Test-only fake API of the runner tests (PLAN.md 7.1).
+axum = { version = "0.8", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -8,9 +8,11 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection; S2c: ticket validation), the black-box API parity harness
-(S7a, green against Python) and the black-box runner parity harness (S7b,
-green against the Python runner). The workspace, CI, the fixture generator and the command-line
+header selection; S2c: ticket validation), the runner's first half (S6a:
+API client, tmux adapter, artifacts, agent commands and the ticket
+executor), the black-box API parity harness (S7a, green against Python)
+and the black-box runner parity harness (S7b, green against the Python
+runner). The workspace, CI, the fixture generator and the command-line
 skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
@@ -55,8 +57,15 @@ the checksum and stored-JSON formatter, depth check, PLAN.md 4.6/4.8) and
 scalars and `lower`); of S2c: `validate` (new-ticket validation and
 normalisation in Python's check order, plan/policy/floor/reviewer rules,
 duration, the checksum payload, 4.7.1) and `error` (`ServiceError`: status,
-code, message). The other library crates are empty
-until their slices land. Every crate forbids
+code, message). `opsgate-runner` has the modules of S6a: `api` (the
+HTTP client of the runner routes, PLAN.md 4.13.1), `tmux` (`tmux -L <label>`
+children started with exactly the merged settings environment, 4.13.8),
+`artifacts` (step paths, atomic 0600 JSON writes, 4.13.2/4.13.7),
+`commands` (slugs, session names, agent command lines, the attach command
+and `run_step.sh`, 4.13.3) and `executor` (one ticket's steps, heartbeats,
+cancel, timeout, status retries and the resume rules, 4.13.4/4.13.5); the
+supervisor and the `runner` command follow with S6b. The store and web
+crates are empty until their slices land. Every crate forbids
 `unsafe` code (workspace lint).
 
 ## Toolchain
@@ -84,6 +93,17 @@ Run from the repository root:
 
 `just check` stays the Python check.
 
+## Runner tests
+
+`opsgate-runner`'s executor tests use a fake API and a scripted tmux on
+paused tokio time; the API client is tested against an in-process axum
+server. `tests/tmux_integration.rs` runs real `tmux` on a private socket
+label and `TMUX_TMPDIR` with fake `codex`/`claude` scripts, in an isolated
+environment built from an allowlist (no exported shell functions; own `HOME`, `SHELL=/bin/sh`, a `PATH` with only the fakes, a
+`tmux` link and the system directories), so neither a real agent nor your
+tmux configuration is reached. Without `tmux` these tests skip; with
+`OPSGATE_REQUIRE_TMUX=1` (set in CI) they fail instead.
+
 ## CI
 
 The `parity-api` job runs the API parity harness against Python (lint,
@@ -91,7 +111,8 @@ typecheck, scenarios); slice S4a adds the Rust leg.
 
 The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 `macos-15`: rustfmt, clippy, `cargo deny --locked check` (pinned, sha256
-verified cargo-deny release), `cargo test --locked`, a release build, a
+verified cargo-deny release), `cargo test --locked` (with tmux installed and
+`OPSGATE_REQUIRE_TMUX=1`), a release build, a
 `--version` smoke test (version and the checked-out commit) and the release
 binary size in the job summary. The fixture drift test runs in the Python job
 as part of pytest. The `parity-runner` job runs the runner parity harness

@@ -298,3 +298,12 @@ Default UI routes:
 - `GET /tickets`
 - `POST /tickets`
 - `GET /tickets/:id`
+
+## Rust port
+
+A Rust port of the API/UI and the runner is being built in `rust/` (one
+`opsgate` binary; plan `rust/PLAN.md`, test map `rust/TESTMAP.md`). It is not
+deployed yet; the Python package stays the production implementation. Its
+checks run with `just rs-check` (rustup needed) and in the `rust` CI job on
+Linux and macOS; the drift test of its Python-generated fixtures
+(`tests/test_rust_fixtures.py`) is part of `just test`. See `rust/README.md`.

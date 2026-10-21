@@ -1,7 +1,7 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
-Status: plan, not yet implemented; owner questions decided 2026-10-21
-(section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
+Status: plan; implementation in progress (S1 foundations landed); owner
+questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
 This document is the contract for the implementers and reviewers of the
@@ -1031,7 +1031,9 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   parallel (waitress threads); Rust is not limited to 8. SQLite serialises
   writers in both.
 - **D-15 Rust-only CLI**: `--version`, `check-config`, `check-db`,
-  `serve --db/--bind-host/--bind-port` (tests and shadow only).
+  `serve --db/--bind-host/--bind-port` (tests and shadow only). `--once` is
+  accepted only after `runner` (argparse also takes `serve --once` and
+  ignores it). No command still means `serve`.
 - **D-16 Faster shutdown observation**: the Rust runner's sleeps and HTTP
   requests are cancellable, so SIGTERM is observed sooner than Python's
   poll-interval sleep and 15 s request timeout; the shutdown actions
@@ -1134,6 +1136,12 @@ generated with pyca bcrypt 4.3 incl. long and NUL passwords),
 `throttle.json` (event sequences with clock → locked/unlocked), `schema.sql`
 (Python-initialised `sqlite_master`).
 
+S1 ships the generator with `schema.sql` as its first fixture (tables, then
+indexes, so it runs as one script; the S3a contract test uses it) and the
+drift test `tests/test_rust_fixtures.py`, which compares bytes. A builder
+returns the file text; JSON fixtures are rendered with sorted keys and
+`indent=1`. Each slice adds its builders to `GENERATORS`.
+
 ### 7.3 API parity harness (`rust/parity/api/`, black box)
 
 pytest suite (dev dependency `httpx`) that starts an implementation as a
@@ -1181,10 +1189,15 @@ harness column says whether a black-box scenario also covers it.
 
 `.github/workflows/ci.yml` gains a `rust` job (matrix `ubuntu-latest`,
 `macos-15`): `cargo fmt --check`, `clippy -D warnings`, `cargo test --locked`,
-`cargo deny check` (pinned, sha256-verified cargo-deny as in nyxmon),
+`cargo deny check` (pinned, sha256-verified cargo-deny 0.20.2 as in nyxmon,
+the release binary for each runner OS; `deny.toml` checks the release target
+`aarch64-apple-darwin` only, so both legs check the same graph), release
+build, `opsgate --version` smoke test against the checked-out commit,
 binary-size report; and a `parity` job running 7.3/7.4. `justfile`:
-`rs-check`, `rs-test`, `rs-fixtures`, `rs-parity-api`, `rs-parity-runner`,
-`rs-build`. The Python jobs stay unchanged.
+`rs-check` (fmt, clippy, test), `rs-test`, `rs-deny`, `rs-fmt`,
+`rs-fixtures`, `rs-build` (S1), `rs-parity-api` (S7a), `rs-parity-runner`
+(S7b). The Python jobs stay unchanged apart from the fixture drift test,
+which pytest collects.
 
 ---
 
@@ -1219,7 +1232,9 @@ Baseline (section 1): API 26.0 MiB RSS / 32 MB footprint; runner 23.4 MiB /
   `scripts/release_checks.py` (stdlib, unit-tested): `otool -L` allow-list,
   `vtool -show-build` minos ≤ 14.0, `lipo -archs` = `arm64`,
   `codesign --verify` (ad-hoc linker signature intact after strip), smoke
-  `opsgate --version` = `opsgate <version> (<full commit>)`, `opsgate
+  `opsgate --version` = `opsgate <version> (<full commit>)` (the workflow
+  sets `OPSGATE_GIT_COMMIT` to the commit it built; `build.rs` otherwise
+  asks `git rev-parse HEAD`), `opsgate
   check-config api` against a test env; deterministic archive
   `opsgate-<ver>-aarch64-apple-darwin.tar.gz` (`opsgate` + `LICENSE`, fixed
   owner and mtime, gzip without name) + `.sha256`; `gh release create

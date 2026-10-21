@@ -19,7 +19,8 @@ comment naming the divergence (e.g. D-2 for lone surrogates).
 Rust-only tests that have no Python counterpart (checksum and float fixtures,
 schema contract, cross-implementation database round trips and recovery,
 mixed stacks, template render test, release checks) are listed per slice in
-the plan's acceptance criteria.
+the plan's acceptance criteria; once landed, they are listed in the last
+section ("Rust-only tests") with their paths.
 
 ### `tests/test_api.py`
 
@@ -237,3 +238,15 @@ the plan's acceptance criteria.
 | `test_cleanup_accepts_absent_tmux_server` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_cleanup_rejects_unverifiable_tmux` | `runner::supervisor / runner::resume` | S6b | R |
 | `test_cleanup_verifies_sessions_are_gone` | `runner::supervisor / runner::resume` | S6b | R |
+
+## Rust-only tests
+
+Tests without a Python counterpart, by the slice that landed them. Paths are
+relative to `rust/` (Rust) or the repository root (pytest).
+
+| Test | Covers | Slice |
+| --- | --- | --- |
+| `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db`, usage errors exit 2, `--version` text (4.1, D-15) | S1 |
+| `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2, usage errors exit 2, `--help` | S1 |
+| `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
+| `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |

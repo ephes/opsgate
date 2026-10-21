@@ -3,7 +3,11 @@ name: CI
 # Same checks as `just check` (test, typecheck, lint). Tests use temporary
 # SQLite stores and no external services, so no secrets are needed.
 # Python 3.11 is the supported floor (requires-python, ruff and mypy target);
-# 3.14 is the current development interpreter.
+# 3.14 is the current development interpreter. The Python tests include the
+# drift test of the Rust port's fixtures (rust/fixtures, rust/PLAN.md 7.2).
+# The Rust port in rust/ runs in the `rust` job (`just rs-check` plus
+# cargo-deny, a release build and a `--version` smoke test) on Linux and
+# macOS (rust/PLAN.md 7.6).
 
 on:
   push:
@@ -56,3 +60,80 @@ jobs:
         run: uv run mypy src tests
       - name: Lint (just lint)
         run: uv run ruff check src tests
+
+  rust:
+    name: Rust port (${{ matrix.os }}; fmt, clippy, deny, tests, release build)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cargo-deny-target: x86_64-unknown-linux-musl
+            cargo-deny-sha256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+          - os: macos-15
+            cargo-deny-target: aarch64-apple-darwin
+            cargo-deny-sha256: fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustc --version
+      - name: Cache cargo registry and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rust/target
+          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}
+          restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-
+      - name: Format (cargo fmt)
+        run: cargo fmt --all --check
+      - name: Lint (cargo clippy)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install cargo-deny (pinned release, sha256 checked)
+        env:
+          CARGO_DENY_VERSION: "0.20.2"
+          CARGO_DENY_TARGET: ${{ matrix.cargo-deny-target }}
+          CARGO_DENY_SHA256: ${{ matrix.cargo-deny-sha256 }}
+        run: |
+          name="cargo-deny-${CARGO_DENY_VERSION}-${CARGO_DENY_TARGET}"
+          curl --proto '=https' --tlsv1.2 -sSfL -o "$RUNNER_TEMP/${name}.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/${name}.tar.gz"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/${name}.tar.gz" | shasum -a 256 --check
+          tar -xzf "$RUNNER_TEMP/${name}.tar.gz" -C "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/bin"
+          install -m 0755 "$RUNNER_TEMP/${name}/cargo-deny" "$RUNNER_TEMP/bin/cargo-deny"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/bin/cargo-deny" --version
+      - name: Supply chain (cargo deny, rust/deny.toml)
+        run: cargo deny --locked check
+      - name: Tests (cargo test)
+        run: cargo test --workspace --locked
+      - name: Release build
+        run: cargo build --release --locked
+      - name: Smoke test (--version names version and commit)
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps --locked \
+            | python3 -I -c 'import json, sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "opsgate"))')
+          expected="opsgate ${version} (${GITHUB_SHA})"
+          actual=$(target/release/opsgate --version)
+          echo "${actual}"
+          test "${actual}" = "${expected}" || { echo "expected: ${expected}"; exit 1; }
+      - name: Binary size
+        run: |
+          size=$(wc -c < target/release/opsgate | tr -d ' ')
+          echo "opsgate release binary (${{ matrix.os }}): ${size} bytes"
+          echo "opsgate release binary (${{ matrix.os }}): ${size} bytes" >> "$GITHUB_STEP_SUMMARY"

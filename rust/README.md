@@ -265,11 +265,11 @@ clock (`TestApp::with_throttle`).
 
 ## CI
 
-The `parity-api` job runs the API parity harness against Python (lint,
-typecheck, scenarios; it also lints and typechecks `parity/shadow` and the
-store's Python peer), then builds the release binary, runs the harness
-against Rust (the scenarios of the web slices in `RUST_SLICES_LANDED`) and
-diffs both record sets with `compare.py`.
+The `parity-api` job lints and typechecks the harness (also `parity/shadow`
+and the store's Python peer), builds the release binary (the Python run's
+cross-implementation scenarios use it as their peer since S4b), runs the
+harness against Python, then against Rust (the scenarios of the web slices in
+`RUST_SLICES_LANDED`) and diffs both record sets with `compare.py`.
 
 The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 `macos-15`: rustfmt, clippy, `cargo deny --locked check` (pinned, sha256

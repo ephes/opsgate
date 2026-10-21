@@ -72,7 +72,8 @@ jobs:
   parity-api:
     # rust/PLAN.md 7.3: black-box API scenarios against a real `python -m opsgate serve` process per
     # scenario, then against the Rust release binary (`--impl rust`; only the scenarios whose web slices
-    # are in harness.RUST_SLICES_LANDED run, since slice S4a) and the record diff with compare.py.
+    # are in harness.RUST_SLICES_LANDED run, since slice S4a) and the record diff with compare.py. The
+    # binary is built first: the Python leg's cross-implementation scenarios use it as their peer.
     name: API parity harness (Python and Rust)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -100,8 +101,6 @@ jobs:
           uv run ruff check rust/parity rust/crates/opsgate-store/tests/python_peer.py
           uv run ruff format --check rust/parity rust/crates/opsgate-store/tests/python_peer.py
           uv run mypy rust/parity/api rust/parity/shadow rust/crates/opsgate-store/tests/python_peer.py
-      - name: Scenarios against Python
-        run: uv run pytest rust/parity/api -rs --impl python --records "$RUNNER_TEMP/parity-api/python"
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: |
@@ -120,6 +119,10 @@ jobs:
       - name: Release build of the Rust binary
         working-directory: rust
         run: cargo build --release --locked
+      # The Python leg needs the binary too: since slice S4b, test_cross.py runs its
+      # cross-implementation scenarios with a Rust peer (Python creates, Rust claims and back).
+      - name: Scenarios against Python
+        run: uv run pytest rust/parity/api -rs --impl python --records "$RUNNER_TEMP/parity-api/python"
       - name: Scenarios against Rust
         run: uv run pytest rust/parity/api -rs --impl rust --records "$RUNNER_TEMP/parity-api/rust"
       - name: Record diff (compare.py)

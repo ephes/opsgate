@@ -9,6 +9,19 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+opsgate-core.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+shlex.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["process", "rt", "sync", "time", "macros"] }
+tokio-util.workspace = true
+
+[dev-dependencies]
+axum = { workspace = true, features = ["tokio", "http1"] }
+tokio = { workspace = true, features = ["process", "rt", "rt-multi-thread", "sync", "time", "macros", "net", "test-util"] }
 
 [lints]
 workspace = true

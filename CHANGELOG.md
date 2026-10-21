@@ -38,6 +38,14 @@
   Python-generated fixtures `checksum.json`, `float_repr.json`, `storage_json.json`, `datetime.json`
   and `pystr.json`; `datetime.json` is generated and checked only by Python 3.14 (`PYTHON_GATED`),
   other interpreters skip it.
+- Rust port slice S6a (`rust/crates/opsgate-runner`): the runner's API client (bearer token, JSON
+  bodies, Python's error categories without response bodies), the tmux adapter (children get exactly
+  the settings environment incl. the env file, as under Python), step paths and atomic 0600 JSON
+  artifacts, the agent command lines and `run_step.sh`, and the ticket executor (steps in order,
+  heartbeats, cancel, timeout, status retries, and the resume rules that never launch a step twice).
+  Executor tests run on paused time against fakes; integration tests drive real tmux with fake agents
+  in an isolated environment, and the CI `rust` job installs tmux for them. Nothing calls this code
+  yet; the `runner` command follows with S6b.
 - Add the black-box API parity harness `rust/parity/api` (plan slice S7a): a pytest suite (new dev
   dependency `httpx`) that starts a real `serve` process per scenario and runs more than 500
   scenarios ported from `tests/test_api.py` plus contract cases, writes normalised records, and

@@ -75,7 +75,9 @@ struct PrivateTmux {
 }
 
 impl PrivateTmux {
-    fn new(name: &str) -> Self {
+    /// `remain_on_exit` keeps a finished session (dead pane) until the server
+    /// is killed: see `executor_runs_steps_in_real_tmux`.
+    fn new(name: &str, remain_on_exit: bool) -> Self {
         // Under /tmp: the socket path must stay below the 104-byte limit.
         let dir = tempfile::Builder::new()
             .prefix("og-")
@@ -85,6 +87,9 @@ impl PrivateTmux {
         std::fs::create_dir(&tmpdir).unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir(&home).unwrap();
+        if remain_on_exit {
+            std::fs::write(home.join(".tmux.conf"), "set -g remain-on-exit on\n").unwrap();
+        }
         let fake_bin = dir.path().join("bin");
         std::fs::create_dir(&fake_bin).unwrap();
         std::os::unix::fs::symlink(tmux_binary().unwrap(), fake_bin.join("tmux")).unwrap();
@@ -128,12 +133,18 @@ fn write_script(path: &Path, text: &str) {
 /// A two-step ticket through real tmux sessions: the step script runs the
 /// agent from the inherited `PATH` with the prompt on stdin, tees its output
 /// into `session.log` and writes `exit_code`; the second step fails with 3.
+///
+/// The test's tmux keeps finished sessions (`remain-on-exit`): the poll
+/// checks `exit_code` and then probes the session, as Python does, so a step
+/// that writes its exit code and ends between the two calls is reported as
+/// `session_terminated_without_exit_code`. The fake agents end within
+/// milliseconds of their launch, which hits that window on fast hosts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn executor_runs_steps_in_real_tmux() {
     if !tmux_available() {
         return;
     }
-    let tmux = PrivateTmux::new("exec");
+    let tmux = PrivateTmux::new("exec", true);
     let dir = tempfile::tempdir().unwrap();
     let settings = Arc::new(runner_settings(dir.path(), 1));
     let id = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -203,7 +214,8 @@ async fn executor_runs_steps_in_real_tmux() {
     for paths in [&first, &second] {
         let metadata = common::read_json(&paths.metadata_path);
         let session = metadata["session_name"].as_str().unwrap();
-        assert!(!cli.has_session(session).await.unwrap(), "{session}");
+        // Kept by `remain-on-exit`: the session the step ran in.
+        assert!(cli.has_session(session).await.unwrap(), "{session}");
     }
     assert!(tmux.fake_bin.join("codex").exists());
 }
@@ -215,7 +227,7 @@ async fn session_probe_kill_and_failed_launch() {
     if !tmux_available() {
         return;
     }
-    let tmux = PrivateTmux::new("kill");
+    let tmux = PrivateTmux::new("kill", false);
     let cli = tmux.cli();
     let dir = tempfile::tempdir().unwrap();
     let script = dir.path().join("run step.sh");

@@ -101,7 +101,10 @@ server. `tests/tmux_integration.rs` runs real `tmux` on a private socket
 label and `TMUX_TMPDIR` with fake `codex`/`claude` scripts, in an isolated
 environment built from an allowlist (no exported shell functions; own `HOME`, `SHELL=/bin/sh`, a `PATH` with only the fakes, a
 `tmux` link and the system directories), so neither a real agent nor your
-tmux configuration is reached. Without `tmux` these tests skip; with
+tmux configuration is reached. The executor test's tmux keeps finished
+sessions (`remain-on-exit`, from a `.tmux.conf` in that `HOME`): the poll
+checks `exit_code` before it probes the session, as Python does, and a fake
+agent that ends within milliseconds could otherwise end between the two. Without `tmux` these tests skip; with
 `OPSGATE_REQUIRE_TMUX=1` (set in CI) they fail instead.
 
 ## CI

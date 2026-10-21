@@ -5,7 +5,10 @@ JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S3b
 store II, S4a web I (`opsgate serve` with the bearer routes, health and the
 login page; the API parity harness runs its S4a scenarios against Rust in CI),
 S4b web II (`POST /login`, logout, the throttle, API-CSRF and the approver's
-API actions; the S4b scenarios of both parity harnesses run against Rust), S6a
+API actions; the S4b scenarios of both parity harnesses run against Rust), S5
+web III (the ticket pages, the manual ticket form and the approver's form
+actions; with S4b the UI scenarios of the API parity harness and the runner
+harness's mixed stacks with a Rust API run against Rust), S6a
 runner I, S6b runner II (`opsgate runner` works; the runner
 parity harness is green against it locally) and the S7b runner parity harness
 landed); owner
@@ -438,8 +441,12 @@ All routes, with their auth and the order of checks. "gate" = network gate
 | `POST /tickets/<id>/{approve,reject,cancel}` | gate; UI-CSRF; session else 302 `/login` | 302 `/tickets/<id>` |
 | `POST /tickets/<id>/{archive,unarchive}` | as above | 302 `redirect_to` if it sanitises and starts with `/tickets`, else `/tickets/<id>` |
 
-Routing details (P1): `<id>` matches one path segment; `<int:n>` matches ASCII
-digits only (`0` matches and then fails `log_not_found`); no trailing-slash
+Routing details (P1): `<id>` matches one path segment; `<int:n>` is
+Werkzeug's `IntegerConverter`, the pattern `\d+` (Python's `re`, so any Unicode
+decimal digits: `/steps/٢/log` is step 2) converted with `int()` (leading
+zeros allowed; more than 4300 digits make `int()` fail, which is no match:
+404); `0` matches and then fails `log_not_found` (corrected in S5: an earlier
+version of this plan said ASCII digits only); no trailing-slash
 variants. Unknown routes 404, wrong methods 405 (bodies P2). `HEAD` works for
 every `GET` route; `OPTIONS` answers 200 on every route (Flask's automatic
 `OPTIONS`, `Allow` details P2). A path with repeated slashes that matches a
@@ -496,6 +503,13 @@ Error mapping (`handle_service_error`, `handle_forbidden`, `api_error`):
   else `forbidden.html` with 403.
 - Unhandled errors (corrupt stored JSON on read, SQLite busy beyond the
   timeout): 500, no traceback (P1 status; P2 body).
+- Every `Location` of a 302 goes through Werkzeug's `iri_to_uri` before it is
+  sent (`get_wsgi_headers`): non-ASCII and unsafe characters of the path,
+  query and fragment are percent-encoded, an empty `?` or `#` is dropped.
+  The 302 targets are local paths (`url_for` results, a sanitised `next` or
+  `redirect_to`), which Rust quotes the same way (`urls::local_iri_to_uri`
+  in `error::redirect`, S4b); a `redirect_to` of the archive actions (S5)
+  like `/tickets?view=all x` is sent as `/tickets?view=all%20x`.
 
 ### 4.5 Authentication and sessions
 
@@ -884,8 +898,15 @@ investigator → codex, reviewer → claude, unknown → codex) and scaffolding
 investigator), the default step (reviewer if the operator floor requires it,
 else investigator). Manual form parsing (`parse_manual_ticket_steps`): step
 keys by `int(n)` ascending, first value per key, empty agent → role default;
-`max_duration_seconds` must match `[0-9]+`; `context_json` must decode
-(`invalid_context_json`, nesting ≤ 64) to an object. Ticket list: 100 newest,
+`max_duration_seconds` must match `[0-9]+` (and `int()` must take it: more
+than 4300 digits are `invalid_ticket` too); `context_json` must decode
+(`invalid_context_json`, nesting ≤ 64) to an object. Python's unhandled
+`ValueError`s of the form are 500s in Rust too: a step key whose index has
+more than 4300 digits (`int()` in `parse_manual_ticket_steps`, which runs for
+the sticky form before the payload) and an integer token of more than 4300
+digits in `context_json` (`json.loads` raises `ValueError`, not
+`JSONDecodeError`). Werkzeug parses a urlencoded body of any method, so a
+`GET /tickets` with one fills the form with it (S5 reads it too). Ticket list: 100 newest,
 `view` filter; detail: plan, policy/context as indented JSON, session views
 with log previews (4.12), action forms by state/archive flags, back link to the
 archived or active view. HTML bytes are P2 because the same template files are
@@ -911,9 +932,18 @@ rendered (section 6.3).
   resolved component; each other component is `lstat`ed; a symlink is replaced
   by its resolved target; a component that cannot be looked up is kept and the
   walk continues; a symlink loop stays unresolved), because "canonicalise the
-  longest existing prefix" would miss a symlink after `missing/..`. Step lookup: entries whose
-  `int(step_index)` equals `n - 1`; `n <= 0` → 404. Session views skip
-  non-object entries; `step_number = step_index + 1` if ≥ 0.
+  longest existing prefix" would miss a symlink after `missing/..`. Step lookup: the first object entry
+  whose `int(step_index)` equals `n - 1` (entries where `int()` raises
+  `TypeError`/`ValueError` skipped); `n <= 0` → 404. Session views skip
+  non-object entries; `step_number = step_index + 1` if ≥ 0, else none (no
+  link). `int()` is Python's: booleans 0/1, floats truncated, strings by the
+  `int(str)` grammar, integers of any size (Rust keeps step numbers as exact
+  decimals, `pyint.rs`, S5); an infinite float raises `OverflowError`, which
+  neither function catches → 500. A non-text `log_path` goes through
+  `str()`; Rust writes arrays, objects and overflowing numbers as their JSON
+  text instead of their `repr`, a relative path like Python's, which resolves
+  outside the artifact root unless the server's working directory lies inside
+  it.
 
 ### 4.13 Runner (`runner.py`)
 
@@ -1224,7 +1254,10 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   value whose C0 controls `urlsplit` strips before `//[x`. Python answers
   500; Rust treats the value as no `next` (the page or the redirect without
   it). Every such value has a network location, which the sanitising refuses
-  anyway (S4a).
+  anyway (S4a). The archive and unarchive actions sanitise their form field
+  `redirect_to` with the same function: Python answers 500 after the action
+  was committed, Rust redirects to the ticket's detail page as for any
+  refused `redirect_to` (S5).
 - **D-19 Cookie-authenticated API calls without a `Host` header.** Without
   `Host` (HTTP/1.0), Werkzeug's `request.host` falls back to waitress's
   `SERVER_NAME` and `SERVER_PORT` (default adjustments:
@@ -1280,7 +1313,7 @@ and filesystem work in `spawn_blocking`).
 | patterns | `regex` | the few Python patterns (UUID, tmux names, step fields) |
 | CLI | `clap` (derive) | |
 | logging | `tracing`, `tracing-subscriber` (fmt) | |
-| tests | `tempfile`, `tower` (`ServiceExt::oneshot` as the Flask test client), `tokio` test utilities with paused time, `proptest` (formatter properties, 7.1) | |
+| tests | `tempfile`, `tower` (`ServiceExt::oneshot` as the Flask test client), `tokio` test utilities with paused time, `proptest` (formatter properties, 7.1), `html5gum` (WHATWG HTML tokenizer: the page checks of 6.3 read forms, fields, links and flashes, S5) | |
 
 No hand-rolled protocols. The only Python-compatibility code is small and
 fixture-pinned: the checksum formatter (4.8), Python `str.strip` whitespace,
@@ -1291,7 +1324,9 @@ against Werkzeug's results) Werkzeug's decoding of `request.path`,
 `parse_qsl` with the `werkzeug.url_quote` error handler, `url_for`'s quoting
 and MarkupSafe's escaping; in S4b pyca bcrypt's `checkpw` wrapper over the
 same `bcrypt` crate (fixture-pinned), Werkzeug's `iri_to_uri` for local
-redirect targets and `get_host`'s `Host` validation.
+redirect targets and `get_host`'s `Host` validation; in S5 Python's `int()` of step
+indexes and step numbers as exact decimals
+(`opsgate_core::settings::py_int_decimal`).
 
 ### 6.3 Templates
 
@@ -1304,7 +1339,9 @@ Autoescape for `.html` with MarkupSafe's rules (`&<>'"`; minijinja's own
 escaping would also escape `/`), values printed as Python's `str()` (`None`,
 `True`, float `repr`) through a minijinja formatter (S4a). A test renders every template with representative
 contexts (each ticket state × archived flag, flashes, form errors) and checks
-the P1 elements of 4.11 with an HTML parser, never bytes. Template edits
+the P1 elements of 4.11 with an HTML parser, never bytes (S4a renders every
+template, `tests/templates.rs`; S5 checks the served pages' forms, fields,
+links and flashes with `html5gum`, `tests/{ui,manual_form}.rs`). Template edits
 during the parallel period are made once and verified against both
 implementations by the parity harness.
 
@@ -1396,7 +1433,8 @@ Each scenario records (status, `error`, normalised JSON, redirect target,
 flash texts via the next page, the forms and internal links of every page,
 session cookie attributes, normalised DB snapshot: ids mapped, timestamps
 masked, temp paths masked, JSON columns parsed, error `message` texts masked as
-P2). `just rs-parity-api` runs the suite against both and diffs the records
+P2; flash texts that are a decoder's or `fromisoformat`'s free-text message are
+masked too where the scenario says so, `Recorder.mask_flash_texts`, S5). `just rs-parity-api` runs the suite against both and diffs the records
 (`compare.py`; scenarios that name a P3 divergence are reported as explained);
 CI runs it on every push (job `parity-api`: the Rust release binary is built
 first, since the Python run's cross-implementation scenarios use it as their

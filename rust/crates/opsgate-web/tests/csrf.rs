@@ -507,3 +507,40 @@ async fn api_csrf_comes_before_the_body() {
     }
     assert_eq!(app.ticket_state(&ticket_id).await, "pending_approval");
 }
+
+/// `test_ui_ticket_actions_reject_non_ascii_form_token` (slice S5's
+/// routes): a non-ASCII form token is "Invalid form token" on the detail
+/// page, the action is not run and the approver stays signed in.
+#[tokio::test]
+async fn test_ui_ticket_actions_reject_non_ascii_form_token() {
+    for action in ["approve", "reject", "cancel", "archive", "unarchive"] {
+        let app = TestApp::new();
+        let id = app
+            .create_ticket(
+                NYXMON_TOKEN,
+                ticket_payload(
+                    "Non-ASCII form token",
+                    Some(&format!("non-ascii-ui-csrf-{action}")),
+                ),
+            )
+            .await;
+        app.sign_in();
+        let before = app.snapshot();
+        let response = app
+            .send(
+                Call::post(&format!("/tickets/{id}/{action}"))
+                    .form(&[("csrf_token", "té-über"), ("reason", "nope")]),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::FOUND, "{action}");
+        assert_eq!(
+            response.location(),
+            Some(format!("/tickets/{id}").as_str()),
+            "{action}"
+        );
+        let detail = app.get(&format!("/tickets/{id}")).await;
+        assert_eq!(detail.status, StatusCode::OK, "{action}");
+        assert!(detail.text().contains("Invalid form token"), "{action}");
+        assert_eq!(app.snapshot(), before, "{action}");
+    }
+}

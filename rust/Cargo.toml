@@ -72,6 +72,9 @@ tower = { version = "0.5", default-features = false }
 # Login (PLAN.md 4.5.3, 6.2; slice S4b): the bcrypt core pyca bcrypt 4.3 wraps
 # (`hash_with_salt`, `format_for_version`); `alloc` only, no random salts.
 bcrypt = { version = "0.19", default-features = false, features = ["alloc"] }
+# Test-only HTML tokenizer of the web page tests (slice S5): the template
+# checks of PLAN.md 6.3 read forms, fields and links with an HTML parser.
+html5gum = { version = "0.8", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

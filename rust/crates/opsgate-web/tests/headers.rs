@@ -5,9 +5,8 @@ mod common;
 use axum::http::{Method, StatusCode};
 use common::{Call, NYXMON_TOKEN, TestApp, ticket_payload};
 
-/// `test_ui_pages_cannot_be_framed` with the pages of slice S4a (the login
-/// page, the forbidden page); the ticket pages of slice S5 get the headers
-/// from the same layer and S5 adds them here.
+/// `test_ui_pages_cannot_be_framed`: the login page and the forbidden page
+/// (slice S4a), the ticket list and the detail page (slice S5).
 #[tokio::test]
 async fn test_ui_pages_cannot_be_framed() {
     let app = TestApp::new();
@@ -19,6 +18,18 @@ async fn test_ui_pages_cannot_be_framed() {
         .await;
     assert_eq!(forbidden.status, StatusCode::FORBIDDEN);
     forbidden.assert_security_headers();
+    app.sign_in();
+    let id = app
+        .create_ticket(
+            NYXMON_TOKEN,
+            ticket_payload("Hardening", Some("headers-ui")),
+        )
+        .await;
+    for path in ["/tickets".to_owned(), format!("/tickets/{id}")] {
+        let page = app.get(&path).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}");
+        page.assert_security_headers();
+    }
 }
 
 #[tokio::test]
@@ -28,8 +39,12 @@ async fn test_api_error_and_redirect_responses_carry_security_headers() {
     let unauthenticated = app.get("/api/v1/tickets/does-not-exist").await;
     assert_eq!(unauthenticated.status, StatusCode::UNAUTHORIZED);
     unauthenticated.assert_security_headers();
-    // A redirect: the UI-CSRF check of a form without token (the `GET
-    // /tickets` redirect of the Python test is slice S5's route).
+    // The redirect of `GET /tickets` without a session (slice S5) and the
+    // UI-CSRF check of a form without token.
+    let to_login = app.get("/tickets").await;
+    assert_eq!(to_login.status, StatusCode::FOUND);
+    assert_eq!(to_login.location(), Some("/login"));
+    to_login.assert_security_headers();
     let redirect = app
         .send(Call::post("/tickets").form(&[("title", "x")]))
         .await;

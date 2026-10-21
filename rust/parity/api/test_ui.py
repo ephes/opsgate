@@ -19,6 +19,7 @@ from harness import (
     Browser,
     Database,
     Profile,
+    Recorder,
     Target,
     create_ticket,
     get_ticket,
@@ -223,8 +224,12 @@ def test_manual_ticket_creation_supports_legacy_single_step_fields(approver: Bro
     ],
 )
 def test_manual_ticket_form_errors_render_sticky_form(
-    approver: Browser, db: Database, fields: dict[str, str], message: str | None
+    approver: Browser, db: Database, rec: Recorder, fields: dict[str, str], message: str | None
 ) -> None:
+    if message is None:
+        # The decoder's and `fromisoformat`'s own texts (P2); the depth case reads "JSON nesting exceeds 64 levels"
+        # in both, but Python only reaches it below its recursion limit.
+        rec.mask_flash_texts()
     resp = approver.post("/tickets", data=manual_form(approver, **fields))
     assert resp.status == 400
     assert len(resp.flashes) == 1 and resp.flashes[0][0] == "error"

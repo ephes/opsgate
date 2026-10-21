@@ -44,7 +44,7 @@ IMPLS = ("python", "rust")
 # Rust slices (PLAN.md section 12) whose routes have landed on main. A scenario
 # runs against Rust only when every slice it names in its ``rust`` marker is
 # listed here; each web slice adds its id when it merges (S4a, S4b, S5).
-RUST_SLICES_LANDED: frozenset[str] = frozenset({"S4a", "S4b"})
+RUST_SLICES_LANDED: frozenset[str] = frozenset({"S4a", "S4b", "S5"})
 
 USERNAME = "opsgate-admin"
 PASSWORD = "secret-password"
@@ -409,10 +409,16 @@ class Recorder:
         self.divergences: set[str] = set()
         self.snapshots: list[Any] = []
         self.snapshot_enabled = True
+        self.flash_texts_p2 = False
 
     def divergence(self, code: str) -> None:
         """Mark the scenario as covering a P3 divergence (PLAN.md section 5)."""
         self.divergences.add(code)
+
+    def mask_flash_texts(self) -> None:
+        """Record flash texts as ``<message>`` from now on: they are free-text error messages (P2, PLAN.md 3.3),
+        such as a JSON decoder's or ``datetime.fromisoformat``'s; the category and the count stay compared."""
+        self.flash_texts_p2 = True
 
     def note(self, key: str, value: Any) -> None:
         self.steps.append({"note": key, "value": self.norm.value(value)})
@@ -431,7 +437,9 @@ class Recorder:
         if resp.location is not None:
             entry["location"] = self.norm.text(resp.location)
         if resp.facts is not None and "body" not in entry:
-            entry["flashes"] = [[cat, self.norm.text(text)] for cat, text in resp.facts.flashes]
+            entry["flashes"] = [
+                [cat, "<message>" if self.flash_texts_p2 else self.norm.text(text)] for cat, text in resp.facts.flashes
+            ]
             entry["forms"] = [
                 {**form, "action": self.norm.text(form["action"]), "fields": sorted(set(form["fields"]))}
                 for form in resp.facts.forms

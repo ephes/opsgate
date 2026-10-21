@@ -243,6 +243,23 @@ pub enum PyInt {
 /// digits, at most 4300 digits. `None` where Python raises `ValueError` (or,
 /// for non-ASCII digits, accepts: D-8). [`py_int`] is the full `int(str)`.
 pub fn parse_py_int(text: &str) -> Option<PyInt> {
+    let (negative, digits) = ascii_int_parts(text)?;
+    let signed = if negative {
+        format!("-{digits}")
+    } else {
+        digits
+    };
+    Some(
+        signed
+            .parse::<i64>()
+            .map_or(PyInt::OutOfRange, PyInt::Value),
+    )
+}
+
+/// The sign and the digits (underscores removed, leading zeros kept) of an
+/// ASCII integer text in Python's `int()` grammar, or `None` where Python
+/// raises `ValueError`.
+fn ascii_int_parts(text: &str) -> Option<(bool, String)> {
     let (negative, body) = match text.as_bytes().first() {
         Some(b'+') => (false, &text[1..]),
         Some(b'-') => (true, &text[1..]),
@@ -263,16 +280,7 @@ pub fn parse_py_int(text: &str) -> Option<PyInt> {
     if digits.is_empty() || !previous_was_digit || digits.len() > PY_INT_MAX_STR_DIGITS {
         return None;
     }
-    let signed = if negative {
-        format!("-{digits}")
-    } else {
-        digits
-    };
-    Some(
-        signed
-            .parse::<i64>()
-            .map_or(PyInt::OutOfRange, PyInt::Value),
-    )
+    Some((negative, digits))
 }
 
 /// The first code point of every run of ten non-ASCII decimal digits
@@ -305,6 +313,13 @@ fn decimal_digit(c: char) -> Option<u8> {
 /// store reads a stored `max_duration_seconds` text with it
 /// (`int(row[...])`, PLAN.md 4.7.2).
 pub fn py_int(text: &str) -> Option<PyInt> {
+    parse_py_int(&py_int_ascii(text)?)
+}
+
+/// The text CPython's `int(str)` parses: non-ASCII whitespace as spaces,
+/// non-ASCII decimal digits as ASCII digits, ASCII whitespace stripped;
+/// `None` for any other non-ASCII character.
+fn py_int_ascii(text: &str) -> Option<String> {
     let mut ascii = String::with_capacity(text.len());
     for c in text.chars() {
         if c.is_ascii() {
@@ -315,7 +330,26 @@ pub fn py_int(text: &str) -> Option<PyInt> {
             ascii.push(char::from(b'0' + decimal_digit(c)?));
         }
     }
-    parse_py_int(ascii.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')))
+    Some(
+        ascii
+            .trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
+            .to_owned(),
+    )
+}
+
+/// Python's `int(text)` for any `str` (as [`py_int`]) as an exact decimal
+/// of any size: an optional `-` and the digits without leading zeros (`0`
+/// for zero, never `-0`). `None` where Python raises `ValueError`. The web
+/// layer converts step indexes and step numbers with it (PLAN.md 4.12),
+/// which Python keeps as integers of any size.
+pub fn py_int_decimal(text: &str) -> Option<String> {
+    let (negative, digits) = ascii_int_parts(&py_int_ascii(text)?)?;
+    let digits = digits.trim_start_matches('0');
+    Some(match (negative, digits.is_empty()) {
+        (_, true) => "0".to_owned(),
+        (true, false) => format!("-{digits}"),
+        (false, false) => digits.to_owned(),
+    })
 }
 
 /// `config.parse_int` keeping integers outside `i64` apart: blank or missing
@@ -890,6 +924,33 @@ pub fn load_runner_settings_with_host(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn py_int_decimal_is_exact() {
+        for (text, expected) in [
+            ("0", Some("0")),
+            ("-0", Some("0")),
+            ("+007", Some("7")),
+            (" 1_2 ", Some("12")),
+            ("\u{661}\u{662}", Some("12")),
+            ("-00\u{6f3}", Some("-3")),
+            (
+                "99999999999999999999999999999999999999999",
+                Some("99999999999999999999999999999999999999999"),
+            ),
+            ("1__2", None),
+            ("x", None),
+            ("", None),
+            ("\u{1c}1", None),
+        ] {
+            assert_eq!(py_int_decimal(text).as_deref(), expected, "{text:?}");
+        }
+        assert_eq!(
+            py_int_decimal(&"1".repeat(4300)).map(|d| d.len()),
+            Some(4300)
+        );
+        assert_eq!(py_int_decimal(&"1".repeat(4301)), None);
+    }
 
     #[test]
     fn py_int_grammar() {

@@ -1,8 +1,9 @@
 //! Every template renders through the S4a environment (PLAN.md 6.3) with
 //! the context `app.py` gives it, for each ticket state with and without
-//! the archived flag. The pages and their P1 checks are slice S5's; this
-//! test keeps the shared environment (globals, filters, value printing)
-//! able to render them.
+//! the archived flag. This test keeps the shared environment (globals,
+//! filters, value printing) able to render them; the P1 checks of the served
+//! pages (forms, fields, links, flashes) are slice S5's `ui.rs` and
+//! `manual_form.rs`.
 
 mod common;
 

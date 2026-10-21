@@ -5,6 +5,7 @@
 //! query string (`urlencode(items, safe="!$'()*,/:;?@")`, `None` values
 //! dropped, in the order given).
 
+use opsgate_core::settings::py_int_decimal;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
 use crate::path::PATH_SAFE;
@@ -204,11 +205,9 @@ pub fn url_for(endpoint: &str, args: &[(&str, UrlArg)]) -> Result<String, BuildE
                 used.push(name);
                 let text = match (part, value) {
                     (Int(_), UrlArg::Int(number)) => number.to_string(),
-                    (Int(_), UrlArg::Text(text)) => text
-                        .trim()
-                        .parse::<i64>()
-                        .map_err(|_| BuildError(format!("{endpoint}: {name:?} is no integer")))?
-                        .to_string(),
+                    // `str(int(value))`, of any size.
+                    (Int(_), UrlArg::Text(text)) => py_int_decimal(text)
+                        .ok_or_else(|| BuildError(format!("{endpoint}: {name:?} is no integer")))?,
                     (_, UrlArg::Int(number)) => number.to_string(),
                     (_, UrlArg::Text(text)) => text.clone(),
                     (_, UrlArg::None) => unreachable!("filtered above"),
@@ -343,6 +342,56 @@ mod tests {
         ] {
             assert_eq!(local_iri_to_uri(location), expected, "{location:?}");
         }
+    }
+
+    #[test]
+    fn local_iri_to_uri_matches_werkzeug_examples() {
+        // Expected values: `werkzeug.urls.iri_to_uri` (Werkzeug 3.1).
+        for (location, expected) in [
+            ("/tickets", "/tickets"),
+            ("/tickets?", "/tickets"),
+            ("/tickets#", "/tickets"),
+            ("/tickets?view=all x#f g", "/tickets?view=all%20x#f%20g"),
+            ("/tickets/é?q=ü", "/tickets/%C3%A9?q=%C3%BC"),
+            ("/tickets?a=%zz&b=%41", "/tickets?a=%zz&b=%41"),
+            (
+                "/tickets\u{1}|<>\"{}^`",
+                "/tickets%01%7C%3C%3E%22%7B%7D%5E%60",
+            ),
+            ("/tickets?x=[]|", "/tickets?x=%5B%5D%7C"),
+            ("/tickets/a#b#c?d", "/tickets/a#b#c?d"),
+            ("/tickets?a?b#c", "/tickets?a?b#c"),
+            (
+                "/login?next=/tickets/x+y?view%3Dall%26a%3D%2B",
+                "/login?next=/tickets/x+y?view%3Dall%26a%3D%2B",
+            ),
+        ] {
+            assert_eq!(local_iri_to_uri(location), expected, "{location:?}");
+        }
+    }
+
+    #[test]
+    fn int_variables_take_python_integers() {
+        let big = "1".repeat(60);
+        assert_eq!(
+            url_for(
+                "ui_ticket_step_log",
+                &[
+                    ("ticket_id", "t".into()),
+                    ("step_number", big.clone().into())
+                ]
+            )
+            .unwrap(),
+            format!("/tickets/t/steps/{big}/log")
+        );
+        assert_eq!(
+            url_for(
+                "ui_ticket_step_log",
+                &[("ticket_id", "t".into()), ("step_number", " 0_7 ".into())]
+            )
+            .unwrap(),
+            "/tickets/t/steps/7/log"
+        );
     }
 
     #[test]

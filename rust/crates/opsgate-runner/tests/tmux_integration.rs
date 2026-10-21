@@ -1,4 +1,5 @@
-//! The executor with the real `tmux` on a private socket label and
+//! The executor and the supervisor's tmux housekeeping with the real `tmux`
+//! on a private socket label and
 //! `TMUX_TMPDIR`, fake `codex`/`claude` first on `PATH` (PLAN.md 7.1). The
 //! tests skip when `tmux` is missing, unless `OPSGATE_REQUIRE_TMUX` is set
 //! (CI sets it).
@@ -10,9 +11,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use common::{FakeApi, TestClock, runner_settings, running_ticket};
+use common::{FakeApi, FleetApi, TestClock, runner_settings, running_ticket};
 use opsgate_core::settings::Environment;
-use opsgate_runner::{TicketExecutor, Tmux, TmuxCli, TmuxError};
+use opsgate_runner::{CleanupError, Supervisor, TicketExecutor, Tmux, TmuxCli, TmuxError};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
@@ -245,14 +246,105 @@ async fn session_probe_kill_and_failed_launch() {
     assert!(!cli.has_session(name).await.unwrap());
 }
 
+fn supervisor(cli: TmuxCli, root: &Path) -> Supervisor<Arc<FleetApi>, TmuxCli, TestClock> {
+    Supervisor::new(
+        Arc::new(runner_settings(root, 1)),
+        FleetApi::new(),
+        cli,
+        TestClock::new(),
+        CancellationToken::new(),
+    )
+    .unwrap()
+}
+
+/// The supervisor's view of a real server (4.13.6): without a server there
+/// is nothing to discover and nothing to clean; with one, the ticket ids of
+/// the `job-<uuid>-NN-…` sessions are discovered, and the cleanup of one
+/// ticket kills exactly its sessions and verifies they are gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn supervisor_discovers_and_cleans_real_sessions() {
+    if !tmux_available() {
+        return;
+    }
+    let a = "aaaaaaaa-1111-4111-8111-111111111111";
+    let b = "bbbbbbbb-2222-4222-8222-222222222222";
+    let tmux = PrivateTmux::new("sup", true);
+    let cli = tmux.cli();
+    let dir = tempfile::tempdir().unwrap();
+    let supervisor = supervisor(cli.clone(), dir.path());
+
+    assert!(
+        supervisor
+            .discover_ticket_ids_from_tmux()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    supervisor.kill_tmux_sessions_for_ticket(a).await.unwrap();
+
+    let script = dir.path().join("run_step.sh");
+    write_script(&script, "#!/bin/bash\nsleep 30\n");
+    let names = [
+        format!("job-{a}-01-investigator"),
+        format!("job-{a}-02-reviewer"),
+        format!("job-{b}-01-implementer"),
+        "unrelated".to_owned(),
+    ];
+    for name in &names {
+        cli.new_session(name, &script).await.unwrap();
+    }
+    let found: Vec<String> = supervisor
+        .discover_ticket_ids_from_tmux()
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(found, [a, b]);
+    assert_eq!(
+        supervisor.tmux_sessions_for_ticket(a).await.unwrap(),
+        names[..2]
+    );
+
+    supervisor.kill_tmux_sessions_for_ticket(a).await.unwrap();
+    assert!(!cli.has_session(&names[0]).await.unwrap());
+    assert!(!cli.has_session(&names[1]).await.unwrap());
+    assert!(cli.has_session(&names[2]).await.unwrap());
+    assert!(cli.has_session(&names[3]).await.unwrap());
+    let found: Vec<String> = supervisor
+        .discover_ticket_ids_from_tmux()
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(found, [b]);
+}
+
 /// Without `tmux` on the inherited `PATH` every call is a spawn error
-/// (Python: `FileNotFoundError`).
+/// (Python: `FileNotFoundError`): discovery finds nothing, cleanup cannot be
+/// verified.
 #[tokio::test]
 async fn missing_tmux_binary_is_an_error() {
     let cli = TmuxCli::new(
         "og-missing",
         Arc::new(Environment::from_vars([("PATH", "/nonexistent")])),
     );
+    let dir = tempfile::tempdir().unwrap();
+    let supervisor = supervisor(cli.clone(), dir.path());
+    assert!(
+        supervisor
+            .discover_ticket_ids_from_tmux()
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        supervisor.kill_tmux_sessions_for_ticket("x").await,
+        Err(CleanupError::Unverifiable)
+    ));
+    assert!(matches!(
+        cli.list_sessions().await,
+        Err(TmuxError::Spawn(_))
+    ));
     assert!(matches!(
         cli.has_session("x").await,
         Err(TmuxError::Spawn(_))

@@ -5,23 +5,27 @@
 //! ([`tmux`]), artifact paths and atomic writes ([`artifacts`], 4.13.2,
 //! 4.13.7), the agent commands and the step script ([`commands`], 4.13.3)
 //! and the ticket executor ([`executor`], 4.13.4 and the resume rules of
-//! 4.13.5 inside `_run_step`). Slice S6b adds the supervisor (4.13.6) and the
-//! `runner` command.
+//! 4.13.5 inside `_run_step`). Slice S6b added the supervisor
+//! ([`supervisor`], 4.13.6: claim loop, workers, recovery, verified tmux
+//! cleanup, state files, signal handling), which the `opsgate runner`
+//! command runs.
 //!
 //! Ported Python: `src/opsgate/runner.py` (`RunnerApiClient`, `_slugify`,
 //! `_atomic_write_json`, `_sha256`, `_build_agent_command`,
-//! `_build_attach_command`, `TicketExecutor`).
+//! `_build_attach_command`, `TicketExecutor`, `OpsGateRunner`).
 
 pub mod api;
 pub mod artifacts;
 pub mod commands;
 pub mod executor;
+pub mod supervisor;
 pub mod tmux;
 mod values;
 
 pub use api::{HttpApiClient, JsonObject, RunnerApi, RunnerApiError};
 pub use executor::{Clock, ExecutorError, StatusUpdate, SystemClock, TicketExecutor};
-pub use tmux::{Tmux, TmuxCli, TmuxError};
+pub use supervisor::{CleanupError, Supervisor, SupervisorError, install_signal_handlers};
+pub use tmux::{SessionListing, Tmux, TmuxCli, TmuxError};
 
 /// Ticket states after which the runner does nothing more
 /// (`service.TERMINAL_STATES`).

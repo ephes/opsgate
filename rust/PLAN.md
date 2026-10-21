@@ -2,7 +2,8 @@
 
 Status: plan; implementation in progress (S1 foundations, S2a core
 JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S6a
-runner I and the S7b runner parity harness landed); owner
+runner I, S6b runner II (`opsgate runner` works; the runner parity harness is
+green against it locally) and the S7b runner parity harness landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -329,8 +330,10 @@ else that differs is a bug.
   D-16). launchd sends
   SIGTERM on `bootout`/`kickstart -k`, SIGKILL after its exit timeout.
 - `runner --once`: one recovery pass, one claim round; exits after the
-  started workers finished, or immediately if nothing was claimed or the
-  disable file exists (`run_forever`).
+  started workers finished, or without waiting for claimed work if nothing
+  was claimed or the disable file exists (`run_forever`); workers that the
+  recovery pass started are waited for in every case (`_wait_for_workers`
+  after the loop).
 
 ### 4.2 Configuration (`config.py`)
 
@@ -987,7 +990,10 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   null → stop; missing id → skip), write state file, start worker; sleep poll
   interval.
 - Recovery (`_recover_inflight_tickets`): candidates = ids from state files
-  (invalid JSON/non-object/no id → file deleted), tmux sessions matching
+  (`runner-state/*.json`, hidden files included; invalid JSON/non-object/no
+  id → file deleted; a file that cannot be read or is not UTF-8, e.g. a
+  directory named `*.json`, is an exception Python does not catch: the
+  runner exits 1, in Rust too), tmux sessions matching
   `^job-([0-9a-fA-F-]{36})-\d{2}-` whose id matches the UUID pattern, and
   (first pass) artifact directories named like a UUID; sorted; stop when the
   worker limit is reached; `GET` error → skip; terminal or not running → kill
@@ -1009,7 +1015,15 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   file or directory" or "Connection refused" in stderr → no sessions; other
   failure → error; after kills a re-list must be empty.
 - Rust maps the exception classes to the same outcomes; the `<Type>` in
-  `runner_unhandled_exception:<Type>` is P2 (Rust error kind names).
+  `runner_unhandled_exception:<Type>` is P2 (Rust error kind names:
+  `RunnerApiError`, `IoError`, `TmuxError`, `InvalidTicket`). Errors the
+  Python supervisor does not catch (state-file I/O, a `tmux` that cannot be
+  started for another reason than a missing binary during discovery) end
+  `opsgate runner` with one log line and exit 1 (Python: traceback, exit 1).
+- Rust (S6b, `opsgate_runner::supervisor`): workers are tokio tasks;
+  `_wait_for_workers` also reaps the workers that finished between its last
+  reap and its liveness check (Python can miss those in that window and
+  leave their state files).
 
 #### 4.13.7 Artifact writing and permissions
 

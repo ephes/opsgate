@@ -50,7 +50,7 @@ IMPLS = ("python", "rust")
 # Rust API in the mixed stacks only once S4a and S4b (bearer routes, login and
 # cookie-authenticated approval) are listed. Each of those slices adds its id
 # here when it merges.
-RUST_SLICES_LANDED: frozenset[str] = frozenset()
+RUST_SLICES_LANDED: frozenset[str] = frozenset({"S6b"})
 RUST_RUNNER_SLICES = ("S6b",)
 RUST_API_SLICES = ("S4a", "S4b")
 

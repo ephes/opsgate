@@ -3,3 +3,4 @@
 //! commands `check-config`, `check-db` and `--version` (D-15).
 
 pub mod cli;
+pub mod runner;

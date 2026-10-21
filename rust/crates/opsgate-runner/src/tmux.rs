@@ -1,4 +1,5 @@
-//! The tmux adapter (PLAN.md 4.13.3, 4.13.8): `tmux -L <label> …` children.
+//! The tmux adapter (PLAN.md 4.13.3, 4.13.6, 4.13.8): `tmux -L <label> …`
+//! children.
 //!
 //! Python runs `subprocess.run(["tmux", "-L", label, …])` with the process
 //! environment, into which the env file was merged (4.2). The Rust runner
@@ -43,7 +44,20 @@ impl std::fmt::Display for TmuxError {
 
 impl std::error::Error for TmuxError {}
 
-/// The tmux operations of the executor (`TicketExecutor._tmux_*`).
+/// The result of `tmux ls` (`subprocess.run(..., capture_output=True,
+/// text=True, check=False)`): the exit status and both streams, decoded
+/// lossily (tmux prints the session names the runner created and its own
+/// diagnostics, both UTF-8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionListing {
+    /// Exit status 0.
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// The tmux operations of the executor (`TicketExecutor._tmux_*`) and the
+/// supervisor (`OpsGateRunner._tmux_command("ls")`).
 pub trait Tmux: Send + Sync {
     /// `has-session -t <name>`: exit status 0.
     fn has_session(
@@ -64,6 +78,10 @@ pub trait Tmux: Send + Sync {
         &self,
         session_name: &str,
     ) -> impl Future<Output = Result<(), TmuxError>> + Send;
+
+    /// `ls`; a non-zero exit is part of the listing, not an error (only a
+    /// failing spawn is).
+    fn list_sessions(&self) -> impl Future<Output = Result<SessionListing, TmuxError>> + Send;
 }
 
 impl<T: Tmux> Tmux for Arc<T> {
@@ -87,6 +105,10 @@ impl<T: Tmux> Tmux for Arc<T> {
         session_name: &str,
     ) -> impl Future<Output = Result<(), TmuxError>> + Send {
         (**self).kill_session(session_name)
+    }
+
+    fn list_sessions(&self) -> impl Future<Output = Result<SessionListing, TmuxError>> + Send {
+        (**self).list_sessions()
     }
 }
 
@@ -151,5 +173,14 @@ impl Tmux for TmuxCli {
     async fn kill_session(&self, session_name: &str) -> Result<(), TmuxError> {
         self.run(&["kill-session", "-t", session_name]).await?;
         Ok(())
+    }
+
+    async fn list_sessions(&self) -> Result<SessionListing, TmuxError> {
+        let output = self.run(&["ls"]).await?;
+        Ok(SessionListing {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
     }
 }

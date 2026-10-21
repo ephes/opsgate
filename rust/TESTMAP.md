@@ -219,12 +219,12 @@ between two probes) and the `cleanup_fails=True` case of
 | `test_ticket_executor_reports_timeout_result` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_reports_timeout_result` | S6a ✓ | R |
 | `test_ticket_executor_reports_step_failure_detail` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_reports_step_failure_detail` | S6a ✓ | R |
 | `test_ticket_executor_resumes_from_existing_step_summary` | `crates/opsgate-runner/tests/executor.rs::ticket_executor_resumes_from_existing_step_summary` | S6a ✓ | R |
-| `test_worker_keeps_state_file_when_status_update_unavailable` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_worker_exception_report_includes_runner_host` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_worker_success_marks_state_for_cleanup` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_reap_finished_workers_cleans_state_files` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_recovery_restarts_only_running_tickets` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_discover_ticket_ids_from_tmux_handles_missing_binary` | `runner::supervisor / runner::resume` | S6b | R |
+| `test_worker_keeps_state_file_when_status_update_unavailable` | `crates/opsgate-runner/tests/supervisor.rs::worker_keeps_state_file_when_status_update_unavailable` | S6b ✓ | R |
+| `test_worker_exception_report_includes_runner_host` | `crates/opsgate-runner/tests/supervisor.rs::worker_exception_report_includes_runner_host` | S6b ✓ | R |
+| `test_worker_success_marks_state_for_cleanup` | `crates/opsgate-runner/tests/supervisor.rs::worker_success_marks_state_for_cleanup` | S6b ✓ | R |
+| `test_reap_finished_workers_cleans_state_files` | `crates/opsgate-runner/tests/supervisor.rs::reap_finished_workers_cleans_state_files` | S6b ✓ | R |
+| `test_recovery_restarts_only_running_tickets` | `crates/opsgate-runner/tests/supervisor.rs::recovery_restarts_only_running_tickets` | S6b ✓ | R |
+| `test_discover_ticket_ids_from_tmux_handles_missing_binary` | `crates/opsgate-runner/tests/supervisor.rs::discover_ticket_ids_from_tmux` + `crates/opsgate-runner/tests/tmux_integration.rs::missing_tmux_binary_is_an_error` | S6b ✓ | R |
 | `test_build_agent_command_rejects_unsupported_agent` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_rejects_unsupported_agent` | S6a ✓ | - |
 | `test_build_agent_command_uses_codex_exec_with_stdin` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_uses_codex_exec_with_stdin` | S6a ✓ | - |
 | `test_build_agent_command_uses_claude_print_with_bypass_permissions` | `crates/opsgate-runner/src/commands.rs::tests::build_agent_command_uses_claude_print_with_bypass_permissions` | S6a ✓ | - |
@@ -239,15 +239,15 @@ between two probes) and the `cleanup_fails=True` case of
 | `test_resume_adopts_exit_code_written_during_session_probe` | `crates/opsgate-runner/tests/executor.rs::resume_adopts_exit_code_written_during_session_probe` | S6a ✓ | R |
 | `test_post_status_ignores_conflict_when_ticket_moved_on` | `crates/opsgate-runner/tests/executor.rs::post_status_ignores_conflict_when_ticket_moved_on` | S6a ✓ | R |
 | `test_post_status_raises_other_conflicts` | `crates/opsgate-runner/tests/executor.rs::post_status_raises_other_conflicts` | S6a ✓ | R |
-| `test_worker_cleans_session_before_terminal_failure` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_status_outage_retries_and_retains_execution` | `runner::supervisor / runner::resume` | S6b | R |
+| `test_worker_cleans_session_before_terminal_failure` | `crates/opsgate-runner/tests/supervisor.rs::worker_cleans_session_before_terminal_failure` | S6b ✓ | R |
+| `test_status_outage_retries_and_retains_execution` | `crates/opsgate-runner/tests/supervisor.rs::status_outage_retries_and_retains_execution` | S6b ✓ | R |
 | `test_api_normalizes_transport_and_response_errors` | `crates/opsgate-runner/tests/api_client.rs::api_normalizes_transport_and_response_errors` | S6a ✓ | R |
-| `test_recovery_transport_outage_isolated_and_state_retained` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_running_heartbeat_outage_never_fails_live_session` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_permanent_api_error_stops_session_before_failure` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_cleanup_accepts_absent_tmux_server` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_cleanup_rejects_unverifiable_tmux` | `runner::supervisor / runner::resume` | S6b | R |
-| `test_cleanup_verifies_sessions_are_gone` | `runner::supervisor / runner::resume` | S6b | R |
+| `test_recovery_transport_outage_isolated_and_state_retained` | `crates/opsgate-runner/tests/supervisor.rs::recovery_transport_outage_isolated_and_state_retained` | S6b ✓ | R |
+| `test_running_heartbeat_outage_never_fails_live_session` | `crates/opsgate-runner/tests/supervisor.rs::running_heartbeat_outage_never_fails_live_session` | S6b ✓ | R |
+| `test_permanent_api_error_stops_session_before_failure` | `crates/opsgate-runner/tests/supervisor.rs::permanent_api_error_stops_session_before_failure` | S6b ✓ | R |
+| `test_cleanup_accepts_absent_tmux_server` | `crates/opsgate-runner/tests/supervisor.rs::cleanup_accepts_absent_tmux_server` + `crates/opsgate-runner/tests/tmux_integration.rs::supervisor_discovers_and_cleans_real_sessions` | S6b ✓ | R |
+| `test_cleanup_rejects_unverifiable_tmux` | `crates/opsgate-runner/tests/supervisor.rs::cleanup_rejects_unverifiable_tmux` | S6b ✓ | R |
+| `test_cleanup_verifies_sessions_are_gone` | `crates/opsgate-runner/tests/supervisor.rs::cleanup_verifies_sessions_are_gone` + `crates/opsgate-runner/tests/tmux_integration.rs::supervisor_discovers_and_cleans_real_sessions` | S6b ✓ | R |
 
 ## Rust-only tests
 
@@ -257,7 +257,8 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | Test | Covers | Slice |
 | --- | --- | --- |
 | `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db`, usage errors exit 2, `--version` text (4.1, D-15) | S1 |
-| `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2, usage errors exit 2, `--help` | S1 |
+| `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2 (`runner` no longer since S6b), usage errors exit 2, `--help` | S1 |
+| `crates/opsgate/tests/binary.rs` (runner cases) | `opsgate runner [--once]` as a process: configuration errors (one stderr line naming the setting, never its value, exit 1), `--once` with the disable file (no claim, `runner-state/` created, startup line without secrets), the P1 log line of a failed claim (4.15), SIGTERM and SIGINT during the poll-interval sleep end the runner at once with exit 0 (4.1, D-16) | S6b |
 | `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
 | `parity/api/` (pytest, `just rs-parity-api`) | black-box API parity harness: 520+ scenarios against a real `serve` process per scenario (Python green; Rust switched on per landed slice through `harness.RUST_SLICES_LANDED`), records and `compare.py` diff, cross-implementation databases, races over HTTP, `--target` mode for the shadow (7.3) | S7a |
 | `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |
@@ -290,5 +291,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `tests/test_runner_parity_compare.py` | `rust/parity/runner/compare.py`: equal records pass, differences reported with their path, types compared, failed stacks and missing baselines fail, `--require-rust` | S7b |
 | `crates/opsgate-runner/tests/executor.rs` (Rust-only cases) | executor against a fake API and tmux on paused time: status sequence, artifact names, keys and modes (`context.json` in both roots, `prompt.md`, `previous_step_summary.md`, `run_step.sh` 0750, JSON artifacts 0600), invalid plan, non-running tickets, terminal ticket before a step, cancel and other terminal states during a step, session lost without exit code, heartbeat cadence, post-status retries and the stop-aware retry wait, shutdown after the exit code appeared, error kinds (4.13.4, 4.13.5) | S6a |
 | `crates/opsgate-runner/tests/api_client.rs` (Rust-only cases) | HTTP client against an in-process axum server: bearer header, JSON bodies and paths, claim results, empty bodies, the three passed-on error codes and `http_error` otherwise, no redirects, redacted `Debug` (4.13.1) | S6a |
-| `crates/opsgate-runner/tests/tmux_integration.rs` | real `tmux` on a private socket label and `TMUX_TMPDIR` with fake agents in an isolated environment: a two-step ticket (agent command lines, prompt on stdin, env-file variables reach the step, `session.log`, `exit_code`), `has-session`/`kill-session`, failing `new-session`, missing `tmux` binary (4.13.3, 4.13.8) | S6a |
+| `crates/opsgate-runner/tests/tmux_integration.rs` | real `tmux` on a private socket label and `TMUX_TMPDIR` with fake agents in an isolated environment: a two-step ticket (agent command lines, prompt on stdin, env-file variables reach the step, `session.log`, `exit_code`), `has-session`/`kill-session`, failing `new-session`, missing `tmux` binary (4.13.3, 4.13.8); S6b: the supervisor's discovery and verified cleanup on a real server and without one, and without a `tmux` binary (4.13.6) | S6a, S6b |
 | `crates/opsgate-runner/src/{commands,artifacts,executor,values}.rs::tests` | slugs and names, shell quoting round trips, the step script text, artifact JSON text, `_load_summary` rules, SHA-256, Python path joining, session-entry upsert, exit-code parsing, Python `str()`/truthiness/`int()` of ticket values | S6a |
+| `crates/opsgate-runner/tests/supervisor.rs` (Rust-only cases) | supervisor against a fake API with several tickets and a scripted tmux on paused time (4.13.6): `--once` (claims, waits for the workers, removes their state files; disable file; empty and failed claims), a claimed ticket without id, claims up to `max_parallel_jobs` with state files and the shutdown that interrupts the steps and removes the state files, recovery at the worker limit and with live workers, the first pass over the artifact directories (symlinks followed, once per process), the `_run_worker` `finally` (terminal ticket after an outage, cleanup verified), a failing state-file write ending the supervisor | S6b |
+| `crates/opsgate-runner/src/supervisor.rs::tests` | the ticket-id and tmux-session patterns as Python's `re` (`$` before a final newline, Unicode `\d`), `tmux ls` line splitting, state-file reading (hidden files, invalid files deleted, non-UTF-8 and directories are errors, a missing directory has none) | S6b |

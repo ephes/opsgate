@@ -13,11 +13,13 @@ opsgate-core.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
+regex.workspace = true
 sha2.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["process", "rt", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time", "macros"] }
 tokio-util.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 axum = { workspace = true, features = ["tokio", "http1"] }

@@ -1,8 +1,11 @@
 //! Process-level tests of the `opsgate` binary (PLAN.md 4.1, D-15):
 //! `--version`, the stub commands and usage errors (slice S1), `check-db`
-//! (slice S3a).
+//! (slice S3a) and `runner` (slice S6b: configuration errors, `--once`, the
+//! P1 log line of a failed claim, SIGTERM/SIGINT).
 
-use std::process::{Command, Output};
+use std::path::Path;
+use std::process::{Child, Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_opsgate");
 
@@ -69,8 +72,6 @@ fn unlanded_commands_are_stubs_that_exit_2() {
             ],
             "serve",
         ),
-        (&["runner"], "runner"),
-        (&["runner", "--once"], "runner"),
         (&["check-config", "api"], "check-config"),
         (&["check-config", "runner"], "check-config"),
     ] {
@@ -158,5 +159,196 @@ fn help_lists_the_commands() {
     let stdout = text(&output.stdout);
     for command in ["serve", "runner", "check-config", "check-db"] {
         assert!(stdout.contains(command), "{command}: {stdout}");
+    }
+}
+
+// ----- runner (slice S6b) -----------------------------------------------------
+
+const RUNNER_TOKEN: &str = "runner-secret-value-0000000";
+
+/// A loopback port nothing listens on (bound and released).
+fn closed_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.local_addr().unwrap().port()
+}
+
+/// The runner's env file in `root` (an API that refuses connections, no
+/// `tmux` on `PATH`) and the process environment pointing at it.
+fn runner_env(root: &Path, extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    let exec_dir = root.join("execution");
+    let mut lines = vec![
+        format!("OPSGATE_RUNNER_TOKEN={RUNNER_TOKEN}"),
+        format!(
+            "OPSGATE_RUNNER_API_BASE_URL=http://127.0.0.1:{}",
+            closed_port()
+        ),
+        format!("OPSGATE_EXECUTION_DATA_DIR={}", exec_dir.display()),
+        "OPSGATE_RUNNER_HOST=runner-binary-test".to_owned(),
+        "OPSGATE_TMUX_SOCKET_LABEL=og-binary-test".to_owned(),
+        "PATH=/nonexistent".to_owned(),
+    ];
+    lines.extend(extra.iter().map(|(key, value)| format!("{key}={value}")));
+    let env_file = root.join("runner.env");
+    std::fs::write(&env_file, lines.join("\n") + "\n").unwrap();
+    vec![(
+        "OPSGATE_ENV_FILE".to_owned(),
+        env_file.display().to_string(),
+    )]
+}
+
+fn runner_command(args: &[&str], env: &[(String, String)]) -> Command {
+    let mut command = Command::new(BINARY);
+    command
+        .args(args)
+        .env_clear()
+        .envs(env.iter().map(|(key, value)| (key, value)));
+    command
+}
+
+#[test]
+fn runner_configuration_errors_name_the_setting_and_exit_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.env");
+    let short_file = dir.path().join("short.env");
+    std::fs::write(&short_file, "OPSGATE_RUNNER_TOKEN=too-short-secret\n").unwrap();
+    for (env, named) in [
+        (vec![], "OPSGATE_RUNNER_TOKEN"),
+        (
+            vec![("OPSGATE_ENV_FILE", missing.to_str().unwrap())],
+            "Env file does not exist",
+        ),
+        (
+            vec![("OPSGATE_ENV_FILE", short_file.to_str().unwrap())],
+            "OPSGATE_RUNNER_TOKEN",
+        ),
+        (
+            vec![
+                ("OPSGATE_RUNNER_TOKEN", RUNNER_TOKEN),
+                ("OPSGATE_RUNNER_POLL_INTERVAL_SECONDS", "0"),
+            ],
+            "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS",
+        ),
+    ] {
+        for args in [&["runner"][..], &["runner", "--once"]] {
+            let output = Command::new(BINARY)
+                .args(args)
+                .env_clear()
+                .envs(env.iter().copied())
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{env:?}");
+            assert!(output.stdout.is_empty());
+            let stderr = text(&output.stderr);
+            assert_eq!(stderr.lines().count(), 1, "{stderr}");
+            assert!(
+                stderr.starts_with("opsgate runner: configuration error: "),
+                "{stderr}"
+            );
+            assert!(stderr.contains(named), "{stderr}");
+            assert!(!stderr.contains("too-short-secret"), "{stderr}");
+        }
+    }
+}
+
+/// `--once` with the disable file: one recovery pass, no claim, exit 0. The
+/// state directory is created and the startup line names no secret.
+#[test]
+fn runner_once_with_disable_file_exits_without_claiming() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = runner_env(dir.path(), &[]);
+    let exec_dir = dir.path().join("execution");
+    std::fs::create_dir_all(&exec_dir).unwrap();
+    std::fs::write(exec_dir.join(".disabled"), "").unwrap();
+
+    let output = runner_command(&["runner", "--once"], &env)
+        .output()
+        .unwrap();
+
+    let stderr = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(exec_dir.join("runner-state").is_dir());
+    assert!(
+        stderr.contains("implementation=rust runner_host=runner-binary-test"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("Runner claim failed"), "{stderr}");
+    assert!(!stderr.contains(RUNNER_TOKEN), "{stderr}");
+}
+
+/// `--once` against an unreachable API: the claim fails with the P1 log line
+/// (4.15) and the runner exits 0.
+#[test]
+fn runner_once_logs_a_failed_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = runner_env(dir.path(), &[]);
+
+    let output = runner_command(&["runner", "--once"], &env)
+        .output()
+        .unwrap();
+
+    let stderr = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    let failures: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("Runner claim failed"))
+        .collect();
+    assert_eq!(failures.len(), 1, "{stderr}");
+    assert!(
+        failures[0].ends_with("Runner claim failed: status=503 category=transport_error"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains(RUNNER_TOKEN), "{stderr}");
+}
+
+fn wait_for_exit(child: &mut Child, timeout: Duration) -> Option<std::process::ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return Some(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// SIGTERM and SIGINT stop the runner during its poll-interval sleep at once
+/// (D-16; the interval here is an hour) with exit 0.
+#[test]
+fn runner_stops_on_sigterm_and_sigint() {
+    for signal in ["TERM", "INT"] {
+        let dir = tempfile::tempdir().unwrap();
+        let env = runner_env(
+            dir.path(),
+            &[("OPSGATE_RUNNER_POLL_INTERVAL_SECONDS", "3600")],
+        );
+        let stderr_path = dir.path().join("runner.err");
+        let mut child = runner_command(&["runner"], &env)
+            .stdout(Stdio::null())
+            .stderr(std::fs::File::create(&stderr_path).unwrap())
+            .spawn()
+            .unwrap();
+        // The first claim has failed once the loop runs (and the handlers
+        // are installed).
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !std::fs::read_to_string(&stderr_path)
+            .unwrap()
+            .contains("Runner claim failed")
+        {
+            assert!(Instant::now() < deadline, "runner did not start");
+            assert!(child.try_wait().unwrap().is_none(), "runner exited");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let killed = Command::new("kill")
+            .args([&format!("-{signal}"), &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(killed.success());
+        let status = wait_for_exit(&mut child, Duration::from_secs(10));
+        let stderr = std::fs::read_to_string(&stderr_path).unwrap();
+        assert_eq!(status.and_then(|s| s.code()), Some(0), "{signal}: {stderr}");
     }
 }

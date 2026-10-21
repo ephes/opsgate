@@ -16,8 +16,12 @@ ignore = []
 version = 2
 allow = [
     "Apache-2.0",
+    # subtle (constant-time comparison of the session fingerprint, S3a).
+    "BSD-3-Clause",
     "MIT",
     "Unicode-3.0",
+    # foldhash (through rusqlite's hashlink/hashbrown, S3a).
+    "Zlib",
 ]
 confidence-threshold = 0.93
 

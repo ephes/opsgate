@@ -80,11 +80,11 @@ section ("Rust-only tests") with their paths.
 | `test_login_ignores_javascript_next_path` | `web::login` | S4b | A |
 | `test_login_ignores_control_chars_in_next_path` | `web::login` | S4b | A |
 | `test_create_and_get_ticket_submit_token` | `web::api` | S4a | A |
-| `test_dedupe_enforced_for_open_task_ref` | `store::create` | S3a | A |
+| `test_dedupe_enforced_for_open_task_ref` | `crates/opsgate-store/tests/create.rs::test_dedupe_enforced_for_open_task_ref` (also scenario `dedupe` of fixture `store.json`) | S3a ✓ | A |
 | `test_dedupe_ignores_archived_pending_ticket` | `store::create + store::transitions` | S3b | A |
-| `test_dedupe_expires_stale_pending_ticket_before_replacement_submit` | `store::create` | S3a | A |
+| `test_dedupe_expires_stale_pending_ticket_before_replacement_submit` | `crates/opsgate-store/tests/create.rs::test_dedupe_expires_stale_pending_ticket_before_replacement_submit` (also scenario `lazy_expiry` of fixture `store.json`) | S3a ✓ | A |
 | `test_dedupe_expires_stale_approved_ticket_before_replacement_submit` | `store::create + store::transitions` | S3b | A |
-| `test_dedupe_not_applied_when_task_ref_missing` | `store::create` | S3a | A |
+| `test_dedupe_not_applied_when_task_ref_missing` | `crates/opsgate-store/tests/create.rs::test_dedupe_not_applied_when_task_ref_missing` (also scenario `create_get_list` of fixture `store.json`) | S3a ✓ | A |
 | `test_operator_submitter_may_explicitly_require_reviewer_step` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_may_explicitly_require_reviewer_step` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_lazy_expiry_blocks_approval` | `store::transitions` | S3b | A |
@@ -99,8 +99,8 @@ section ("Rust-only tests") with their paths.
 | `test_runner_status_rejects_invalid_event_type` | `store::runner_status` | S3b | A |
 | `test_runner_status_accepts_step_failed_event` | `store::runner_status` | S3b | A |
 | `test_get_ticket_forbidden_for_other_submitter_source` | `web::api` | S4a | A |
-| `test_health_endpoint_reports_ok` | `store::health + web::api` | S4a | A |
-| `test_health_reports_no_runner_heartbeat_before_first_poll` | `store::health + web::api` | S4a | A |
+| `test_health_endpoint_reports_ok` | `crates/opsgate-store/tests/create.rs::test_health_endpoint_reports_ok` (store half) + `web::api` | S3a ✓ + S4a | A |
+| `test_health_reports_no_runner_heartbeat_before_first_poll` | `crates/opsgate-store/tests/create.rs::test_health_reports_no_runner_heartbeat_before_first_poll` (store half) + `web::api` | S3a ✓ + S4a | A |
 | `test_idle_runner_claim_poll_records_heartbeat` | `store::claim` | S3b | A |
 | `test_runner_claim_without_token_records_no_heartbeat` | `store::claim` | S3b | A |
 | `test_api_rejects_non_tailscale_source_ip` | `web::gate` | S4a | A |
@@ -276,6 +276,12 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-core/tests/validation.rs::{normalised_ticket_and_checksum_payload,text_field_divergences}` | the normalised fields and the checksum payload; D-2/D-3 of the text fields, `source` and `expires_at` containers answered as Python does | S2c |
 | `crates/opsgate-core/src/validate.rs::tests` | Python truthiness of stored policies (approval, 4.7.2), floor lookup by source (manual tickets), the merge rules | S2c |
 | `tests/test_rust_fixtures.py::test_python_gated_fixtures_follow_the_interpreter` | fixtures gated to another CPython version (`PYTHON_GATED`) are neither written nor checked, and are checked on their own version (7.2) | S2a |
+| `crates/opsgate-store/tests/schema_contract.rs` | schema contract (4.10): a Rust-initialised database renders to `fixtures/schema.sql` byte for byte (and whitespace-normalised); Rust's start on a Python database changes nothing but the approver row; `init_db` idempotent; a pre-archive database gains the two columns; parent directory created; WAL, foreign keys, 5 s busy timeout | S3a |
+| `crates/opsgate-store/tests/store_fixture.rs` | `store.json`: 7 scenarios replayed against the store, every step result (ticket, error code/status/message, unhandled error) and the final four tables equal to Python's: creation with lazy expiry (pending and approved, offsets, blank and unparsable stored expiry, archived and foreign-source tickets untouched), dedupe incl. stripped `task_ref`, manual tickets and the operator floor, validation failures writing nothing, get/list/serialisation of rows written by older code (non-integer durations, empty `archived_at`, compact JSON text, whole-second ordering), health, session generation sync/revoke/restart (4.5.2, 4.6, 4.7.1) | S3a |
+| `crates/opsgate-store/tests/create.rs` (other tests) | ticket shape and `ticket_created` audit row, manual tickets, an unparsable stored expiry fails without writing, get/list, unreadable stored JSON (incl. D-2 `NaN`) is an error, session generation and fingerprint | S3a |
+| `crates/opsgate-store/tests/check_db.rs` | `check-db` (3.1, D-15): counts, the database file never written (also with uncheckpointed WAL content, which is read), the Python schema fixture passes, missing/extra/changed tables (columns, collations, constraints) and indexes, unreadable rows (JSON, D-2 overflow, BLOBs, `expires_at`, durations, audit metadata, session and heartbeat rows) reported without their values, a capped problem list, write-protected file, missing or foreign file | S3a |
+| `crates/opsgate/tests/binary.rs::check_db_reports_and_exits_0_or_1` | `opsgate check-db --db`: report on stdout, exit 0/1, an unreadable file is one stderr line and exit 1, never creates the file | S3a |
+| `tests/test_rust_fixtures.py::test_rust_store_ddl_is_the_python_ddl` | the DDL constants of `opsgate-store/src/schema.rs` are the statements of `init_db`, in order (4.10) | S3a |
 | `rust/parity/runner/test_runner_execution.py` | runner black box over a fake API (7.4): one/three steps, names and slugs, context and previous summary, agent command lines, env-file keys in the agents' environment (4.13.8), file modes, request shapes, exit-code failure, unsupported agent, invalid plan, timeout, cancel/terminal state during a step, session killed externally, heartbeat cadence, `max_parallel_jobs`, state files | S7b |
 | `rust/parity/runner/test_runner_api_faults.py` | status retry (503, dropped connection), status and heartbeat outages (state kept, live session re-attached), permanent 4xx, 409 conflicts, claim errors and their P1 log lines (4.13.1, 4.15) | S7b |
 | `rust/parity/runner/test_runner_supervisor.py` | disable file, `--once`, recovery housekeeping (state files, tmux discovery, terminal/not-running/unknown tickets, no tmux server, no tmux binary, GET outage) | S7b |

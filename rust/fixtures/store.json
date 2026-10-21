@@ -1,0 +1,5267 @@
+{
+ "generated_by": "rust/fixtures/generate.py",
+ "password_hashes": [
+  "$2b$12$fixture.hash.one.not.verified.by.these.scenarios.xx",
+  "$2b$12$fixture.hash.two.not.verified.by.these.scenarios.xx"
+ ],
+ "scenarios": [
+  {
+   "name": "create_get_list",
+   "settings": {},
+   "steps": [
+    {
+     "body": "{\"title\": \" Disk full \", \"summary\": \"Free space\\n\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"disk-full/macmini\", \"context\": {\"producer\": \"nyxmon\", \"check\": {\"check_id\": 42, \"name\": \"OpsGate Health (JSON Metrics)\", \"check_type\": \"json-http\", \"url\": \"http://studio.example:8711/api/v1/health\", \"service_id\": 7}, \"result\": {\"status\": \"error\", \"data\": {\"value\": 0.95, \"threshold\": 3.0, \"latency\": 14.0, \"ok\": false}}, \"numbers\": [0.95, 3.0, 14.0, 1e+16, 1e-05, -0.0, 12345678901234567890, 0.1], \"text\": \"Gr\\u00fc\\u00dfe \\u2603 \\ud83d\\ude00 \\\"quoted\\\" \\\\ \\n\\t\", \"empty\": {}, \"nested\": {\"z\": [1, 2.5, null, true, {\"deep\": []}]}}, \"expires_at\": \"2999-01-01T10:00:00+02:00\", \"max_duration_seconds\": 900}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {
+        "check": {
+         "check_id": 42,
+         "check_type": "json-http",
+         "name": "OpsGate Health (JSON Metrics)",
+         "service_id": 7,
+         "url": "http://studio.example:8711/api/v1/health"
+        },
+        "empty": {},
+        "nested": {
+         "z": [
+          1,
+          2.5,
+          null,
+          true,
+          {
+           "deep": []
+          }
+         ]
+        },
+        "numbers": [
+         0.95,
+         3.0,
+         14.0,
+         1e+16,
+         1e-05,
+         -0.0,
+         12345678901234567890,
+         0.1
+        ],
+        "producer": "nyxmon",
+        "result": {
+         "data": {
+          "latency": 14.0,
+          "ok": false,
+          "threshold": 3.0,
+          "value": 0.95
+         },
+         "status": "error"
+        },
+        "text": "Gr\u00fc\u00dfe \u2603 \ud83d\ude00 \"quoted\" \\ \n\t"
+       },
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2999-01-01T08:00:00Z",
+       "finished_at": null,
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 900,
+       "payload_checksum": "d2d7cdfa385dfd4c0ddeb19a228fe44f4db6504a17858c2f725e1ca9cf43a8d5",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Free space",
+       "task_ref": "disk-full/macmini",
+       "title": "Disk full",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"No task ref\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}]}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-2",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": null,
+       "title": "No task ref",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": null,
+     "user_agent": null
+    },
+    {
+     "body": "{\"title\": \"No task ref\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}]}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-3",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": null,
+       "title": "No task ref",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": null,
+     "user_agent": null
+    },
+    {
+     "body": "{\"title\": \"Blank task ref is none\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"  \"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-4",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "8bf497cf3ecbce1b2a42e3b62ad66aa498f6183803cd8093d1893e5a1249ff14",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": null,
+       "title": "Blank task ref is none",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Manual\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \" Implementer \", \"agent\": \"CODEX\", \"prompt_markdown\": \"  Fix it\\n\"}, {\"role\": \"Reviewer\", \"agent\": \"claude\", \"prompt_markdown\": \"Review the change\"}], \"task_ref\": \"manual-1\", \"policy_requirements\": {\"require_reviewer_step\": true}, \"context\": {\"note\": \"from the form\"}}",
+     "creator": "opsgate-admin",
+     "op": "create_manual",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {
+        "note": "from the form"
+       },
+       "created_at": "<timestamp>",
+       "created_by": "approver:opsgate-admin",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Fix it",
+         "role": "Implementer"
+        },
+        {
+         "agent": "claude",
+         "prompt_markdown": "Review the change",
+         "role": "Reviewer"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-5",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "4cef5e31e1a6f77213c2ebe37e42b4d5443582acedda70d2516ce9fc2c8c5ca8",
+       "policy_requirements": {
+        "require_reviewer_step": true
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "operator",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "manual-1",
+       "title": "Manual",
+       "tmux_sessions": []
+      }
+     },
+     "source_ip": "127.0.0.1",
+     "user_agent": "Mozilla/5.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"manual-1\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "operator",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {
+        "check": {
+         "check_id": 42,
+         "check_type": "json-http",
+         "name": "OpsGate Health (JSON Metrics)",
+         "service_id": 7,
+         "url": "http://studio.example:8711/api/v1/health"
+        },
+        "empty": {},
+        "nested": {
+         "z": [
+          1,
+          2.5,
+          null,
+          true,
+          {
+           "deep": []
+          }
+         ]
+        },
+        "numbers": [
+         0.95,
+         3.0,
+         14.0,
+         1e+16,
+         1e-05,
+         -0.0,
+         12345678901234567890,
+         0.1
+        ],
+        "producer": "nyxmon",
+        "result": {
+         "data": {
+          "latency": 14.0,
+          "ok": false,
+          "threshold": 3.0,
+          "value": 0.95
+         },
+         "status": "error"
+        },
+        "text": "Gr\u00fc\u00dfe \u2603 \ud83d\ude00 \"quoted\" \\ \n\t"
+       },
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2999-01-01T08:00:00Z",
+       "finished_at": null,
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 900,
+       "payload_checksum": "d2d7cdfa385dfd4c0ddeb19a228fe44f4db6504a17858c2f725e1ca9cf43a8d5",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Free space",
+       "task_ref": "disk-full/macmini",
+       "title": "Disk full",
+       "tmux_sessions": []
+      }
+     },
+     "ticket": 1
+    },
+    {
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {
+        "note": "from the form"
+       },
+       "created_at": "<timestamp>",
+       "created_by": "approver:opsgate-admin",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Fix it",
+         "role": "Implementer"
+        },
+        {
+         "agent": "claude",
+         "prompt_markdown": "Review the change",
+         "role": "Reviewer"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-5",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "4cef5e31e1a6f77213c2ebe37e42b4d5443582acedda70d2516ce9fc2c8c5ca8",
+       "policy_requirements": {
+        "require_reviewer_step": true
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "operator",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "manual-1",
+       "title": "Manual",
+       "tmux_sessions": []
+      }
+     },
+     "ticket": 5
+    },
+    {
+     "id": "00000000-0000-4000-8000-000000000000",
+     "op": "get",
+     "result": {
+      "error": {
+       "code": "ticket_not_found",
+       "message": "Ticket not found",
+       "status": 404
+      }
+     }
+    },
+    {
+     "id": "",
+     "op": "get",
+     "result": {
+      "error": {
+       "code": "ticket_not_found",
+       "message": "Ticket not found",
+       "status": 404
+      }
+     }
+    },
+    {
+     "archived": "exclude",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "note": "from the form"
+        },
+        "created_at": "<timestamp>",
+        "created_by": "approver:opsgate-admin",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Fix it",
+          "role": "Implementer"
+         },
+         {
+          "agent": "claude",
+          "prompt_markdown": "Review the change",
+          "role": "Reviewer"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-5",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "4cef5e31e1a6f77213c2ebe37e42b4d5443582acedda70d2516ce9fc2c8c5ca8",
+        "policy_requirements": {
+         "require_reviewer_step": true
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "operator",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": "manual-1",
+        "title": "Manual",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "<timestamp>",
+        "created_by": "submit:openclaw",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect the service",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-4",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "8bf497cf3ecbce1b2a42e3b62ad66aa498f6183803cd8093d1893e5a1249ff14",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "openclaw",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": null,
+        "title": "Blank task ref is none",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "<timestamp>",
+        "created_by": "submit:openclaw",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect the service",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-3",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "openclaw",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": null,
+        "title": "No task ref",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "<timestamp>",
+        "created_by": "submit:openclaw",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect the service",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-2",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "openclaw",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": null,
+        "title": "No task ref",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "check": {
+          "check_id": 42,
+          "check_type": "json-http",
+          "name": "OpsGate Health (JSON Metrics)",
+          "service_id": 7,
+          "url": "http://studio.example:8711/api/v1/health"
+         },
+         "empty": {},
+         "nested": {
+          "z": [
+           1,
+           2.5,
+           null,
+           true,
+           {
+            "deep": []
+           }
+          ]
+         },
+         "numbers": [
+          0.95,
+          3.0,
+          14.0,
+          1e+16,
+          1e-05,
+          -0.0,
+          12345678901234567890,
+          0.1
+         ],
+         "producer": "nyxmon",
+         "result": {
+          "data": {
+           "latency": 14.0,
+           "ok": false,
+           "threshold": 3.0,
+           "value": 0.95
+          },
+          "status": "error"
+         },
+         "text": "Gr\u00fc\u00dfe \u2603 \ud83d\ude00 \"quoted\" \\ \n\t"
+        },
+        "created_at": "<timestamp>",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect the service",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": "2999-01-01T08:00:00Z",
+        "finished_at": null,
+        "id": "ticket-1",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 900,
+        "payload_checksum": "d2d7cdfa385dfd4c0ddeb19a228fe44f4db6504a17858c2f725e1ca9cf43a8d5",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Free space",
+        "task_ref": "disk-full/macmini",
+        "title": "Disk full",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "archived": "include",
+     "limit": 2,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "note": "from the form"
+        },
+        "created_at": "<timestamp>",
+        "created_by": "approver:opsgate-admin",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Fix it",
+          "role": "Implementer"
+         },
+         {
+          "agent": "claude",
+          "prompt_markdown": "Review the change",
+          "role": "Reviewer"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-5",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "4cef5e31e1a6f77213c2ebe37e42b4d5443582acedda70d2516ce9fc2c8c5ca8",
+        "policy_requirements": {
+         "require_reviewer_step": true
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "operator",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": "manual-1",
+        "title": "Manual",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "<timestamp>",
+        "created_by": "submit:openclaw",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect the service",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "ticket-4",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "8bf497cf3ecbce1b2a42e3b62ad66aa498f6183803cd8093d1893e5a1249ff14",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "openclaw",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Summary",
+        "task_ref": null,
+        "title": "Blank task ref is none",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "archived": "only",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": []
+     }
+    },
+    {
+     "op": "health",
+     "result": {
+      "ok": {
+       "db": "ok",
+       "runner_host": null,
+       "runner_last_heartbeat": null,
+       "service": "opsgate",
+       "status": "ok",
+       "ticket_counters": {
+        "pending_approval": 5
+       }
+      }
+     }
+    },
+    {
+     "body": "{\"title\": \"\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"invalid\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "invalid_ticket",
+       "message": "title and summary are required",
+       "status": 400
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"mismatch\", \"source\": \"openclaw\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "source_mismatch",
+       "message": "Ticket source must match the authenticated creation path",
+       "status": 403
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"x\", \"agent\": \"gpt\", \"prompt_markdown\": \"p\"}], \"task_ref\": \"bad-agent\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "invalid_execution_plan",
+       "message": "agent must be one of: codex, claude",
+       "status": 400
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"bad-expiry\", \"expires_at\": \"2026-10-21T10:00:00\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "invalid_expires_at",
+       "message": "Datetime must include timezone information",
+       "status": 400
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    }
+   ],
+   "tables": {
+    "audit_events": [
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 1,
+      "metadata_json": "{\"task_ref\": \"disk-full/macmini\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-1",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 2,
+      "metadata_json": "{\"task_ref\": null}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": null,
+      "ticket_id": "ticket-2",
+      "timestamp": "<timestamp>",
+      "user_agent": null
+     },
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 3,
+      "metadata_json": "{\"task_ref\": null}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": null,
+      "ticket_id": "ticket-3",
+      "timestamp": "<timestamp>",
+      "user_agent": null
+     },
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 4,
+      "metadata_json": "{\"task_ref\": null}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-4",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "approver:opsgate-admin",
+      "event_type": "ticket_created",
+      "id": 5,
+      "metadata_json": "{\"task_ref\": \"manual-1\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "127.0.0.1",
+      "ticket_id": "ticket-5",
+      "timestamp": "<timestamp>",
+      "user_agent": "Mozilla/5.0"
+     }
+    ],
+    "runner_heartbeats": [],
+    "tickets": [
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{\"check\": {\"check_id\": 42, \"check_type\": \"json-http\", \"name\": \"OpsGate Health (JSON Metrics)\", \"service_id\": 7, \"url\": \"http://studio.example:8711/api/v1/health\"}, \"empty\": {}, \"nested\": {\"z\": [1, 2.5, null, true, {\"deep\": []}]}, \"numbers\": [0.95, 3.0, 14.0, 1e+16, 1e-05, -0.0, 12345678901234567890, 0.1], \"producer\": \"nyxmon\", \"result\": {\"data\": {\"latency\": 14.0, \"ok\": false, \"threshold\": 3.0, \"value\": 0.95}, \"status\": \"error\"}, \"text\": \"Gr\\u00fc\\u00dfe \\u2603 \\ud83d\\ude00 \\\"quoted\\\" \\\\ \\n\\t\"}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2999-01-01T08:00:00Z",
+      "finished_at": null,
+      "id": "ticket-1",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 900,
+      "payload_checksum": "d2d7cdfa385dfd4c0ddeb19a228fe44f4db6504a17858c2f725e1ca9cf43a8d5",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Free space",
+      "task_ref": "disk-full/macmini",
+      "title": "Disk full",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-2",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": null,
+      "title": "No task ref",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-3",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "d5e10d05f3bf82426ed3ec1e0f53537873c993db7f01dc0e044c3e17fce37940",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": null,
+      "title": "No task ref",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-4",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "8bf497cf3ecbce1b2a42e3b62ad66aa498f6183803cd8093d1893e5a1249ff14",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": null,
+      "title": "Blank task ref is none",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{\"note\": \"from the form\"}",
+      "created_at": "<timestamp>",
+      "created_by": "approver:opsgate-admin",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Fix it\", \"role\": \"Implementer\"}, {\"agent\": \"claude\", \"prompt_markdown\": \"Review the change\", \"role\": \"Reviewer\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-5",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "4cef5e31e1a6f77213c2ebe37e42b4d5443582acedda70d2516ce9fc2c8c5ca8",
+      "policy_requirements_json": "{\"require_reviewer_step\": true}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "operator",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "manual-1",
+      "title": "Manual",
+      "tmux_sessions_json": "[]"
+     }
+    ],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "dedupe",
+   "settings": {},
+   "steps": [
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"same-ref\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "ea4619ffc6dbbb52c9bb22f5957a65c795146fab8331a74b45d3a41ff7eede51",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "same-ref",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"same-ref\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \" same-ref\\t\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"same-ref\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-2",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "a4a47b7a2c2152f1d6404bc2cadd7e825ab8915b19794a087cb7808dee191d68",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "same-ref",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "state": "running"
+     },
+     "ticket": 1
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"same-ref\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "state": "succeeded"
+     },
+     "ticket": 1
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"same-ref\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-3",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "ea4619ffc6dbbb52c9bb22f5957a65c795146fab8331a74b45d3a41ff7eede51",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "same-ref",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    }
+   ],
+   "tables": {
+    "audit_events": [
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 1,
+      "metadata_json": "{\"task_ref\": \"same-ref\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-1",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 2,
+      "metadata_json": "{\"task_ref\": \"same-ref\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-2",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 3,
+      "metadata_json": "{\"task_ref\": \"same-ref\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-3",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     }
+    ],
+    "runner_heartbeats": [],
+    "tickets": [
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-1",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "ea4619ffc6dbbb52c9bb22f5957a65c795146fab8331a74b45d3a41ff7eede51",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "succeeded",
+      "summary": "Summary",
+      "task_ref": "same-ref",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-2",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "a4a47b7a2c2152f1d6404bc2cadd7e825ab8915b19794a087cb7808dee191d68",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "same-ref",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-3",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "ea4619ffc6dbbb52c9bb22f5957a65c795146fab8331a74b45d3a41ff7eede51",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "same-ref",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     }
+    ],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "lazy_expiry",
+   "settings": {},
+   "steps": [
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-pending\", \"expires_at\": \"2001-01-01T00:00:00Z\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": null,
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "f662cf8c77b62c467205b1390a6f88b5f8954d2dc35fdbecd5186b7c82395721",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-pending",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Replacement\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-pending\", \"expires_at\": \"2999-01-01T10:00:00+02:00\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2999-01-01T08:00:00Z",
+       "finished_at": null,
+       "id": "ticket-2",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "1535f566f187c323af8a260d607db0514b087a3fb84be3a1d608e56c52712940",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-pending",
+       "title": "Replacement",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": "<timestamp>",
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": true,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "f662cf8c77b62c467205b1390a6f88b5f8954d2dc35fdbecd5186b7c82395721",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": "failure",
+       "result_detail": "expired_before_execution",
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "expired",
+       "summary": "Summary",
+       "task_ref": "exp-pending",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "ticket": 1
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-approved\", \"expires_at\": \"2999-01-01T10:00:00+02:00\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2999-01-01T08:00:00Z",
+       "finished_at": null,
+       "id": "ticket-3",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "278996a170b2b55c627a7723666b47bf966bb9aaca8e27f6c5b14054c5f3669b",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-approved",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "approved_at": "2026-10-21T08:00:00Z",
+      "approved_by": "opsgate-admin",
+      "expires_at": "2026-01-01T00:00:00.000001Z",
+      "state": "approved"
+     },
+     "ticket": 3
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-approved\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-4",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "fc9e606b5bb66be107c818061d845af32f22bfc2d0bcba5a228c1493d83de83f",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-approved",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-running\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-5",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "1a50b2933a96f6f374920256e4f0c701ec9b83f216b0df1deade88cad185278e",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-running",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "expires_at": "2001-01-01T00:00:00Z",
+      "state": "running"
+     },
+     "ticket": 5
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-running\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-future\", \"expires_at\": \"2999-01-01T10:00:00+02:00\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2999-01-01T08:00:00Z",
+       "finished_at": null,
+       "id": "ticket-6",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "7fd8d2008424e1facfec95818842af2940ff910d7ded3ef1cabb6a97ac072ecc",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-future",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-future\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-blank\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-7",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "579c2932e84459e08e4948f35703c244e32c819c1bde60ec336be4b16e337e81",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-blank",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "expires_at": " \t"
+     },
+     "ticket": 7
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-blank\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "duplicate_open_ticket",
+       "message": "Duplicate open ticket for source/task_ref",
+       "status": 409
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-offset\", \"expires_at\": \"2001-01-01T05:00:00+05:00\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": null,
+       "id": "ticket-8",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "61bd074028c653abd99d6c6f8c185e38dd1b208ea547de0209f6bdb85abd794b",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-offset",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-offset\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-9",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "94ba2efd0b509a1ac3c2ecc03dba8a849fcf3cec72c40b6e60d541fc3e5f9ee9",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-offset",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-archived\", \"expires_at\": \"2001-01-01T00:00:00Z\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": null,
+       "id": "ticket-10",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "03e56fb5e4d49e69a2356f5e5143da9dc621323af24a79ceafa174bb1e69b0b2",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-archived",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "archived_at": "2026-10-21T09:00:00Z",
+      "archived_by": "opsgate-admin"
+     },
+     "ticket": 10
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-archived\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-11",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "891c1bcafe12ae901318a3c9eeeb7f8bea5bcaaa298c628ebdbff6db61107c10",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-archived",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": "2026-10-21T09:00:00Z",
+       "archived_by": "opsgate-admin",
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": null,
+       "id": "ticket-10",
+       "is_archivable": false,
+       "is_archived": true,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "03e56fb5e4d49e69a2356f5e5143da9dc621323af24a79ceafa174bb1e69b0b2",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-archived",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "ticket": 10
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-other\", \"expires_at\": \"2001-01-01T00:00:00Z\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:openclaw",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2001-01-01T00:00:00Z",
+       "finished_at": null,
+       "id": "ticket-12",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "ae17d3a0e49fa07267e2074e20af488cb914949a4028bb18ff1ce5f7c169a4a8",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "openclaw",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-other",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "openclaw",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-other\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-13",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "688100a636b6511b0ba90314c9680d9a1c77248dff81fc05321276c432f85b0f",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-other",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-garbage\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-14",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "c0b6d566a90491463b37cb7a4513b1e92402e98b6c9bb185e9ad831742117f46",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "exp-garbage",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "update",
+     "result": {
+      "ok": null
+     },
+     "set": {
+      "expires_at": "not a date"
+     },
+     "ticket": 14
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"exp-garbage\"}",
+     "op": "create",
+     "result": {
+      "unhandled": "ValueError"
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "op": "health",
+     "result": {
+      "ok": {
+       "db": "ok",
+       "runner_host": null,
+       "runner_last_heartbeat": null,
+       "service": "opsgate",
+       "status": "ok",
+       "ticket_counters": {
+        "expired": 3,
+        "pending_approval": 10,
+        "running": 1
+       }
+      }
+     }
+    }
+   ],
+   "tables": {
+    "audit_events": [
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 1,
+      "metadata_json": "{\"task_ref\": \"exp-pending\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-1",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_expired",
+      "id": 2,
+      "metadata_json": "{\"expires_at\": \"2001-01-01T00:00:00Z\"}",
+      "new_state": "expired",
+      "previous_state": "pending_approval",
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-1",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 3,
+      "metadata_json": "{\"task_ref\": \"exp-pending\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-2",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 4,
+      "metadata_json": "{\"task_ref\": \"exp-approved\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-3",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_expired",
+      "id": 5,
+      "metadata_json": "{\"expires_at\": \"2026-01-01T00:00:00.000001Z\"}",
+      "new_state": "expired",
+      "previous_state": "approved",
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-3",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 6,
+      "metadata_json": "{\"task_ref\": \"exp-approved\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-4",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 7,
+      "metadata_json": "{\"task_ref\": \"exp-running\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-5",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 8,
+      "metadata_json": "{\"task_ref\": \"exp-future\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-6",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 9,
+      "metadata_json": "{\"task_ref\": \"exp-blank\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-7",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 10,
+      "metadata_json": "{\"task_ref\": \"exp-offset\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-8",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_expired",
+      "id": 11,
+      "metadata_json": "{\"expires_at\": \"2001-01-01T00:00:00Z\"}",
+      "new_state": "expired",
+      "previous_state": "pending_approval",
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-8",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 12,
+      "metadata_json": "{\"task_ref\": \"exp-offset\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-9",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 13,
+      "metadata_json": "{\"task_ref\": \"exp-archived\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-10",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 14,
+      "metadata_json": "{\"task_ref\": \"exp-archived\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-11",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:openclaw",
+      "event_type": "ticket_created",
+      "id": 15,
+      "metadata_json": "{\"task_ref\": \"exp-other\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-12",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 16,
+      "metadata_json": "{\"task_ref\": \"exp-other\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-13",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 17,
+      "metadata_json": "{\"task_ref\": \"exp-garbage\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-14",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     }
+    ],
+    "runner_heartbeats": [],
+    "tickets": [
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2001-01-01T00:00:00Z",
+      "finished_at": "<timestamp>",
+      "id": "ticket-1",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "f662cf8c77b62c467205b1390a6f88b5f8954d2dc35fdbecd5186b7c82395721",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "expired_before_execution",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "expired",
+      "summary": "Summary",
+      "task_ref": "exp-pending",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2999-01-01T08:00:00Z",
+      "finished_at": null,
+      "id": "ticket-2",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "1535f566f187c323af8a260d607db0514b087a3fb84be3a1d608e56c52712940",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-pending",
+      "title": "Replacement",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": "2026-10-21T08:00:00Z",
+      "approved_by": "opsgate-admin",
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2026-01-01T00:00:00.000001Z",
+      "finished_at": "<timestamp>",
+      "id": "ticket-3",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "278996a170b2b55c627a7723666b47bf966bb9aaca8e27f6c5b14054c5f3669b",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "expired_before_execution",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "expired",
+      "summary": "Summary",
+      "task_ref": "exp-approved",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-4",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "fc9e606b5bb66be107c818061d845af32f22bfc2d0bcba5a228c1493d83de83f",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-approved",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2001-01-01T00:00:00Z",
+      "finished_at": null,
+      "id": "ticket-5",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "1a50b2933a96f6f374920256e4f0c701ec9b83f216b0df1deade88cad185278e",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "running",
+      "summary": "Summary",
+      "task_ref": "exp-running",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2999-01-01T08:00:00Z",
+      "finished_at": null,
+      "id": "ticket-6",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "7fd8d2008424e1facfec95818842af2940ff910d7ded3ef1cabb6a97ac072ecc",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-future",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": " \t",
+      "finished_at": null,
+      "id": "ticket-7",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "579c2932e84459e08e4948f35703c244e32c819c1bde60ec336be4b16e337e81",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-blank",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2001-01-01T00:00:00Z",
+      "finished_at": "<timestamp>",
+      "id": "ticket-8",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "61bd074028c653abd99d6c6f8c185e38dd1b208ea547de0209f6bdb85abd794b",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "expired_before_execution",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "expired",
+      "summary": "Summary",
+      "task_ref": "exp-offset",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-9",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "94ba2efd0b509a1ac3c2ecc03dba8a849fcf3cec72c40b6e60d541fc3e5f9ee9",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-offset",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "2026-10-21T09:00:00Z",
+      "archived_by": "opsgate-admin",
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2001-01-01T00:00:00Z",
+      "finished_at": null,
+      "id": "ticket-10",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "03e56fb5e4d49e69a2356f5e5143da9dc621323af24a79ceafa174bb1e69b0b2",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-archived",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-11",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "891c1bcafe12ae901318a3c9eeeb7f8bea5bcaaa298c628ebdbff6db61107c10",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-archived",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:openclaw",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "2001-01-01T00:00:00Z",
+      "finished_at": null,
+      "id": "ticket-12",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "ae17d3a0e49fa07267e2074e20af488cb914949a4028bb18ff1ce5f7c169a4a8",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "openclaw",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-other",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-13",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "688100a636b6511b0ba90314c9680d9a1c77248dff81fc05321276c432f85b0f",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-other",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": "not a date",
+      "finished_at": null,
+      "id": "ticket-14",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "c0b6d566a90491463b37cb7a4513b1e92402e98b6c9bb185e9ad831742117f46",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "exp-garbage",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     }
+    ],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "operator_floor",
+   "settings": {
+    "operator_floor": true
+   },
+   "steps": [
+    {
+     "body": "{\"title\": \"No reviewer\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}]}",
+     "creator": "opsgate-admin",
+     "op": "create_manual",
+     "result": {
+      "error": {
+       "code": "missing_reviewer_step",
+       "message": "policy_requirements.require_reviewer_step=true requires at least one reviewer step",
+       "status": 400
+      }
+     },
+     "source_ip": "127.0.0.1",
+     "user_agent": "Mozilla/5.0"
+    },
+    {
+     "body": "{\"title\": \"With reviewer\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \" Implementer \", \"agent\": \"CODEX\", \"prompt_markdown\": \"  Fix it\\n\"}, {\"role\": \"Reviewer\", \"agent\": \"claude\", \"prompt_markdown\": \"Review the change\"}]}",
+     "creator": "opsgate-admin",
+     "op": "create_manual",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "approver:opsgate-admin",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Fix it",
+         "role": "Implementer"
+        },
+        {
+         "agent": "claude",
+         "prompt_markdown": "Review the change",
+         "role": "Reviewer"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-1",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "c9be517cb3114ab4c441b5be60cb9912c9fa918d23b34d07eb80c7280d42420c",
+       "policy_requirements": {
+        "require_reviewer_step": true
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "operator",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": null,
+       "title": "With reviewer",
+       "tmux_sessions": []
+      }
+     },
+     "source_ip": "127.0.0.1",
+     "user_agent": "Mozilla/5.0"
+    },
+    {
+     "body": "{\"title\": \"Explicit false\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \" Implementer \", \"agent\": \"CODEX\", \"prompt_markdown\": \"  Fix it\\n\"}, {\"role\": \"Reviewer\", \"agent\": \"claude\", \"prompt_markdown\": \"Review the change\"}], \"policy_requirements\": {\"require_reviewer_step\": false}}",
+     "creator": "opsgate-admin",
+     "op": "create_manual",
+     "result": {
+      "error": {
+       "code": "policy_floor_violation",
+       "message": "Ticket policy cannot weaken submit token policy floor",
+       "status": 400
+      }
+     },
+     "source_ip": "127.0.0.1",
+     "user_agent": "Mozilla/5.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"op-1\"}",
+     "op": "create",
+     "result": {
+      "error": {
+       "code": "missing_reviewer_step",
+       "message": "policy_requirements.require_reviewer_step=true requires at least one reviewer step",
+       "status": 400
+      }
+     },
+     "source": "operator",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \"investigator\", \"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\"}], \"task_ref\": \"nyx-1\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect the service",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-2",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "c2d04794aa873292a6eaaf8fbb917031017a00f3aa0a5f7a016309e2b72276e5",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "nyx-1",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "nyxmon",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    },
+    {
+     "body": "{\"title\": \"Title\", \"summary\": \"Summary\", \"execution_plan\": [{\"role\": \" Implementer \", \"agent\": \"CODEX\", \"prompt_markdown\": \"  Fix it\\n\"}, {\"role\": \"Reviewer\", \"agent\": \"claude\", \"prompt_markdown\": \"Review the change\"}], \"task_ref\": \"op-2\"}",
+     "op": "create",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "<timestamp>",
+       "created_by": "submit:operator",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Fix it",
+         "role": "Implementer"
+        },
+        {
+         "agent": "claude",
+         "prompt_markdown": "Review the change",
+         "role": "Reviewer"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "ticket-3",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "6ceb400f561a1a816b130892ba40e1c0fb5e7b5b3f1f8bed1fd41855ba7a821c",
+       "policy_requirements": {
+        "require_reviewer_step": true
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "operator",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Summary",
+       "task_ref": "op-2",
+       "title": "Title",
+       "tmux_sessions": []
+      }
+     },
+     "source": "operator",
+     "source_ip": "100.64.0.7",
+     "user_agent": "producer/1.0"
+    }
+   ],
+   "tables": {
+    "audit_events": [
+     {
+      "actor": "approver:opsgate-admin",
+      "event_type": "ticket_created",
+      "id": 1,
+      "metadata_json": "{\"task_ref\": null}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "127.0.0.1",
+      "ticket_id": "ticket-1",
+      "timestamp": "<timestamp>",
+      "user_agent": "Mozilla/5.0"
+     },
+     {
+      "actor": "submit:nyxmon",
+      "event_type": "ticket_created",
+      "id": 2,
+      "metadata_json": "{\"task_ref\": \"nyx-1\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-2",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     },
+     {
+      "actor": "submit:operator",
+      "event_type": "ticket_created",
+      "id": 3,
+      "metadata_json": "{\"task_ref\": \"op-2\"}",
+      "new_state": "pending_approval",
+      "previous_state": null,
+      "source_ip": "100.64.0.7",
+      "ticket_id": "ticket-3",
+      "timestamp": "<timestamp>",
+      "user_agent": "producer/1.0"
+     }
+    ],
+    "runner_heartbeats": [],
+    "tickets": [
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "approver:opsgate-admin",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Fix it\", \"role\": \"Implementer\"}, {\"agent\": \"claude\", \"prompt_markdown\": \"Review the change\", \"role\": \"Reviewer\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-1",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "c9be517cb3114ab4c441b5be60cb9912c9fa918d23b34d07eb80c7280d42420c",
+      "policy_requirements_json": "{\"require_reviewer_step\": true}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "operator",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": null,
+      "title": "With reviewer",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect the service\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-2",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "c2d04794aa873292a6eaaf8fbb917031017a00f3aa0a5f7a016309e2b72276e5",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "nyx-1",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "<timestamp>",
+      "created_by": "submit:operator",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Fix it\", \"role\": \"Implementer\"}, {\"agent\": \"claude\", \"prompt_markdown\": \"Review the change\", \"role\": \"Reviewer\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "ticket-3",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "6ceb400f561a1a816b130892ba40e1c0fb5e7b5b3f1f8bed1fd41855ba7a821c",
+      "policy_requirements_json": "{\"require_reviewer_step\": true}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "operator",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Summary",
+      "task_ref": "op-2",
+      "title": "Title",
+      "tmux_sessions_json": "[]"
+     }
+    ],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session_state",
+   "settings": {},
+   "steps": [
+    {
+     "op": "generation",
+     "result": {
+      "ok": 1
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": null
+     },
+     "username": "someone-else"
+    },
+    {
+     "op": "revoke",
+     "result": {
+      "ok": 2
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "revoke",
+     "result": {
+      "error": {
+       "code": "unknown_approver",
+       "message": "Unknown approver",
+       "status": 400
+      }
+     },
+     "username": "someone-else"
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 2
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "restart",
+     "result": {
+      "ok": null
+     },
+     "settings": {}
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 2
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "restart",
+     "result": {
+      "ok": null
+     },
+     "settings": {
+      "ui_password_bcrypt": "$2b$12$fixture.hash.two.not.verified.by.these.scenarios.xx"
+     }
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 3
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "restart",
+     "result": {
+      "ok": null
+     },
+     "settings": {
+      "ui_password_bcrypt": "$2b$12$fixture.hash.two.not.verified.by.these.scenarios.xx"
+     }
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 3
+     },
+     "username": "opsgate-admin"
+    },
+    {
+     "op": "restart",
+     "result": {
+      "ok": null
+     },
+     "settings": {
+      "ui_username": "second-admin"
+     }
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 1
+     },
+     "username": "second-admin"
+    },
+    {
+     "op": "generation",
+     "result": {
+      "ok": 3
+     },
+     "username": "opsgate-admin"
+    }
+   ],
+   "tables": {
+    "audit_events": [],
+    "runner_heartbeats": [],
+    "tickets": [],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "d3fa0774aa00f1ad17e82e3d7e99fe3221430f97bbbc193133bf04e96a1d3c4f",
+      "session_generation": 3,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     },
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "second-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "empty_health",
+   "settings": {},
+   "steps": [
+    {
+     "op": "health",
+     "result": {
+      "ok": {
+       "db": "ok",
+       "runner_host": null,
+       "runner_last_heartbeat": null,
+       "service": "opsgate",
+       "status": "ok",
+       "ticket_counters": {}
+      }
+     }
+    },
+    {
+     "archived": "include",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": []
+     }
+    }
+   ],
+   "tables": {
+    "audit_events": [],
+    "runner_heartbeats": [],
+    "tickets": [],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  },
+  {
+   "name": "read_rows",
+   "settings": {},
+   "steps": [
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": "2026-03-07T10:01:00.250000Z",
+      "approved_by": "opsgate-admin",
+      "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archived_at": "2026-03-08T00:00:00Z",
+      "archived_by": "opsgate-admin",
+      "context_json": "{}",
+      "created_at": "2026-03-07T10:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": "2026-03-07T10:06:00Z",
+      "id": "aaaaaaaa-0000-4000-8000-000000000001",
+      "last_heartbeat_at": "2026-03-07T10:05:00Z",
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "success",
+      "result_detail": "done",
+      "runner_host": "macstudio",
+      "source": "nyxmon",
+      "started_at": "2026-03-07T10:02:00Z",
+      "state": "succeeded",
+      "summary": "Stored row",
+      "task_ref": "t-1",
+      "title": "Stored",
+      "tmux_sessions_json": "[{\"log_path\": \"/x/step.log\", \"session_name\": \"opsgate-1\", \"status\": \"succeeded\", \"step_index\": 0}]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{\"x\":1E5,\"y\":[1.50,-0,2e-7],\"z\":\"\\u00e9\\ud83d\\ude00\"}",
+      "created_at": "2026-03-07T10:00:00.500000Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": "2026-03-08T10:00:00Z",
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000002",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Stored row",
+      "task_ref": "t-2",
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "",
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-07T09:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000003",
+      "last_heartbeat_at": "2026-03-07T09:30:00Z",
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": "macstudio",
+      "source": "nyxmon",
+      "started_at": "2026-03-07T09:01:00Z",
+      "state": "running",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "",
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-06T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000004",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 900.5,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "prompt_tampered",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "failed",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-05T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000005",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": "n/a",
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "expired_before_execution",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "expired",
+      "summary": "Stored row",
+      "task_ref": "t-5",
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "2026-03-09T00:00:00Z",
+      "archived_by": "opsgate-admin",
+      "context_json": "{}",
+      "created_at": "2026-03-04T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000006",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-03T00:00:00Z",
+      "created_by": "approver:opsgate-admin",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000007",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "None",
+      "runner_host": null,
+      "source": "operator",
+      "started_at": null,
+      "state": "rejected",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "approved_at": "2026-03-02T00:00:01Z",
+      "approved_by": "opsgate-admin",
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-02T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000008",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": "900",
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "approved",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     "table": "tickets"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "last_heartbeat_at": "2026-10-18T09:00:00.123456Z",
+      "runner_host": "macstudio",
+      "updated_at": "2026-10-18T09:00:00.123456Z"
+     },
+     "table": "runner_heartbeats"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "last_heartbeat_at": "2026-03-01T00:00:00Z",
+      "runner_host": "manual-check",
+      "updated_at": "2026-03-01T00:00:00Z"
+     },
+     "table": "runner_heartbeats"
+    },
+    {
+     "op": "insert",
+     "result": {
+      "ok": null
+     },
+     "row": {
+      "last_heartbeat_at": "2026-10-18T09:00:00Z",
+      "runner_host": "127.0.0.1",
+      "updated_at": "2026-10-18T09:00:00Z"
+     },
+     "table": "runner_heartbeats"
+    },
+    {
+     "archived": "exclude",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "x": 100000.0,
+         "y": [
+          1.5,
+          0,
+          2e-07
+         ],
+         "z": "\u00e9\ud83d\ude00"
+        },
+        "created_at": "2026-03-07T10:00:00.500000Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": "2026-03-08T10:00:00Z",
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000002",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {},
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Stored row",
+        "task_ref": "t-2",
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-05T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000005",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": "n/a",
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "expired_before_execution",
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "expired",
+        "summary": "Stored row",
+        "task_ref": "t-5",
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-03T00:00:00Z",
+        "created_by": "approver:opsgate-admin",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000007",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "None",
+        "runner_host": null,
+        "source": "operator",
+        "started_at": null,
+        "state": "rejected",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": "2026-03-02T00:00:01Z",
+        "approved_by": "opsgate-admin",
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-02T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000008",
+        "is_archivable": false,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 900,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "approved",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "archived": "only",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": "2026-03-07T10:01:00.250000Z",
+        "approved_by": "opsgate-admin",
+        "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+        "archived_at": "2026-03-08T00:00:00Z",
+        "archived_by": "opsgate-admin",
+        "context": {},
+        "created_at": "2026-03-07T10:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": "2026-03-07T10:06:00Z",
+        "id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "is_archivable": false,
+        "is_archived": true,
+        "is_terminal": true,
+        "last_heartbeat_at": "2026-03-07T10:05:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "success",
+        "result_detail": "done",
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T10:02:00Z",
+        "state": "succeeded",
+        "summary": "Stored row",
+        "task_ref": "t-1",
+        "title": "Stored",
+        "tmux_sessions": [
+         {
+          "log_path": "/x/step.log",
+          "session_name": "opsgate-1",
+          "status": "succeeded",
+          "step_index": 0
+         }
+        ]
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "",
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-07T09:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000003",
+        "is_archivable": false,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": "2026-03-07T09:30:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T09:01:00Z",
+        "state": "running",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "",
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-06T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000004",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 900.5,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "prompt_tampered",
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "failed",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "2026-03-09T00:00:00Z",
+        "archived_by": "opsgate-admin",
+        "context": {},
+        "created_at": "2026-03-04T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000006",
+        "is_archivable": false,
+        "is_archived": true,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "archived": "include",
+     "limit": 100,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": "2026-03-07T10:01:00.250000Z",
+        "approved_by": "opsgate-admin",
+        "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+        "archived_at": "2026-03-08T00:00:00Z",
+        "archived_by": "opsgate-admin",
+        "context": {},
+        "created_at": "2026-03-07T10:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": "2026-03-07T10:06:00Z",
+        "id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "is_archivable": false,
+        "is_archived": true,
+        "is_terminal": true,
+        "last_heartbeat_at": "2026-03-07T10:05:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "success",
+        "result_detail": "done",
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T10:02:00Z",
+        "state": "succeeded",
+        "summary": "Stored row",
+        "task_ref": "t-1",
+        "title": "Stored",
+        "tmux_sessions": [
+         {
+          "log_path": "/x/step.log",
+          "session_name": "opsgate-1",
+          "status": "succeeded",
+          "step_index": 0
+         }
+        ]
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "x": 100000.0,
+         "y": [
+          1.5,
+          0,
+          2e-07
+         ],
+         "z": "\u00e9\ud83d\ude00"
+        },
+        "created_at": "2026-03-07T10:00:00.500000Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": "2026-03-08T10:00:00Z",
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000002",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {},
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Stored row",
+        "task_ref": "t-2",
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "",
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-07T09:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000003",
+        "is_archivable": false,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": "2026-03-07T09:30:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T09:01:00Z",
+        "state": "running",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "",
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-06T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000004",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 900.5,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "prompt_tampered",
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "failed",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-05T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000005",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": "n/a",
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "expired_before_execution",
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "expired",
+        "summary": "Stored row",
+        "task_ref": "t-5",
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "2026-03-09T00:00:00Z",
+        "archived_by": "opsgate-admin",
+        "context": {},
+        "created_at": "2026-03-04T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000006",
+        "is_archivable": false,
+        "is_archived": true,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-03T00:00:00Z",
+        "created_by": "approver:opsgate-admin",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000007",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": true,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "failure",
+        "result_detail": "None",
+        "runner_host": null,
+        "source": "operator",
+        "started_at": null,
+        "state": "rejected",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": "2026-03-02T00:00:01Z",
+        "approved_by": "opsgate-admin",
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-02T00:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000008",
+        "is_archivable": false,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 900,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "approved",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "archived": "include",
+     "limit": 3,
+     "op": "list",
+     "result": {
+      "ok": [
+       {
+        "approved_at": "2026-03-07T10:01:00.250000Z",
+        "approved_by": "opsgate-admin",
+        "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+        "archived_at": "2026-03-08T00:00:00Z",
+        "archived_by": "opsgate-admin",
+        "context": {},
+        "created_at": "2026-03-07T10:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": "2026-03-07T10:06:00Z",
+        "id": "aaaaaaaa-0000-4000-8000-000000000001",
+        "is_archivable": false,
+        "is_archived": true,
+        "is_terminal": true,
+        "last_heartbeat_at": "2026-03-07T10:05:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": "success",
+        "result_detail": "done",
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T10:02:00Z",
+        "state": "succeeded",
+        "summary": "Stored row",
+        "task_ref": "t-1",
+        "title": "Stored",
+        "tmux_sessions": [
+         {
+          "log_path": "/x/step.log",
+          "session_name": "opsgate-1",
+          "status": "succeeded",
+          "step_index": 0
+         }
+        ]
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": null,
+        "archived_by": null,
+        "context": {
+         "x": 100000.0,
+         "y": [
+          1.5,
+          0,
+          2e-07
+         ],
+         "z": "\u00e9\ud83d\ude00"
+        },
+        "created_at": "2026-03-07T10:00:00.500000Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": "2026-03-08T10:00:00Z",
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000002",
+        "is_archivable": true,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": null,
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {},
+        "result": null,
+        "result_detail": null,
+        "runner_host": null,
+        "source": "nyxmon",
+        "started_at": null,
+        "state": "pending_approval",
+        "summary": "Stored row",
+        "task_ref": "t-2",
+        "title": "Stored",
+        "tmux_sessions": []
+       },
+       {
+        "approved_at": null,
+        "approved_by": null,
+        "approved_payload_checksum": null,
+        "archived_at": "",
+        "archived_by": null,
+        "context": {},
+        "created_at": "2026-03-07T09:00:00Z",
+        "created_by": "submit:nyxmon",
+        "execution_plan": [
+         {
+          "agent": "codex",
+          "prompt_markdown": "Inspect",
+          "role": "investigator"
+         }
+        ],
+        "expires_at": null,
+        "finished_at": null,
+        "id": "aaaaaaaa-0000-4000-8000-000000000003",
+        "is_archivable": false,
+        "is_archived": false,
+        "is_terminal": false,
+        "last_heartbeat_at": "2026-03-07T09:30:00Z",
+        "max_duration_seconds": 3600,
+        "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+        "policy_requirements": {
+         "require_reviewer_step": false
+        },
+        "result": null,
+        "result_detail": null,
+        "runner_host": "macstudio",
+        "source": "nyxmon",
+        "started_at": "2026-03-07T09:01:00Z",
+        "state": "running",
+        "summary": "Stored row",
+        "task_ref": null,
+        "title": "Stored",
+        "tmux_sessions": []
+       }
+      ]
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000001",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": "2026-03-07T10:01:00.250000Z",
+       "approved_by": "opsgate-admin",
+       "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+       "archived_at": "2026-03-08T00:00:00Z",
+       "archived_by": "opsgate-admin",
+       "context": {},
+       "created_at": "2026-03-07T10:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": "2026-03-07T10:06:00Z",
+       "id": "aaaaaaaa-0000-4000-8000-000000000001",
+       "is_archivable": false,
+       "is_archived": true,
+       "is_terminal": true,
+       "last_heartbeat_at": "2026-03-07T10:05:00Z",
+       "max_duration_seconds": 3600,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": "success",
+       "result_detail": "done",
+       "runner_host": "macstudio",
+       "source": "nyxmon",
+       "started_at": "2026-03-07T10:02:00Z",
+       "state": "succeeded",
+       "summary": "Stored row",
+       "task_ref": "t-1",
+       "title": "Stored",
+       "tmux_sessions": [
+        {
+         "log_path": "/x/step.log",
+         "session_name": "opsgate-1",
+         "status": "succeeded",
+         "step_index": 0
+        }
+       ]
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000002",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {
+        "x": 100000.0,
+        "y": [
+         1.5,
+         0,
+         2e-07
+        ],
+        "z": "\u00e9\ud83d\ude00"
+       },
+       "created_at": "2026-03-07T10:00:00.500000Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": "2026-03-08T10:00:00Z",
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000002",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {},
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Stored row",
+       "task_ref": "t-2",
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000003",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": "",
+       "archived_by": null,
+       "context": {},
+       "created_at": "2026-03-07T09:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000003",
+       "is_archivable": false,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": "2026-03-07T09:30:00Z",
+       "max_duration_seconds": 3600,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": "macstudio",
+       "source": "nyxmon",
+       "started_at": "2026-03-07T09:01:00Z",
+       "state": "running",
+       "summary": "Stored row",
+       "task_ref": null,
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000004",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": "",
+       "archived_by": null,
+       "context": {},
+       "created_at": "2026-03-06T00:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000004",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": true,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 900.5,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": "failure",
+       "result_detail": "prompt_tampered",
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "failed",
+       "summary": "Stored row",
+       "task_ref": null,
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000005",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "2026-03-05T00:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000005",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": true,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": "n/a",
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": "failure",
+       "result_detail": "expired_before_execution",
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "expired",
+       "summary": "Stored row",
+       "task_ref": "t-5",
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000006",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": "2026-03-09T00:00:00Z",
+       "archived_by": "opsgate-admin",
+       "context": {},
+       "created_at": "2026-03-04T00:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000006",
+       "is_archivable": false,
+       "is_archived": true,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "pending_approval",
+       "summary": "Stored row",
+       "task_ref": null,
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000007",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": null,
+       "approved_by": null,
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "2026-03-03T00:00:00Z",
+       "created_by": "approver:opsgate-admin",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000007",
+       "is_archivable": true,
+       "is_archived": false,
+       "is_terminal": true,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 3600,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": "failure",
+       "result_detail": "None",
+       "runner_host": null,
+       "source": "operator",
+       "started_at": null,
+       "state": "rejected",
+       "summary": "Stored row",
+       "task_ref": null,
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "id": "aaaaaaaa-0000-4000-8000-000000000008",
+     "op": "get",
+     "result": {
+      "ok": {
+       "approved_at": "2026-03-02T00:00:01Z",
+       "approved_by": "opsgate-admin",
+       "approved_payload_checksum": null,
+       "archived_at": null,
+       "archived_by": null,
+       "context": {},
+       "created_at": "2026-03-02T00:00:00Z",
+       "created_by": "submit:nyxmon",
+       "execution_plan": [
+        {
+         "agent": "codex",
+         "prompt_markdown": "Inspect",
+         "role": "investigator"
+        }
+       ],
+       "expires_at": null,
+       "finished_at": null,
+       "id": "aaaaaaaa-0000-4000-8000-000000000008",
+       "is_archivable": false,
+       "is_archived": false,
+       "is_terminal": false,
+       "last_heartbeat_at": null,
+       "max_duration_seconds": 900,
+       "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+       "policy_requirements": {
+        "require_reviewer_step": false
+       },
+       "result": null,
+       "result_detail": null,
+       "runner_host": null,
+       "source": "nyxmon",
+       "started_at": null,
+       "state": "approved",
+       "summary": "Stored row",
+       "task_ref": null,
+       "title": "Stored",
+       "tmux_sessions": []
+      }
+     }
+    },
+    {
+     "op": "health",
+     "result": {
+      "ok": {
+       "db": "ok",
+       "runner_host": "127.0.0.1",
+       "runner_last_heartbeat": "2026-10-18T09:00:00Z",
+       "service": "opsgate",
+       "status": "ok",
+       "ticket_counters": {
+        "approved": 1,
+        "expired": 1,
+        "failed": 1,
+        "pending_approval": 2,
+        "rejected": 1,
+        "running": 1,
+        "succeeded": 1
+       }
+      }
+     }
+    }
+   ],
+   "tables": {
+    "audit_events": [],
+    "runner_heartbeats": [
+     {
+      "last_heartbeat_at": "2026-10-18T09:00:00Z",
+      "runner_host": "127.0.0.1",
+      "updated_at": "2026-10-18T09:00:00Z"
+     },
+     {
+      "last_heartbeat_at": "2026-10-18T09:00:00.123456Z",
+      "runner_host": "macstudio",
+      "updated_at": "2026-10-18T09:00:00.123456Z"
+     },
+     {
+      "last_heartbeat_at": "2026-03-01T00:00:00Z",
+      "runner_host": "manual-check",
+      "updated_at": "2026-03-01T00:00:00Z"
+     }
+    ],
+    "tickets": [
+     {
+      "approved_at": "2026-03-07T10:01:00.250000Z",
+      "approved_by": "opsgate-admin",
+      "approved_payload_checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+      "archived_at": "2026-03-08T00:00:00Z",
+      "archived_by": "opsgate-admin",
+      "context_json": "{}",
+      "created_at": "2026-03-07T10:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": "2026-03-07T10:06:00Z",
+      "id": "aaaaaaaa-0000-4000-8000-000000000001",
+      "last_heartbeat_at": "2026-03-07T10:05:00Z",
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "success",
+      "result_detail": "done",
+      "runner_host": "macstudio",
+      "source": "nyxmon",
+      "started_at": "2026-03-07T10:02:00Z",
+      "state": "succeeded",
+      "summary": "Stored row",
+      "task_ref": "t-1",
+      "title": "Stored",
+      "tmux_sessions_json": "[{\"log_path\": \"/x/step.log\", \"session_name\": \"opsgate-1\", \"status\": \"succeeded\", \"step_index\": 0}]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{\"x\":1E5,\"y\":[1.50,-0,2e-7],\"z\":\"\\u00e9\\ud83d\\ude00\"}",
+      "created_at": "2026-03-07T10:00:00.500000Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": "2026-03-08T10:00:00Z",
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000002",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Stored row",
+      "task_ref": "t-2",
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "",
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-07T09:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000003",
+      "last_heartbeat_at": "2026-03-07T09:30:00Z",
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": "macstudio",
+      "source": "nyxmon",
+      "started_at": "2026-03-07T09:01:00Z",
+      "state": "running",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "",
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-06T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000004",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 900.5,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "prompt_tampered",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "failed",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-05T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000005",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": "n/a",
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "expired_before_execution",
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "expired",
+      "summary": "Stored row",
+      "task_ref": "t-5",
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": "2026-03-09T00:00:00Z",
+      "archived_by": "opsgate-admin",
+      "context_json": "{}",
+      "created_at": "2026-03-04T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000006",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "pending_approval",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": null,
+      "approved_by": null,
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-03T00:00:00Z",
+      "created_by": "approver:opsgate-admin",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000007",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 3600,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": "failure",
+      "result_detail": "None",
+      "runner_host": null,
+      "source": "operator",
+      "started_at": null,
+      "state": "rejected",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     },
+     {
+      "approved_at": "2026-03-02T00:00:01Z",
+      "approved_by": "opsgate-admin",
+      "approved_payload_checksum": null,
+      "archived_at": null,
+      "archived_by": null,
+      "context_json": "{}",
+      "created_at": "2026-03-02T00:00:00Z",
+      "created_by": "submit:nyxmon",
+      "execution_plan_json": "[{\"agent\": \"codex\", \"prompt_markdown\": \"Inspect\", \"role\": \"investigator\"}]",
+      "expires_at": null,
+      "finished_at": null,
+      "id": "aaaaaaaa-0000-4000-8000-000000000008",
+      "last_heartbeat_at": null,
+      "max_duration_seconds": 900,
+      "payload_checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+      "policy_requirements_json": "{\"require_reviewer_step\": false}",
+      "result": null,
+      "result_detail": null,
+      "runner_host": null,
+      "source": "nyxmon",
+      "started_at": null,
+      "state": "approved",
+      "summary": "Stored row",
+      "task_ref": null,
+      "title": "Stored",
+      "tmux_sessions_json": "[]"
+     }
+    ],
+    "ui_session_state": [
+     {
+      "password_fingerprint": "9fbe9fd5d57ac6d206366d6c16d3e0478b729fd361f24645cd7d63318dd853ae",
+      "session_generation": 1,
+      "updated_at": "<timestamp>",
+      "username": "opsgate-admin"
+     }
+    ]
+   }
+  }
+ ],
+ "timestamp_mask": "<timestamp>",
+ "timestamp_pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{6})?Z$"
+}

@@ -32,6 +32,7 @@ import json
 import math
 import os
 import random
+import re
 import socket
 import sqlite3
 import struct
@@ -63,6 +64,7 @@ from opsgate.service import (
     compute_payload_checksum,
     isoformat_z,
     parse_iso_datetime,
+    submitter_context_from_policy,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parent
@@ -1792,6 +1794,416 @@ def build_validation() -> str:
     return render_json({"generated_by": GENERATED_BY, "cases": cases})
 
 
+# --- store.json (PLAN.md 4.5.2, 4.6, 4.7.1 step 12, 4.10; slice S3a) ---------
+#
+# Scenarios run against a real ``OpsGateService`` on a temporary database:
+# ticket creation (lazy expiry, dedupe, manual tickets, the operator floor),
+# get/list/serialisation of rows written by this and by older code, health,
+# and the approver's session generation. Every step records its result, every
+# scenario the final content of all four tables. Values the service generates
+# are masked after their format is checked: ticket ids become ``ticket-<n>``
+# in creation order, timestamps (``created_at``/``finished_at`` of created
+# tickets, audit ``timestamp``, session ``updated_at``) ``<timestamp>``. The
+# Rust test replays the steps against ``opsgate_store::Store`` and compares
+# results and tables (JSON values compared by their canonical text).
+
+#: The format ``isoformat_z(utc_now())`` writes (PLAN.md 4.9).
+STORE_TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{6})?Z$"
+_STORE_TIMESTAMP = re.compile(STORE_TIMESTAMP_PATTERN)
+_STORE_MASK = "<timestamp>"
+_STORE_PAST = "2001-01-01T00:00:00Z"
+_STORE_FUTURE = "2999-01-01T10:00:00+02:00"
+_STORE_HASH_ONE = "$2b$12$fixture.hash.one.not.verified.by.these.scenarios.xx"
+_STORE_HASH_TWO = "$2b$12$fixture.hash.two.not.verified.by.these.scenarios.xx"
+
+_STORE_INSPECT = [{"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect the service"}]
+_STORE_REVIEW = [
+    {"role": " Implementer ", "agent": "CODEX", "prompt_markdown": "  Fix it\n"},
+    {"role": "Reviewer", "agent": "claude", "prompt_markdown": "Review the change"},
+]
+
+
+def _store_settings(db_path: Path, options: dict[str, Any]) -> OpsGateSettings:
+    """The API settings of a store scenario: three submitters (the order of
+    ``config.py``), the operator floor and the approver as ``options`` say."""
+    return dataclasses.replace(
+        _settings(db_path),
+        ui_username=options.get("ui_username", "opsgate-admin"),
+        ui_password_bcrypt=options.get("ui_password_bcrypt", _STORE_HASH_ONE),
+        submitter_policies=(
+            SubmitterPolicy(source="openclaw", token="openclaw-token-0000000000", require_reviewer_step_floor=False),
+            SubmitterPolicy(source="nyxmon", token="nyxmon-token-000000000000", require_reviewer_step_floor=False),
+            SubmitterPolicy(
+                source="operator",
+                token="operator-token-00000000000",
+                require_reviewer_step_floor=bool(options.get("operator_floor", False)),
+            ),
+        ),
+    )
+
+
+def _create(submitter: str, task_ref: Any = _ABSENT, /, *, ip: str | None = "100.64.0.7",
+            agent: str | None = "producer/1.0", **fields: Any) -> dict[str, Any]:
+    """A submitter's ``POST /api/v1/tickets`` body; ``fields`` replace or add
+    payload fields (``source`` included)."""
+    payload = _vpayload(execution_plan=_STORE_INSPECT, task_ref=task_ref)
+    payload.update(fields)
+    return {"op": "create", "source": submitter, "body": json.dumps(payload), "source_ip": ip, "user_agent": agent}
+
+
+def _manual(creator: str = "opsgate-admin", **fields: Any) -> dict[str, Any]:
+    payload = _vpayload(execution_plan=_STORE_INSPECT)
+    payload.update(fields)
+    return {"op": "create_manual", "creator": creator, "body": json.dumps(payload),
+            "source_ip": "127.0.0.1", "user_agent": "Mozilla/5.0"}
+
+
+def _update(ticket: int, **columns: Any) -> dict[str, Any]:
+    """Direct SQL between operations, as the Python tests prepare states."""
+    return {"op": "update", "ticket": ticket, "set": columns}
+
+
+def _row(ticket_id: str, created_at: str, state: str, **columns: Any) -> dict[str, Any]:
+    """A ``tickets`` row as stored by this or an earlier version."""
+    row: dict[str, Any] = {
+        "id": ticket_id,
+        "source": "nyxmon",
+        "task_ref": None,
+        "title": "Stored",
+        "summary": "Stored row",
+        "execution_plan_json": '[{"agent": "codex", "prompt_markdown": "Inspect", "role": "investigator"}]',
+        "policy_requirements_json": '{"require_reviewer_step": false}',
+        "context_json": "{}",
+        "payload_checksum": "0" * 64,
+        "approved_payload_checksum": None,
+        "state": state,
+        "created_by": "submit:nyxmon",
+        "created_at": created_at,
+        "approved_by": None,
+        "approved_at": None,
+        "expires_at": None,
+        "max_duration_seconds": 3600,
+        "tmux_sessions_json": "[]",
+        "runner_host": None,
+        "last_heartbeat_at": None,
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "result_detail": None,
+        "archived_at": None,
+        "archived_by": None,
+    }
+    row.update(columns)
+    return {"op": "insert", "table": "tickets", "row": row}
+
+
+def _heartbeat(host: str, at: str) -> dict[str, Any]:
+    return {"op": "insert", "table": "runner_heartbeats",
+            "row": {"runner_host": host, "last_heartbeat_at": at, "updated_at": at}}
+
+
+_STORE_CONTEXT = {
+    **_NYXMON_CONTEXT,
+    "numbers": [0.95, 3.0, 14.0, 1e16, 1e-05, -0.0, 12345678901234567890, 0.1],
+    "text": "Grüße ☃ \U0001f600 \"quoted\" \\ \n\t",
+    "empty": {},
+    "nested": {"z": [1, 2.5, None, True, {"deep": []}]},
+}
+
+STORE_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": "create_get_list",
+        "steps": [
+            _create("nyxmon", "disk-full/macmini", title=" Disk full ", summary="Free space\n",
+                    context=_STORE_CONTEXT, expires_at=_STORE_FUTURE, max_duration_seconds=900),
+            _create("openclaw", ip=None, agent=None, title="No task ref"),
+            # test_dedupe_not_applied_when_task_ref_missing
+            _create("openclaw", ip=None, agent=None, title="No task ref"),
+            _create("openclaw", "  ", title="Blank task ref is none"),
+            _manual(title="Manual", task_ref="manual-1", execution_plan=_STORE_REVIEW,
+                    policy_requirements={"require_reviewer_step": True}, context={"note": "from the form"}),
+            # The manual form and the operator token share the source.
+            _create("operator", "manual-1"),
+            {"op": "get", "ticket": 1},
+            {"op": "get", "ticket": 5},
+            {"op": "get", "id": "00000000-0000-4000-8000-000000000000"},
+            {"op": "get", "id": ""},
+            {"op": "list", "archived": "exclude", "limit": 100},
+            {"op": "list", "archived": "include", "limit": 2},
+            {"op": "list", "archived": "only", "limit": 100},
+            {"op": "health"},
+            # Validation failures write nothing.
+            _create("nyxmon", "invalid", title=""),
+            _create("nyxmon", "mismatch", source="openclaw"),
+            _create("nyxmon", "bad-agent", execution_plan=[{"role": "x", "agent": "gpt", "prompt_markdown": "p"}]),
+            _create("nyxmon", "bad-expiry", expires_at="2026-10-21T10:00:00"),
+        ],
+    },
+    {
+        "name": "dedupe",
+        "steps": [
+            _create("openclaw", "same-ref"),
+            # test_dedupe_enforced_for_open_task_ref
+            _create("openclaw", "same-ref"),
+            _create("openclaw", " same-ref\t"),
+            _create("nyxmon", "same-ref"),
+            _update(1, state="running"),
+            _create("openclaw", "same-ref"),
+            _update(1, state="succeeded"),
+            _create("openclaw", "same-ref"),
+        ],
+    },
+    {
+        "name": "lazy_expiry",
+        "steps": [
+            # test_dedupe_expires_stale_pending_ticket_before_replacement_submit
+            _create("nyxmon", "exp-pending", expires_at=_STORE_PAST),
+            _create("nyxmon", "exp-pending", expires_at=_STORE_FUTURE, title="Replacement"),
+            {"op": "get", "ticket": 1},
+            # An approved ticket whose expiry passed (Python test: SQL update).
+            _create("nyxmon", "exp-approved", expires_at=_STORE_FUTURE),
+            _update(3, state="approved", approved_by="opsgate-admin", approved_at="2026-10-21T08:00:00Z",
+                    expires_at="2026-01-01T00:00:00.000001Z"),
+            _create("nyxmon", "exp-approved"),
+            # A running ticket is never expired lazily: the replacement is a duplicate.
+            _create("nyxmon", "exp-running"),
+            _update(5, state="running", expires_at=_STORE_PAST),
+            _create("nyxmon", "exp-running"),
+            # Not yet expired.
+            _create("nyxmon", "exp-future", expires_at=_STORE_FUTURE),
+            _create("nyxmon", "exp-future"),
+            # A blank stored expiry is no expiry.
+            _create("nyxmon", "exp-blank"),
+            _update(7, expires_at=" \t"),
+            _create("nyxmon", "exp-blank"),
+            # An offset expiry in the past.
+            _create("nyxmon", "exp-offset", expires_at="2001-01-01T05:00:00+05:00"),
+            _create("nyxmon", "exp-offset"),
+            # An archived pending ticket neither blocks nor expires.
+            _create("nyxmon", "exp-archived", expires_at=_STORE_PAST),
+            _update(10, archived_at="2026-10-21T09:00:00Z", archived_by="opsgate-admin"),
+            _create("nyxmon", "exp-archived"),
+            {"op": "get", "ticket": 10},
+            # Another source's ticket with the same task_ref is not touched.
+            _create("openclaw", "exp-other", expires_at=_STORE_PAST),
+            _create("nyxmon", "exp-other"),
+            # An unparsable stored expiry fails the request (Python: ValueError).
+            _create("nyxmon", "exp-garbage"),
+            _update(14, expires_at="not a date"),
+            _create("nyxmon", "exp-garbage"),
+            {"op": "health"},
+        ],
+    },
+    {
+        "name": "operator_floor",
+        "settings": {"operator_floor": True},
+        "steps": [
+            _manual(title="No reviewer"),
+            _manual(title="With reviewer", execution_plan=_STORE_REVIEW),
+            _manual(title="Explicit false", execution_plan=_STORE_REVIEW,
+                    policy_requirements={"require_reviewer_step": False}),
+            _create("operator", "op-1"),
+            _create("nyxmon", "nyx-1"),
+            _create("operator", "op-2", execution_plan=_STORE_REVIEW),
+        ],
+    },
+    {
+        "name": "session_state",
+        "steps": [
+            {"op": "generation", "username": "opsgate-admin"},
+            {"op": "generation", "username": "someone-else"},
+            {"op": "revoke", "username": "opsgate-admin"},
+            {"op": "revoke", "username": "someone-else"},
+            {"op": "generation", "username": "opsgate-admin"},
+            {"op": "restart", "settings": {}},
+            {"op": "generation", "username": "opsgate-admin"},
+            {"op": "restart", "settings": {"ui_password_bcrypt": _STORE_HASH_TWO}},
+            {"op": "generation", "username": "opsgate-admin"},
+            {"op": "restart", "settings": {"ui_password_bcrypt": _STORE_HASH_TWO}},
+            {"op": "generation", "username": "opsgate-admin"},
+            {"op": "restart", "settings": {"ui_username": "second-admin"}},
+            {"op": "generation", "username": "second-admin"},
+            {"op": "generation", "username": "opsgate-admin"},
+        ],
+    },
+    {
+        "name": "empty_health",
+        "steps": [
+            {"op": "health"},
+            {"op": "list", "archived": "include", "limit": 100},
+        ],
+    },
+    {
+        "name": "read_rows",
+        "steps": [
+            _row("aaaaaaaa-0000-4000-8000-000000000001", "2026-03-07T10:00:00Z", "succeeded",
+                 task_ref="t-1", approved_payload_checksum="1" * 64, approved_by="opsgate-admin",
+                 approved_at="2026-03-07T10:01:00.250000Z", runner_host="macstudio",
+                 last_heartbeat_at="2026-03-07T10:05:00Z", started_at="2026-03-07T10:02:00Z",
+                 finished_at="2026-03-07T10:06:00Z", result="success", result_detail="done",
+                 tmux_sessions_json='[{"log_path": "/x/step.log", "session_name": "opsgate-1", "status": "succeeded", '
+                                    '"step_index": 0}]',
+                 archived_at="2026-03-08T00:00:00Z", archived_by="opsgate-admin"),
+            # Same second, fractional: sorts before the whole-second value (4.9).
+            _row("aaaaaaaa-0000-4000-8000-000000000002", "2026-03-07T10:00:00.500000Z", "pending_approval",
+                 task_ref="t-2", expires_at="2026-03-08T10:00:00Z",
+                 context_json='{"x":1E5,"y":[1.50,-0,2e-7],"z":"\\u00e9\\ud83d\\ude00"}',
+                 policy_requirements_json="{}"),
+            _row("aaaaaaaa-0000-4000-8000-000000000003", "2026-03-07T09:00:00Z", "running",
+                 runner_host="macstudio", last_heartbeat_at="2026-03-07T09:30:00Z", started_at="2026-03-07T09:01:00Z",
+                 archived_at=""),
+            _row("aaaaaaaa-0000-4000-8000-000000000004", "2026-03-06T00:00:00Z", "failed", archived_at="",
+                 result="failure", result_detail="prompt_tampered", max_duration_seconds=900.5),
+            _row("aaaaaaaa-0000-4000-8000-000000000005", "2026-03-05T00:00:00Z", "expired", task_ref="t-5",
+                 result="failure", result_detail="expired_before_execution", max_duration_seconds="n/a"),
+            _row("aaaaaaaa-0000-4000-8000-000000000006", "2026-03-04T00:00:00Z", "pending_approval",
+                 archived_at="2026-03-09T00:00:00Z", archived_by="opsgate-admin"),
+            _row("aaaaaaaa-0000-4000-8000-000000000007", "2026-03-03T00:00:00Z", "rejected", source="operator",
+                 created_by="approver:opsgate-admin", result="failure", result_detail="None"),
+            _row("aaaaaaaa-0000-4000-8000-000000000008", "2026-03-02T00:00:00Z", "approved",
+                 approved_by="opsgate-admin", approved_at="2026-03-02T00:00:01Z", max_duration_seconds="900"),
+            _heartbeat("macstudio", "2026-10-18T09:00:00.123456Z"),
+            _heartbeat("manual-check", "2026-03-01T00:00:00Z"),
+            # Whole second sorts after the fractional value of the same second.
+            _heartbeat("127.0.0.1", "2026-10-18T09:00:00Z"),
+            {"op": "list", "archived": "exclude", "limit": 100},
+            {"op": "list", "archived": "only", "limit": 100},
+            {"op": "list", "archived": "include", "limit": 100},
+            {"op": "list", "archived": "include", "limit": 3},
+            *({"op": "get", "id": f"aaaaaaaa-0000-4000-8000-00000000000{n}"} for n in range(1, 9)),
+            {"op": "health"},
+        ],
+    },
+]
+
+
+class _StoreMasks:
+    """Masks the values a scenario's service generated."""
+
+    def __init__(self) -> None:
+        self.ids: list[str] = []
+
+    def ticket_id(self, value: Any) -> Any:
+        return f"ticket-{self.ids.index(value) + 1}" if value in self.ids else value
+
+    @staticmethod
+    def timestamp(value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, str) or not _STORE_TIMESTAMP.match(value):
+            raise AssertionError(f"unexpected generated timestamp {value!r}")
+        return _STORE_MASK
+
+    def ticket(self, ticket: dict[str, Any]) -> dict[str, Any]:
+        masked = dict(ticket)
+        if ticket["id"] in self.ids:
+            masked["created_at"] = self.timestamp(ticket["created_at"])
+            masked["finished_at"] = self.timestamp(ticket["finished_at"])
+        masked["id"] = self.ticket_id(ticket["id"])
+        return masked
+
+
+def _store_tables(db_path: Path, masks: _StoreMasks) -> dict[str, list[dict[str, Any]]]:
+    connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        def rows(sql: str) -> list[dict[str, Any]]:
+            return [dict(row) for row in connection.execute(sql).fetchall()]
+
+        audit = [
+            {**row, "ticket_id": masks.ticket_id(row["ticket_id"]), "timestamp": masks.timestamp(row["timestamp"])}
+            for row in rows("SELECT * FROM audit_events ORDER BY id")
+        ]
+        return {
+            "tickets": [masks.ticket(row) for row in rows("SELECT * FROM tickets ORDER BY rowid")],
+            "audit_events": audit,
+            "ui_session_state": [
+                {**row, "updated_at": masks.timestamp(row["updated_at"])}
+                for row in rows("SELECT * FROM ui_session_state ORDER BY username")
+            ],
+            "runner_heartbeats": rows("SELECT * FROM runner_heartbeats ORDER BY runner_host"),
+        }
+    finally:
+        connection.close()
+
+
+def _store_step(state: dict[str, Any], step: dict[str, Any], masks: _StoreMasks) -> Any:
+    service: OpsGateService = state["service"]
+    op = step["op"]
+    if op in ("create", "create_manual"):
+        payload = json.loads(step["body"])
+        if op == "create":
+            policy = next(p for p in service.settings.submitter_policies if p.source == step["source"])
+            ticket = service.create_ticket(payload, submitter_context_from_policy(policy),
+                                           step["source_ip"], step["user_agent"])
+        else:
+            ticket = service.create_manual_ticket(payload, creator=step["creator"],
+                                                  source_ip=step["source_ip"], user_agent=step["user_agent"])
+        masks.ids.append(ticket["id"])
+        return masks.ticket(ticket)
+    if op in ("update", "insert"):
+        with sqlite3.connect(service.settings.db_path) as connection:
+            if op == "update":
+                assignments = ", ".join(f"{column} = ?" for column in step["set"])
+                connection.execute(f"UPDATE tickets SET {assignments} WHERE id = ?",
+                                   (*step["set"].values(), masks.ids[step["ticket"] - 1]))
+            else:
+                columns = list(step["row"])
+                connection.execute(
+                    f"INSERT INTO {step['table']} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",
+                    tuple(step["row"].values()),
+                )
+        connection.close()
+        return None
+    if op == "get":
+        ticket_id = masks.ids[step["ticket"] - 1] if "ticket" in step else step["id"]
+        return masks.ticket(service.get_ticket(ticket_id))
+    if op == "list":
+        archived = {"exclude": "exclude", "only": "only", "include": "include"}[step["archived"]]
+        return [masks.ticket(ticket) for ticket in service.list_tickets(step["limit"], archived=archived)]
+    if op == "health":
+        return service.health()
+    if op == "generation":
+        return service.get_ui_session_generation(step["username"])
+    if op == "revoke":
+        return service.revoke_ui_sessions(step["username"])
+    if op == "restart":
+        state["service"] = OpsGateService(_store_settings(Path(service.settings.db_path), step["settings"]))
+        return None
+    raise AssertionError(f"unknown store op {op!r}")
+
+
+def _store_scenario(scenario: dict[str, Any]) -> dict[str, Any]:
+    masks = _StoreMasks()
+    with tempfile.TemporaryDirectory() as directory:
+        db_path = Path(directory) / "run" / "opsgate.sqlite3"
+        # OpsGateService creates the missing parent directory.
+        state = {"service": OpsGateService(_store_settings(db_path, scenario.get("settings", {})))}
+        steps = []
+        for step in scenario["steps"]:
+            try:
+                outcome: dict[str, Any] = {"ok": _store_step(state, step, masks)}
+            except ServiceError as exc:
+                outcome = {"error": {"code": exc.error_code, "status": exc.status_code, "message": str(exc)}}
+            except Exception as exc:  # noqa: BLE001 - an unhandled exception is a 500
+                outcome = {"unhandled": type(exc).__name__}
+            steps.append({**step, "result": outcome})
+        tables = _store_tables(db_path, masks)
+    return {"name": scenario["name"], "settings": scenario.get("settings", {}), "steps": steps, "tables": tables}
+
+
+def build_store() -> str:
+    """``store.json``: store scenarios (see the section comment) with Python's
+    result for every step and the final tables."""
+    return render_json({
+        "generated_by": GENERATED_BY,
+        "timestamp_pattern": STORE_TIMESTAMP_PATTERN,
+        "timestamp_mask": _STORE_MASK,
+        "password_hashes": [_STORE_HASH_ONE, _STORE_HASH_TWO],
+        "scenarios": [_store_scenario(scenario) for scenario in STORE_SCENARIOS],
+    })
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
     "checksum.json": build_checksum,
     "datetime.json": build_datetime,
@@ -1802,6 +2214,7 @@ GENERATORS: dict[str, Callable[[], str]] = {
     "schema.sql": build_schema,
     "settings.json": build_settings,
     "storage_json.json": build_storage_json,
+    "store.json": build_store,
     "validation.json": build_validation,
 }
 

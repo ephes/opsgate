@@ -27,8 +27,9 @@ parity harnesses run every scenario against both implementations in CI with
 no unexplained difference — including cross-implementation databases and
 restarts and all four API/runner stacks (Python/Rust × Python/Rust). The
 Python package in `src/opsgate` is the production implementation and the
-oracle for the contract. Nothing deploys or runs this code yet; the release
-(S9) and the role switch (S10) come next.
+oracle for the contract. The release pipeline (S9, section "Release" below)
+publishes the binary as GitHub releases `rs-v<version>`; nothing deploys or
+runs it yet, the role switch (S10) comes next.
 
 ## Layout
 
@@ -63,6 +64,8 @@ rust/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
     runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
     shadow/             data-parity tools for a production database copy (S3b, PLAN.md 11.2)
+  scripts/
+    release_checks.py   release checks of .github/workflows/rust-release.yml (S9, PLAN.md 9)
 ```
 
 `opsgate-core` has the modules of S2a: `json` (parsing like `json.loads`,
@@ -300,6 +303,42 @@ sets with `compare.py --require-rust --complete`. Both parity diffs run with
 `--complete` since S8: a scenario recorded by only one run, or a skipped
 runner stack, fails the job (a runner stack skipped before its scenario starts,
 e.g. for a missing Rust slice, still writes a `skipped` record).
+
+## Release
+
+`.github/workflows/rust-release.yml` (PLAN.md 9) builds the binary for the
+production host (`aarch64-apple-darwin`, `MACOSX_DEPLOYMENT_TARGET=14.0`) on
+`macos-15`, without a cargo cache. It runs on a tag `rs-v<version>`, which must
+equal the workspace version in `Cargo.toml`, and creates the GitHub release; a
+manual run (`gh workflow run rust-release.yml --ref <branch>`) runs the same
+build and checks and uploads the archive as a workflow artifact only. Steps:
+the version check, rustfmt, clippy, `cargo test` (tmux and Python required),
+the release build with `OPSGATE_GIT_COMMIT` set to the built commit, then
+`scripts/release_checks.py` (stdlib only):
+
+| Subcommand | Checks |
+| --- | --- |
+| `version --metadata <cargo metadata> [--tag <tag>]` | prints the `opsgate` package version (semver without build metadata); the tag must be `rs-v<version>` |
+| `macho --max-minos 14.0 --arch arm64 <binary>` | `otool -L`: every library below `/usr/lib/` or `/System/Library/`; `vtool -show-build`: one `LC_BUILD_VERSION`, platform macOS, minos at most 14.0; `lipo -archs`: `arm64` only; `codesign --verify --strict` and the ad-hoc linker signature (`codesign -d`) |
+| `smoke --binary <binary> --version <v> --commit <sha>` | `opsgate --version` prints exactly `opsgate <v> (<sha>)`; `check-config api` and `check-config runner` with only `OPSGATE_ENV_FILE` set (a 0600 test env file with the keys of the role's templates, no real secrets) exit 0 with the exact summary, nothing on stderr, nothing created |
+| `pack --binary --license --version --target --mtime --out-dir` | `opsgate-<v>-aarch64-apple-darwin.tar.gz` with `opsgate` (0755) and `LICENSE` (0644), owner root, the commit time as mtime, gzip without a file name, read back and compared; its `.sha256` in `shasum`/`sha256sum` format |
+
+The release job (the only one with `contents: write`) verifies the checksum
+and runs `gh release create --verify-tag` with the archive and the checksum
+file; a semver pre-release (`0.4.0-rc.1`) becomes a GitHub pre-release. The
+role downloads
+`https://github.com/ephes/opsgate/releases/download/rs-v<v>/opsgate-<v>-aarch64-apple-darwin.tar.gz`
+and pins its sha256 (PLAN.md 10.1). `tests/test_rust_release_checks.py` tests
+the script in the Python CI job; the `parity-api` job lints and typechecks it.
+
+To release: bump `version` under `[workspace.package]` in `Cargo.toml` (and
+`Cargo.lock` with `cargo update --workspace`), merge to `main`, then tag the
+merge commit and push the tag:
+
+```bash
+git tag -a rs-v0.3.0 -m "opsgate 0.3.0 (Rust port)" <commit>
+git push origin rs-v0.3.0
+```
 
 ## Runner parity harness
 

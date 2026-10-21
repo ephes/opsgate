@@ -4,6 +4,17 @@
 
 ### Development
 
+- Rust port slice S9 (release pipeline): `.github/workflows/rust-release.yml` builds the `opsgate`
+  binary for `aarch64-apple-darwin` (minimum macOS 14.0) on `macos-15` and, on a tag `rs-v<version>`
+  equal to the crate version, publishes a GitHub release with
+  `opsgate-<version>-aarch64-apple-darwin.tar.gz` and its `.sha256`; a manual run uploads the same
+  files as a workflow artifact. Before packing, `rust/scripts/release_checks.py` checks the binary:
+  only system libraries (`otool -L`), minos at most 14.0 (`vtool`), `arm64` only (`lipo`), the
+  ad-hoc linker signature intact (`codesign`), `opsgate --version` naming the version and the built
+  commit, and `check-config api` and `check-config runner` passing against test env files in the
+  role's shape. The archive is deterministic (fixed owner and mtime, gzip without a file name). The
+  script is tested by `tests/test_rust_release_checks.py` and linted in CI. Nothing deploys the
+  binary yet; the Python implementation is unchanged.
 - Rust port slice S8 (integration): both black-box parity harnesses now run every scenario against
   both implementations in CI — the `parity-runner` job (Linux and macOS) builds the Rust binary and
   runs every stack with Rust, including SIGKILL-and-restart recovery across implementations and all

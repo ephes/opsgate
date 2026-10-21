@@ -1548,17 +1548,26 @@ Baseline (section 1): API 26.0 MiB RSS / 32 MB footprint; runner 23.4 MiB /
   (release) or `workflow_dispatch` (artifact only); runs on `macos-15`
   (arm64); actions pinned to SHAs; no cargo cache; `contents: write` only in
   the release job. Steps: tag equals crate version; fmt, clippy, test
-  `--locked`; `cargo build --release --locked --target aarch64-apple-darwin`;
-  `scripts/release_checks.py` (stdlib, unit-tested): `otool -L` allow-list,
-  `vtool -show-build` minos ≤ 14.0, `lipo -archs` = `arm64`,
-  `codesign --verify` (ad-hoc linker signature intact after strip), smoke
+  `--locked` (with tmux and Python, `OPSGATE_REQUIRE_TMUX=1` and
+  `OPSGATE_REQUIRE_PYTHON=1` as in CI); `cargo build --release --locked
+  --target aarch64-apple-darwin`;
+  `scripts/release_checks.py` (stdlib, unit-tested in
+  `tests/test_rust_release_checks.py`, linted in the `parity-api` CI job):
+  `macho`: `otool -L` allow-list (every library below `/usr/lib/` or
+  `/System/Library/`; the build links `libSystem` and `libiconv`),
+  `vtool -show-build` one `LC_BUILD_VERSION` for macOS with minos ≤ 14.0,
+  `lipo -archs` = `arm64`, `codesign --verify --strict` and `codesign -d`
+  showing the ad-hoc linker signature (intact after strip); `smoke`:
   `opsgate --version` = `opsgate <version> (<full commit>)` (the workflow
   sets `OPSGATE_GIT_COMMIT` to the commit it built; `build.rs` otherwise
-  asks `git rev-parse HEAD`), `opsgate
-  check-config api` against a test env; deterministic archive
+  asks `git rev-parse HEAD`), `opsgate check-config api` and `opsgate
+  check-config runner`, each with only `OPSGATE_ENV_FILE` set, pointing at a
+  test env file with the keys of the role's templates (exact summary, nothing
+  created; the plan named only `api`, the runner check is as cheap and is what
+  the role's install task runs too); `pack`: deterministic archive
   `opsgate-<ver>-aarch64-apple-darwin.tar.gz` (`opsgate` + `LICENSE`, fixed
   owner and mtime, gzip without name) + `.sha256`; `gh release create
-  --verify-tag`.
+  --verify-tag` (a semver pre-release becomes a GitHub pre-release).
 - First release `rs-v0.3.0` after S8.
 
 ---

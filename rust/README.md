@@ -5,10 +5,11 @@ and `python -m opsgate runner`) as one binary, `opsgate`. The contract, the
 intentional divergences and the slices are in [`PLAN.md`](PLAN.md); the
 mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 
-**Status:** foundations (slice S1) and part of the core library (S2b:
-settings, log previews, path containment, proxy header selection). The
-workspace, CI, the fixture generator and the command-line skeleton exist;
-every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
+**Status:** foundations (slice S1) and part of the core library (S2a:
+canonical JSON and the payload checksum, stored-JSON text, Python `str()`
+and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
+header selection). The workspace, CI, the fixture generator and the
+command-line skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
 
@@ -32,12 +33,20 @@ rust/
     settings.json       settings and env-file cases (4.2)
     log_preview.json    log preview and step log cases (4.12)
     proxy_fix.json      proxy header cases (4.4)
+    checksum.json       canonical JSON text and payload checksums (4.8)
+    float_repr.json     CPython float repr and number tokens (4.8)
+    storage_json.json   stored JSON column text (4.8)
+    datetime.json       timestamp parsing and formatting, Python 3.14 (4.9)
+    pystr.json          str() of JSON scalars, strip, lower (4.6)
 ```
 
-`opsgate-core` has the modules of S2b: `settings` (env file, API and
-runner settings, PLAN.md 4.2), `log_preview` (4.12), `paths` (step-log
-containment, 4.12), `proxy_fix` (4.4) and `pytext` (Python's `str.strip`
-whitespace and `splitlines` boundaries). The other library crates are empty
+`opsgate-core` has the modules of S2a: `json` (parsing like `json.loads`,
+the checksum and stored-JSON formatter, depth check, PLAN.md 4.6/4.8) and
+`time` (`utc_now`, `isoformat_z`, `parse_iso_datetime`, 4.9); of S2b:
+`settings` (env file, API and runner settings, 4.2), `log_preview` (4.12),
+`paths` (step-log containment, 4.12) and `proxy_fix` (4.4); and `pytext`
+(Python's `str.strip` whitespace, `splitlines` boundaries, `str()` of JSON
+scalars and `lower`). The other library crates are empty
 until their slices land. Every crate forbids
 `unsafe` code (workspace lint).
 
@@ -90,12 +99,27 @@ also on whitespace. A Python change that alters a fixture must regenerate it
 in the same change; the Rust tests then show what to port. Each slice adds its
 builders to `GENERATORS` in `generate.py`.
 
+`datetime.json` depends on the CPython minor version (`fromisoformat`
+changed after 3.11) and is generated and checked only by the production
+interpreter, Python 3.14 (`PYTHON_GATED` in `generate.py`). Other versions
+print `skipped fixture: datetime.json ...` and leave it alone; the 3.14 leg of
+the Python CI job checks it. Regenerate it with:
+
+```bash
+UV_PYTHON=3.14 just rs-fixtures
+```
+
 | Fixture | Content | Used by |
 | --- | --- | --- |
+| `checksum.json` | JSON text → canonical text and `compute_payload_checksum` (552 inputs, production-shaped and adversarial; D-2 marked) | `opsgate-core/tests/checksum_fixture.rs` |
+| `datetime.json` | `parse_iso_datetime` inputs → `isoformat_z` result or rejection (D-7 marked), `isoformat_z` of UTC components; Python 3.14 only | `opsgate-core/tests/datetime_fixture.rs` |
+| `float_repr.json` | `repr(float)` of 10 471 doubles by bit pattern; number tokens → `repr(float(token))` | `opsgate-core/tests/float_repr_fixture.rs` |
 | `log_preview.json` | file contents (as recipes) and limits → `read_tail_lines` preview lines and `read_step_log` text (long step logs by SHA-256, length, head and tail) | `opsgate-core/tests/log_preview_fixture.rs` |
 | `proxy_fix.json` | request header lines → client address, scheme and `Host` the app sees in production (waitress's proxy-header middleware around the Flask app with and without `ProxyFix`): forwarded headers never apply | `opsgate-core/tests/proxy_fix_fixture.rs` |
+| `pystr.json` | `str()` of JSON scalars (D-2/D-3 marked), `strip`, `lower`, Python's whitespace set, non-ASCII characters whose lowercase is ASCII | `opsgate-core/tests/pystr_fixture.rs` |
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
+| `storage_json.json` | JSON text → stored column text `json.dumps(value, sort_keys=True)` | `opsgate-core/tests/checksum_fixture.rs` |
 
 ## Command line
 

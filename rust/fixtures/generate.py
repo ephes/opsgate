@@ -15,22 +15,31 @@ Each slice adds its builders to ``GENERATORS``. A builder returns the file
 content as text; JSON fixtures go through ``render_json`` so their formatting
 is stable. Cases where the decided Rust behaviour differs (PLAN.md section 5)
 carry ``"divergence": "D-n"`` and the Rust expectation.
+
+Fixtures in ``PYTHON_GATED`` depend on the CPython minor version; only that
+version (the production interpreter) writes and checks them, others skip them
+with a ``skipped fixture:`` line (``UV_PYTHON=3.14 just rs-fixtures``).
 """
 
 from __future__ import annotations
 
 import argparse
 import dataclasses
+import functools
 import hashlib
 import ipaddress
 import json
+import math
 import os
+import random
 import socket
 import sqlite3
+import struct
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +57,7 @@ from opsgate.config import (
     load_runner_settings,
     load_settings,
 )
-from opsgate.service import OpsGateService
+from opsgate.service import OpsGateService, compute_payload_checksum, isoformat_z, parse_iso_datetime
 
 FIXTURES_DIR = Path(__file__).resolve().parent
 
@@ -739,25 +748,592 @@ def build_proxy_fix() -> str:
     })
 
 
+# --- S2a: canonical JSON, checksum, float repr, stored JSON, str(), time ---
+#
+# The corpora below are deterministic (fixed seeds, `random.Random` methods
+# whose output is stable across CPython versions). Strings never contain lone
+# surrogates as characters: the fixtures must stay readable by a strict JSON
+# parser, so lone surrogates appear only as escape sequences inside the JSON
+# *text* of an input.
+
+# Characters for random text: ASCII printable (weighted), every character the
+# ASCII-only encoder escapes specially, and non-ASCII from the BMP and beyond.
+_TEXT_POOL = [chr(c) for c in range(0x20, 0x7F)] * 3 + [
+    '"', "\\", "/", "\n", "\r", "\t", "\b", "\f", "\x00", "\x01", "\x1b", "\x1f", "\x7f", "\x80", "\x9f",
+    "\xa0", "\xe9", "\xff", "\u0100", "\u0301", "\u03a3", "\u0416", "\u2028", "\u2029", "\u200b", "\u3000",
+    "\u4e2d", "\ufeff", "\ufffd", "\uffff", "\U00010000", "\U0001d11e", "\U0001f600", "\U0001f9ea", "\U0010ffff",
+    "<", ">", "&", "'",
+]
+
+
+def _text(rng: random.Random, max_len: int = 24) -> str:
+    return "".join(rng.choice(_TEXT_POOL) for _ in range(rng.randint(0, max_len)))
+
+
+def _bits_to_float(bits: int) -> float:
+    return struct.unpack("<d", struct.pack("<Q", bits))[0]
+
+
+def _float_to_bits(value: float) -> int:
+    return struct.unpack("<Q", struct.pack("<d", value))[0]
+
+
+def _random_float(rng: random.Random) -> float:
+    kind = rng.randrange(9)
+    if kind == 0:
+        return round(rng.uniform(0, 100), rng.randint(0, 6))
+    if kind == 1:
+        return rng.uniform(-1e6, 1e6)
+    if kind == 2:
+        return float(rng.randint(-(10**6), 10**6))
+    if kind == 3:
+        return 10.0 ** rng.randint(-30, 30) * rng.choice([1.0, -1.0, 1.5, 9.999, 0.3])
+    if kind == 4:
+        value = _bits_to_float(rng.getrandbits(64))
+        return value if math.isfinite(value) else 0.5
+    if kind == 5:
+        return rng.choice([0.0, -0.0, 0.95, 3.0, 14.0, 0.1, 1e16, 1e-05, 0.0001, 9999999999999998.0, 5e-324,
+                           1.7976931348623157e308, 2.2250738585072014e-308, 123456789.125])
+    if kind == 6:
+        return rng.random()
+    if kind == 7:
+        return rng.expovariate(1e-3)
+    return _bits_to_float(rng.getrandbits(52))  # subnormal or zero
+
+
+def _random_int(rng: random.Random) -> int:
+    kind = rng.randrange(5)
+    if kind == 0:
+        return rng.randint(-10, 10)
+    if kind == 1:
+        return rng.randint(0, 31_536_000)
+    if kind == 2:
+        return rng.randint(-(2**63), 2**63)
+    if kind == 3:
+        return rng.choice([2**53 + 1, 2**63, -(2**63) - 1, 2**64, 10**30, -(10**40)])
+    return rng.getrandbits(rng.randint(64, 400)) * rng.choice([1, -1])
+
+
+def _random_scalar(rng: random.Random) -> Any:
+    kind = rng.randrange(6)
+    if kind == 0:
+        return _text(rng)
+    if kind == 1:
+        return _random_int(rng)
+    if kind in (2, 3):
+        return _random_float(rng)
+    if kind == 4:
+        return rng.choice([True, False])
+    return None
+
+
+def _random_value(rng: random.Random, depth: int) -> Any:
+    if depth <= 0 or rng.random() < 0.45:
+        return _random_scalar(rng)
+    if rng.random() < 0.5:
+        return [_random_value(rng, depth - 1) for _ in range(rng.randint(0, 4))]
+    return {_text(rng, 8): _random_value(rng, depth - 1) for _ in range(rng.randint(0, 4))}
+
+
+def _random_isoformat_z(rng: random.Random) -> str:
+    moment = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(seconds=rng.randint(-10**8, 10**8))
+    return isoformat_z(moment.replace(microsecond=rng.choice([0, rng.randint(0, 999_999)])))
+
+
+def _random_ticket_payload(rng: random.Random) -> dict[str, Any]:
+    """A normalised payload shaped like production tickets (PLAN.md 4.8):
+    nyxmon contexts with nested check results and float metrics."""
+    steps = [
+        {
+            "role": rng.choice(["investigator", "implementer", "reviewer", _text(rng, 10)]),
+            "agent": rng.choice(["codex", "claude"]),
+            "prompt_markdown": "# Objective\n" + _text(rng, 60),
+        }
+        for _ in range(rng.randint(1, 3))
+    ]
+    data = {_text(rng, 8): _random_value(rng, 2) for _ in range(rng.randint(0, 4))}
+    data.update({"value": _random_float(rng), "threshold": rng.choice([0.95, 3.0, 14.0, _random_float(rng)])})
+    context = {
+        "producer": rng.choice(["nyxmon", "openclaw", "operator"]),
+        "check": {
+            "check_id": rng.randint(1, 500),
+            "name": _text(rng, 30),
+            "check_type": rng.choice(["json-http", "http", "dns", "tcp"]),
+            "url": "https://example.internal/" + _text(rng, 10),
+            "service_id": rng.randint(1, 50),
+        },
+        "result": {"status": rng.choice(["error", "warning", "ok"]), "data": data},
+    }
+    if rng.random() < 0.2:
+        context = _random_value(rng, 4) if rng.random() < 0.5 else {}
+        if not isinstance(context, dict):
+            context = {"value": context}
+    return {
+        "source": rng.choice(["nyxmon", "openclaw", "operator"]),
+        "task_ref": rng.choice([None, f"nyxmon-check-{rng.randint(1, 500)}", _text(rng, 16)]),
+        "title": _text(rng, 40) or "t",
+        "summary": _text(rng, 80) or "s",
+        "execution_plan": steps,
+        "policy_requirements": {"require_reviewer_step": rng.choice([True, False])},
+        "context": context,
+        "expires_at": rng.choice([None, _random_isoformat_z(rng)]),
+        "max_duration_seconds": rng.randint(1, 31_536_000),
+    }
+
+
+def _float_token(rng: random.Random, value: float) -> str:
+    """Another JSON spelling of ``value`` that parses back to the same double."""
+    form = rng.randrange(5)
+    if form == 0:
+        return f"{value:.17e}"
+    if form == 1:
+        token = f"{value:.17g}"
+        return token if any(c in token for c in ".eE") else token + ".0"
+    if form == 2:
+        return repr(value).upper()
+    if form == 3:
+        return repr(value).replace("e+", "e")
+    return repr(value)
+
+
+def _json_text(rng: random.Random, value: Any) -> str:
+    """JSON text of ``value`` in a randomly chosen style: key order, spacing,
+    ASCII or raw non-ASCII, and alternative float spellings, so the canonical
+    form has to be re-derived rather than copied."""
+    floats: list[str] = []
+
+    def mark(item: Any) -> Any:
+        if isinstance(item, float):
+            floats.append(_float_token(rng, item))
+            return f"@@float{len(floats) - 1}@@"
+        if isinstance(item, list):
+            return [mark(child) for child in item]
+        if isinstance(item, dict):
+            return {key: mark(child) for key, child in item.items()}
+        return item
+
+    text = json.dumps(
+        mark(value),
+        ensure_ascii=rng.random() < 0.5,
+        sort_keys=rng.random() < 0.3,
+        indent=rng.choice([None, None, 2, "\t"]),
+    )
+    for index, token in enumerate(floats):
+        text = text.replace(f'"@@float{index}@@"', token, 1)
+    return text
+
+
+def _has_divergent_value(value: Any) -> bool:
+    """D-2: non-finite floats and lone surrogates, which Rust rejects."""
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, str):
+        return any(0xD800 <= ord(c) <= 0xDFFF for c in value)
+    if isinstance(value, list):
+        return any(_has_divergent_value(child) for child in value)
+    if isinstance(value, dict):
+        return any(_has_divergent_value(key) or _has_divergent_value(child) for key, child in value.items())
+    return False
+
+
+# Hand-written JSON texts for the token and escape corners of 4.6/4.8.
+_JSON_CORNER_TEXTS = [
+    '{"a":-0}', '{"a":-0.0}', '{"a":0.0}', '{"a":1E2}', '{"a":1e+2}', '{"a":1.50}', '{"a":0.1e1}', '{"a":1e16}',
+    '{"a":1e15}', '{"a":9999999999999998}', '{"a":9999999999999998.0}', '{"a":1e-5}', '{"a":1e-4}', '{"a":0.00001}',
+    '{"a":123456789012345678901234567890}', '{"a":-123456789012345678901234567890}', '{"a":1.0e-7}', '{"a":5e-324}',
+    '{"a":2.4703282292062327e-324}', '{"a":2.4703282292062328e-324}', '{"a":1e-400}', '{"a":-1e-400}',
+    '{"a":1.7976931348623157e308}', '{"a":1.7976931348623158e308}', '{"a":1e400}', '{"a":-1e400}',
+    '{"a":NaN}', '{"a":Infinity}', '{"a":-Infinity}', '{"a":0.1}', '{"a":0.2}', '{"a":0.30000000000000004}',
+    '{"a":9007199254740993}', '{"a":9007199254740993.0}', '{"a":true,"b":false,"c":null}', '[]', '{}', '[{}]', '"x"',
+    '1', '-1', '1.5', 'true', 'null', ' {"a" : [ 1 , 2 ] } ', '\t\n\r{"a":1}\n', '{"a":"\\u00e9"}', '{"a":"\u00e9"}',
+    '{"a":"\\ud83d\\ude00"}', '{"a":"\U0001f600"}', '{"a":"\\ud800"}', '{"a":"\\udc00"}', '{"a":"x\\ud800y"}',
+    '{"\\ud800":1}', '{"a":"\\/"}', '{"a":"\\u0000\\u001f\\u007f\\u0080"}', '{"a":"\\b\\f\\n\\r\\t"}',
+    '{"a":"\\u2028\\u2029"}', '{"a":"\\uFFFF"}', '{"a":1,"a":2}', '{"b":1,"a":{"d":2,"c":3}}',
+    '{"\\uffff":1,"\\ud83d\\ude00":2,"\\u00e9":3,"z":4,"A":5,"":6}', '{"a":[1,"1",1.0,true,null]}',
+    '{"a":' + "9" * 4300 + "}", '{"a":-' + "9" * 4300 + "}", '{"a":' + "9" * 4301 + "}", '{"a":1' + "0" * 400 + ".0}",
+    '{"a":0.' + "0" * 400 + "1}", '{"a":"\x01"}', '\ufeff{"a":1}', '{"a":01}', '{"a":1.}', '{"a":.5}', '{"a":+1}',
+    '{"a":1,}', '[1,]', '{"a":\'x\'}', '{"a":1} x', '', '{"a":"' + "x" * 1000 + '"}',
+    '[' * 64 + ']' * 64, '[' * 65 + ']' * 65,
+    # serde_json's internal key for number tokens is ordinary data to Python.
+    '{"context":{"$serde_json::private::Number":"123"}}', '{"$serde_json::private::Number":"1.5","b":1}',
+    '{"$serde_json::private::Number":1}', '{"$serde_json::private::Number":{"x":["1"]}}',
+    '{"\\u0024serde_json::private::Number":"7"}', '{"a":"$serde_json::private::Number"}',
+    '{"b":1,"$serde_json::private::Number":"2"}', '[{"$serde_json::private::Number":"-0"}]',
+    # The digit limit applies to every token, also one a duplicate key replaces.
+    '{"a":' + "9" * 4301 + ',"a":1}', '{"a":[' + "9" * 4301 + '],"a":1}',
+]
+
+
+def _checksum_case(text: str) -> dict[str, Any]:
+    case: dict[str, Any] = {"input": text}
+    try:
+        value = json.loads(text)
+    except ValueError:
+        case["error"] = "undecodable"
+        return case
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    checksum = compute_payload_checksum(value)
+    if checksum != hashlib.sha256(canonical.encode("utf-8")).hexdigest():
+        raise AssertionError("compute_payload_checksum no longer hashes the canonical text")
+    case.update(canonical=canonical, checksum=checksum)
+    if _has_divergent_value(value):
+        case["divergence"] = "D-2"
+    return case
+
+
+def build_checksum() -> str:
+    """``checksum.json``: JSON text → ``json.loads`` → canonical text
+    (``sort_keys``, compact separators, ``ensure_ascii``) and
+    ``compute_payload_checksum`` (PLAN.md 4.8, byte-exact). ``error``:
+    Python cannot decode the text. ``divergence`` D-2: Rust rejects."""
+    rng = random.Random(0x5EED_4801)
+    texts = list(_JSON_CORNER_TEXTS)
+    texts += [_json_text(rng, _random_ticket_payload(rng)) for _ in range(360)]
+    texts += [_json_text(rng, _random_value(rng, 5)) for _ in range(100)]
+    return render_json({"generated_by": GENERATED_BY, "cases": [_checksum_case(text) for text in texts]})
+
+
+def build_storage_json() -> str:
+    """``storage_json.json``: JSON text → ``json.loads`` → the stored column
+    text ``json.dumps(value, sort_keys=True)`` (PLAN.md 4.7.1, 4.8; compared
+    semantically, P2). ``divergence`` D-2: Rust rejects."""
+    rng = random.Random(0x5EED_4802)
+    values: list[Any] = []
+    for _ in range(60):
+        payload = _random_ticket_payload(rng)
+        values += [payload["execution_plan"], payload["policy_requirements"], payload["context"]]
+    values += [
+        [], {}, {"require_reviewer_step": True}, {"task_ref": None}, {"reason": "None"}, {"expires_at": "x"},
+        {"approved_payload_checksum": "0" * 64}, {"previous_archived_at": None, "previous_archived_by": "approver:a"},
+        {"event": "heartbeat", "result_detail": "running_step_1_of_2"}, {"reason": "invalid_stored_plan", "error": "e"},
+        [{"step_index": 0, "status": "running", "log_size_bytes": 0, "log_sha256": None}],
+    ]
+    texts = [_json_text(rng, value) for value in values] + _JSON_CORNER_TEXTS
+    cases = []
+    for text in texts:
+        case: dict[str, Any] = {"input": text}
+        try:
+            value = json.loads(text)
+        except ValueError:
+            continue
+        case["stored"] = json.dumps(value, sort_keys=True)
+        if _has_divergent_value(value):
+            case["divergence"] = "D-2"
+        cases.append(case)
+    return render_json({"generated_by": GENERATED_BY, "cases": cases})
+
+
+def _float_repr_values() -> list[float]:
+    rng = random.Random(0x5EED_4803)
+    values = {0.0, -0.0, 5e-324, 2.2250738585072014e-308, 2.225073858507201e-308, 1.7976931348623157e308,
+              0.1, 0.2, 0.3, 0.1 + 0.2, 1 / 3, 2 / 3, math.pi, math.e, 0.95, 3.0, 14.0, 2.0**53, 2.0**53 + 2,
+              2.0**63, 2.0**64, 9999999999999998.0, 1e16 - 2, 123456789.125, 1e22, 1e23, 5e-310}
+    for exponent in range(-323, 309):
+        value = float(f"1e{exponent}")
+        values |= {value, math.nextafter(value, math.inf), math.nextafter(value, 0.0)}
+    for exponent in range(-25, 25):
+        for _ in range(40):
+            digits = rng.randint(1, 17)
+            values.add(float(f"{rng.randint(1, 10**digits - 1)}e{exponent}"))
+    for _ in range(3000):
+        value = _bits_to_float(rng.getrandbits(64))
+        if math.isfinite(value):
+            values.add(value)
+    for _ in range(500):
+        values.add(_bits_to_float(rng.getrandbits(52)))
+    for n in range(1, 200):
+        values |= {float(n), n / 10, n / 100, n / 1000, float(10**n) if n < 300 else 1.0}
+    values |= {-value for value in list(values) if rng.random() < 0.3}
+    return sorted(values, key=_float_to_bits)
+
+
+_FLOAT_TOKENS = [
+    "1E2", "1e+2", "1e-2", "1.0e-2", "0.1e1", "-0.0", "0e0", "0E-5", "1e-400", "-1e-400", "2.4703282292062327e-324",
+    "2.4703282292062328e-324", "4.9406564584124654e-324", "2.2250738585072011e-308", "2.2250738585072012e-308",
+    "1.7976931348623157e308", "1.7976931348623158e308", "1.7976931348623159e308", "1e308", "1e309", "-1e309",
+    "9007199254740993.0", "9007199254740993e0", "0.1000000000000000055511151231257827021181583404541015625",
+    "123456789012345678901234567890.0", "1." + "0" * 30 + "1", "0." + "0" * 330 + "1", "1" + "0" * 308 + ".0",
+    "1" + "0" * 309 + ".0", "3.0", "14.0", "0.95", "1.50", "100e-2", "1e16", "1e15", "1e-5", "1e-4",
+]
+
+
+def build_float_repr() -> str:
+    """``float_repr.json``: ``bits`` maps IEEE-754 bit patterns (16 hex
+    digits) to ``repr(float)``, the number format of ``json.dumps`` (PLAN.md
+    4.8: shortest round-trip digits, exponent form below 1e-4 and from 1e16).
+    ``tokens`` maps JSON number tokens to ``repr(json.loads(token))``; null =
+    the token overflows to infinity (D-2, Rust rejects)."""
+    bits = {f"{_float_to_bits(value):016x}": repr(value) for value in _float_repr_values()}
+    tokens: dict[str, str | None] = {}
+    for token in _FLOAT_TOKENS:
+        value = json.loads(token)
+        if not isinstance(value, float):
+            raise AssertionError(f"not a float token: {token}")
+        tokens[token] = repr(value) if math.isfinite(value) else None
+    return render_json({"generated_by": GENERATED_BY, "bits": bits, "tokens": tokens})
+
+
+_STR_SCALAR_TEXTS = [
+    '"x"', '"  padded  "', '""', '"\\u00e9"', '"\\ud83d\\ude00"', '"None"', "0", "-0", "1", "-17", "3600",
+    "123456789012345678901234567890", "9" * 4300, "1.0", "-0.0", "1.5", "0.95", "3.0", "1e16", "1E2", "1e-05", "0.0001",
+    "1e400", "-1e400", "true", "false", "null", "[]", "[1, 2]", "{}", '{"a": 1}', '["x"]', '"\\ud800"',
+]
+
+_STRIP_INPUTS = [
+    "", " ", "x", "  x  ", "\t\n\x0b\x0c\r x \r\n", "\x1c\x1d\x1e\x1f x \x1f", "\x85x\xa0", "\u1680x\u180e",
+    "\u2000\u200ax\u2028\u2029", "\u202fx\u205f\u3000", "\u200bx\u200b", "\ufeffx\ufeff", "a b", " a \u3000 b ",
+    "\x00x\x00", "\U0001f600 ", "\x7f x",
+]
+
+_LOWER_INPUTS = [
+    "", "ABC", "Codex", "CLAUDE", "Reviewer", "HEARTBEAT", "Step_Started", "\u212aodex", "\u0130", "\u0130i",
+    "\u03a3", "\u039f\u0394\u039f\u03a3", "A\u03a3.", "A\u03a3 B", "\u03a3A", "\u00c9T\u00c9", "\u0416\u0418\u0412",
+    "\u1e9e", "\u00df", "\u2160", "\u24b6", "\U00010400", "\uff21", "sAME-oRIGIN", "On", "YES", "TRUE", "\u0130STANBUL",
+    "\u01c5", "\u1f88", "\u0049\u0307",
+]
+
+
+def build_pystr() -> str:
+    """``pystr.json``: Python ``str()`` of JSON scalars (PLAN.md 4.6; arrays
+    and objects are D-3, non-finite floats and lone surrogates D-2, Rust
+    rejects), ``str.strip()``, ``str.lower()``, the code points
+    ``str.isspace()`` accepts, and the non-ASCII code points whose
+    ``lower()`` is pure ASCII (the only ones that can change a comparison
+    with an ASCII constant)."""
+    str_cases = []
+    for text in _STR_SCALAR_TEXTS:
+        value = json.loads(text)
+        case: dict[str, Any] = {"input": text}
+        if isinstance(value, list | dict):
+            case["divergence"] = "D-3"
+        elif _has_divergent_value(value):
+            case["divergence"] = "D-2"
+        else:
+            case["python"] = str(value)
+        str_cases.append(case)
+    whitespace = [c for c in range(sys.maxunicode + 1) if chr(c).isspace()]
+    lower_to_ascii = [c for c in range(0x80, sys.maxunicode + 1) if chr(c).lower().isascii()]
+    return render_json(
+        {
+            "generated_by": GENERATED_BY,
+            "str": str_cases,
+            "strip": [{"input": text, "python": text.strip()} for text in _STRIP_INPUTS],
+            "lower": [{"input": text, "python": text.lower()} for text in _LOWER_INPUTS],
+            "whitespace": whitespace,
+            "lower_to_ascii": lower_to_ascii,
+        }
+    )
+
+
+# `parse_iso_datetime` inputs (PLAN.md 4.9) and whether the Rust ISO subset
+# deliberately rejects an input Python 3.14 accepts (True = D-7). The builder
+# fails when a D-7 input is not accepted by Python, so the marks stay honest.
+_DATETIME_CASES: list[tuple[str, bool]] = [
+    # isoformat_z output and the other extended forms
+    ("2026-10-21T10:00:00Z", False), ("2026-10-21T10:00:00.123456Z", False), ("2026-10-21T10:00:00.000001Z", False),
+    ("2026-10-21T10:00:00.000000Z", False), ("2026-10-21T10:00Z", False), ("2026-10-21T10:00:00+00:00", False),
+    ("2026-10-21T10:00:00-00:00", False), ("2026-10-21T10:00:00+02:00", False), ("2026-10-21T10:00:00-07:30", False),
+    ("2026-10-21T10:00:00.5+01:00", False), ("2026-10-21T10:00:00.1Z", False), ("2026-10-21T10:00:00.12Z", False),
+    ("2026-10-21T10:00:00.1234Z", False), ("2026-10-21T10:00:00.12345Z", False),
+    ("2026-10-21T10:00:00.1234567Z", False),
+    ("2026-10-21T10:00:00.12345678901234567890Z", False), ("2026-10-21T10:00:00.1234565Z", False),
+    ("2026-10-21T10:00:00.0000001Z", False), ("2026-10-21 10:00:00Z", False), ("2026-10-21t10:00Z", False),
+    ("2026-10-21x10:00Z", False), ("2026-10-21110:00Z", False), ("2026-10-21é10:00Z", False),
+    ("2026-10-21\t10:00Z", False), ("2026-10-21\n10:00Z", False), ("2026-10-21+10:00Z", False),
+    ("2026-10-21\U0001f60010:00Z", False),
+    # offsets: seconds and fractions, Python's field leniency, the 24 h bound
+    ("2026-10-21T10:00:00+01:00:30", False), ("2026-10-21T10:00:00+01:00:30.5", False),
+    ("2026-10-21T10:00:00+01:00:30.123456", False), ("2026-10-21T10:00:00+01:00:00.1234567", False),
+    ("2026-10-21T10:00:00+23:59:59.999999", False), ("2026-10-21T10:00:00-23:59:59.999999", False),
+    ("2026-10-21T10:00:00.123456-23:59:59.999999", False), ("2026-10-21T10:00:00-00:00:00.000001", False),
+    ("2026-10-21T10:00:00+00:00:00.000000", False), ("2026-10-21T10:00+00:60", False),
+    ("2026-10-21T10:00+00:99", False),
+    ("2026-10-21T10:00+00:00:60", False), ("2026-10-21T10:00+00:00:99", False), ("2026-10-21T10:00+23:99", False),
+    ("2026-10-21T10:00:00+24:00", False), ("2026-10-21T10:00:00-24:00", False), ("2026-10-21T10:00+99:00", False),
+    ("2026-10-21T10:00+01:00:00", False),
+    # 24:00 is midnight of the next day in Python 3.14
+    ("2026-10-21T24:00Z", False), ("2026-10-21T24:00:00Z", False), ("2026-10-21T24:00:00.000000Z", False),
+    ("2026-10-21T24:00:00.0000001Z", False), ("2026-12-31T24:00+01:00", False), ("2026-12-31T24:00Z", False),
+    ("2024-02-28T24:00Z", False), ("2026-10-21T24:00:00.000001Z", False), ("2026-10-21T24:01Z", False),
+    ("2026-10-21T24:00:01Z", False), ("9999-12-31T24:00Z", False), ("9999-12-31T24:00+01:00", False),
+    # field ranges and calendars
+    ("2026-10-21T25:00Z", False), ("2026-10-21T10:60Z", False), ("2026-10-21T10:00:60Z", False),
+    ("2026-10-21T23:59:60Z", False), ("2026-13-01T00:00Z", False), ("2026-00-01T00:00Z", False),
+    ("2026-10-00T00:00Z", False), ("2026-10-32T00:00Z", False), ("2026-02-29T00:00Z", False),
+    ("2024-02-29T00:00Z", False), ("1900-02-29T00:00Z", False), ("2000-02-29T00:00Z", False),
+    ("2026-04-31T00:00Z", False), ("2026-04-30T00:00Z", False),
+    # UTC bounds (year 1 to 9999 after the conversion)
+    ("0001-01-01T00:00Z", False), ("0001-01-01T00:00:00+00:01", False), ("0001-01-01T00:00-00:01", False),
+    ("0001-01-01T23:59:59.999999+23:59:59.999999", False), ("9999-12-31T23:59:59.999999Z", False),
+    ("9999-12-31T23:59:59-00:01", False), ("9999-12-31T23:59:59.999999+00:01", False),
+    ("9999-12-31T00:00:00-23:59:59.999999", False), ("0000-01-01T00:00Z", False), ("10000-01-01T00:00Z", False),
+    # whitespace (Python's set) and the trailing-Z replacement
+    (" 2026-10-21T10:00Z", False), ("2026-10-21T10:00:00Z ", False), ("2026-10-21T10:00:00Z\n", False),
+    ("　2026-10-21T10:00Z　", False), ("\x1c2026-10-21T10:00Z\x1f", False), ("\x852026-10-21T10:00Z", False),
+    ("​2026-10-21T10:00Z", False), ("2026-10-21T10:00:00ZZ", False), ("2026-10-21T10:00:00+00:00Z", False),
+    ("2026-10-21T10:00:00Z+00:00", False), ("2026-10-21T10:00:00z", False), ("2026-10-21T10:00:00UTC", False),
+    ("2026-10-21T10:00:00+00:00+00:00", False),
+    # naive values and malformed text
+    ("2026-10-21", False), ("2026-10-21Z", False), ("2026-10-21T10:00", False), ("2026-10-21T10:00:00.123", False),
+    ("", False), ("   ", False), ("Z", False), ("2026-10-21T", False), ("2026-10-21TZ", False),
+    ("2026-1-21T10:00Z", False),
+    ("+2026-10-21T10:00Z", False), ("2026-10-21T10:0Z", False), ("2026-10-21T10:00:0Z", False),
+    ("2026-10-21T10:00:00.Z", False), ("2026-10-21T10:00:00.+01:00", False), ("2026-10-21T10:00:00.12a3Z", False),
+    ("2026-10-21T10:00:00.5,5Z", False), ("2026-10-21T10:00:00.123456+", False), ("2026-10-21T10:00:00-", False),
+    ("2026-10-21T10:00:00+01:", False), ("2026-10-21T10:00:00+01:0", False), ("2026-10-21T10:00:00+01:00:", False),
+    ("2026-10-21T10:00:00+01:00:0", False), ("2026-10-21T10:00:00+01:00:00.", False),
+    ("2026-10-21T10:00:00+0100:00", False), ("2026-10-21T10:00:00+01:0000", False), ("2026-10-21T10:00:00+1:00", False),
+    ("2026-10-21T10:00:00+-01:00", False), ("2026-10-21T10:00:00++01:00", False), ("2026-10-21T10:00+00:00.5", False),
+    ("2026-10-21T１０:00Z", False), ("２026-10-21T10:00Z", False), ("2026-294T10:00Z", False),
+    ("2026/10/21T10:00Z", False), ("2026-10-21T10.5Z", False), ("2026-10-21T10:00:00.123456789+01:00:00.5x", False),
+    ("not a date", False), ("None", False), ("1729500000", False), ("2026-10-21T10:00:00+01:00 ", False),
+    ("2026-10-21T10:00.5Z", False), ("2026-10-21T10:00:00.5", False), ("2026-10-21T10:00:5Z", False),
+    ("2026-10-21T10:00:00.123456789+01:00:00.123456789", False), ("2026-10-21T24:00:00.0000001+01:00", False),
+    ("2026-10-21T10:00:00-00:00:00.0000001", False), ("2026-10-21T10:00:00.1e3Z", False),
+    ("2026-10-21T10:00:00+01:00:00:00", False), ("2026-10-21T10:00:00\u3000+01:00", False),
+    # D-7: Python 3.14 accepts, the Rust subset rejects
+    ("20261021T1000Z", True), ("20261021T100000Z", True), ("20261021T10:00Z", True), ("2026-10-21T1000Z", True),
+    ("2026-10-21T100000Z", True), ("2026-10-21T100000.5Z", True), ("2026-10-21T10Z", True),
+    ("2026-10-21T10+01:00", True), ("2026-10-21T10:00:00+01", True), ("2026-10-21T10:00:00-07", True),
+    ("2026-10-21T10:00:00+0100", True), ("2026-10-21T10:00:00+010030", True), ("2026-10-21T10:00:00,5Z", True),
+    ("2026-10-21T10:00:00+01:00:00,5", True), ("2026-W43-3T10:00Z", True), ("2026W433T10:00Z", True),
+    ("2026-W43T10:00Z", True), ("2026-10-21T10:00 Z", True), ("2026-10-21T10:00:00 +01:00", True),
+    ("2026-10-21T10:00:00.123 -01:00", False),
+]
+
+
+def _parse_case(raw: str, divergent: bool, *, strict: bool) -> dict[str, Any]:
+    case: dict[str, Any] = {"input": raw}
+    try:
+        case["python"] = isoformat_z(parse_iso_datetime(raw))
+    except ValueError:
+        case["python"] = None
+    if divergent and case["python"] is None:
+        if strict:
+            raise AssertionError(f"D-7 case rejected by Python too: {raw!r}")
+        divergent = False  # a random D-7 spelling out of UTC range: both reject
+    if divergent:
+        case["divergence"] = "D-7"
+    return case
+
+
+def _random_datetime_case(rng: random.Random, divergent: bool) -> tuple[str, bool]:
+    """A random accepted (or, with ``divergent``, D-7) spelling of a random
+    instant, with random offsets including seconds and fractions."""
+    year = rng.choice([1, 2, 1969, 1970, 2000, 2026, 9998, 9999, rng.randint(1, 9999), rng.randint(1900, 2100)])
+    month = rng.randint(1, 12)
+    day = rng.randint(1, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28, 31, 30, 31, 30,
+                          31, 31, 30, 31, 30, 31][month - 1])
+    hour, minute, second = rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59)
+    fraction = "".join(rng.choice("0123456789") for _ in range(rng.randint(1, 9)))
+    date = f"{year:04d}-{month:02d}-{day:02d}"
+    clock = f"{hour:02d}:{minute:02d}"
+    if rng.random() < 0.8:
+        clock += f":{second:02d}"
+        if rng.random() < 0.6:
+            clock += "." + fraction
+    sign = rng.choice("+-")
+    off_h, off_m, off_s = rng.randint(0, 23), rng.randint(0, 59), rng.randint(0, 59)
+    zone = rng.choice(
+        ["Z", "+00:00", "-00:00", f"{sign}{off_h:02d}:{off_m:02d}", f"{sign}{off_h:02d}:{off_m:02d}:{off_s:02d}",
+         f"{sign}{off_h:02d}:{off_m:02d}:{off_s:02d}.{fraction}"]
+    )
+    separator = rng.choice(["T", "T", "T", " "])
+    if divergent:
+        form = rng.randrange(6)
+        if form == 0:
+            date = date.replace("-", "")
+        elif form == 1:
+            clock = f"{hour:02d}{minute:02d}{second:02d}"
+        elif form == 2:
+            clock = f"{hour:02d}"
+        elif form == 3:
+            zone = f"{sign}{off_h:02d}"
+        elif form == 4:
+            zone = f"{sign}{off_h:02d}{off_m:02d}"
+        else:
+            clock = f"{hour:02d}:{minute:02d}:{second:02d},{fraction}"
+    text = date + separator + clock + zone
+    if rng.random() < 0.1:
+        text = rng.choice([" ", "\t", "　", "\x1c"]) + text + rng.choice(["", " ", "\n"])
+    return text, divergent
+
+
+def build_datetime() -> str:
+    """``datetime.json`` (Python 3.14 only, see ``PYTHON_GATED``):
+    ``parse`` maps inputs of ``parse_iso_datetime`` to
+    ``isoformat_z(parse_iso_datetime(input))`` or null for a ``ValueError``
+    (PLAN.md 4.9; ``divergence`` D-7: Python accepts, Rust rejects).
+    ``format`` maps UTC components to ``isoformat_z``."""
+    rng = random.Random(0x5EED_4804)
+    parse = [_parse_case(raw, divergent, strict=True) for raw, divergent in _DATETIME_CASES]
+    for divergent in [False] * 400 + [True] * 60:
+        raw, divergent = _random_datetime_case(rng, divergent)
+        parse.append(_parse_case(raw, divergent, strict=False))
+    components = [
+        (1, 1, 1, 0, 0, 0, 0), (9999, 12, 31, 23, 59, 59, 999_999), (2026, 10, 21, 10, 0, 0, 0),
+        (2026, 10, 21, 10, 0, 0, 1), (2026, 10, 21, 10, 0, 0, 500_000), (999, 1, 2, 3, 4, 5, 6),
+        (1970, 1, 1, 0, 0, 0, 0),
+    ]
+    for _ in range(100):
+        moment = datetime(1, 1, 1, tzinfo=UTC) + timedelta(microseconds=rng.randrange(315_537_897_600_000_000))
+        components.append((moment.year, moment.month, moment.day, moment.hour, moment.minute, moment.second,
+                           rng.choice([0, moment.microsecond])))
+    format_cases = [
+        {"utc": list(parts), "python": isoformat_z(datetime(*parts, tzinfo=UTC))} for parts in components
+    ]
+    return render_json({"generated_by": GENERATED_BY, "parse": parse, "format": format_cases})
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
+    "checksum.json": build_checksum,
+    "datetime.json": build_datetime,
+    "float_repr.json": build_float_repr,
     "log_preview.json": build_log_preview,
     "proxy_fix.json": build_proxy_fix,
+    "pystr.json": build_pystr,
     "schema.sql": build_schema,
     "settings.json": build_settings,
+    "storage_json.json": build_storage_json,
+}
+
+# Fixtures whose content depends on the CPython minor version: they are
+# generated and checked only by that interpreter, the production one
+# (PLAN.md 7.2). ``datetime.fromisoformat`` changed between 3.11 and 3.14
+# (``24:00``, a trailing ``.``), so ``datetime.json`` pins 3.14.
+PYTHON_GATED: dict[str, tuple[int, int]] = {
+    "datetime.json": (3, 14),
 }
 
 
+def generated_here(name: str) -> bool:
+    """Whether this interpreter generates and checks fixture ``name``
+    (``PYTHON_GATED``)."""
+    version = PYTHON_GATED.get(name)
+    return version is None or sys.version_info[:2] == version
+
+
+def skipped_fixtures() -> list[str]:
+    """The fixtures this interpreter leaves alone, sorted by name."""
+    return [name for name in sorted(GENERATORS) if not generated_here(name)]
+
+
+@functools.cache
 def render(name: str) -> str:
-    """The current content of fixture ``name``."""
+    """The current content of fixture ``name`` (builders are deterministic,
+    so one render per process is enough)."""
     return GENERATORS[name]()
 
 
 def check_fixtures(directory: Path | None = None) -> list[str]:
     """Return the fixture files in ``directory`` (default ``FIXTURES_DIR``)
-    that are missing or differ from a fresh render, sorted by name."""
+    that are missing or differ from a fresh render, sorted by name. Fixtures
+    gated to another Python version are not checked."""
     directory = FIXTURES_DIR if directory is None else directory
     stale = []
     for name in sorted(GENERATORS):
+        if not generated_here(name):
+            continue
         path = directory / name
         current = path.read_bytes() if path.exists() else None
         if current != render(name).encode("utf-8"):
@@ -766,11 +1342,13 @@ def check_fixtures(directory: Path | None = None) -> list[str]:
 
 
 def write_fixtures(directory: Path | None = None) -> list[Path]:
-    """Write every fixture into ``directory`` (default ``FIXTURES_DIR``) and
-    return the paths."""
+    """Write every fixture this interpreter generates into ``directory``
+    (default ``FIXTURES_DIR``) and return the paths."""
     directory = FIXTURES_DIR if directory is None else directory
     written = []
     for name in sorted(GENERATORS):
+        if not generated_here(name):
+            continue
         path = directory / name
         path.write_bytes(render(name).encode("utf-8"))
         written.append(path)
@@ -781,6 +1359,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--check", action="store_true", help="exit 1 when a file is missing or stale")
     args = parser.parse_args(argv)
+    running = "{}.{}".format(*sys.version_info[:2])
+    for name in skipped_fixtures():
+        wanted = "{}.{}".format(*PYTHON_GATED[name])
+        print(f"skipped fixture: {name} (generated by Python {wanted} only, this is {running})", file=sys.stderr)
     if args.check:
         stale = check_fixtures()
         for name in stale:

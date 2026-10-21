@@ -17,6 +17,13 @@
   `X-Forwarded-*` before Werkzeug's `ProxyFix` runs, so `OPSGATE_TRUST_PROXY_HEADERS` has no effect;
   the Rust port keeps that behaviour. New Python-generated fixtures
   `settings.json`, `log_preview.json` and `proxy_fix.json` pin them. Nothing calls this code yet.
+- Rust port slice S2a: `opsgate-core` gains the payload checksum formatter (byte-exact
+  `json.dumps(sort_keys=True, separators=(",", ":"), ensure_ascii=True)` incl. CPython float `repr`),
+  the stored-JSON text, `json.loads` number and depth rules, Python `str()`/`strip`/`lower`, and
+  `isoformat_z`/`parse_iso_datetime` (CPython 3.14 semantics on the extended ISO 8601 forms). New
+  Python-generated fixtures `checksum.json`, `float_repr.json`, `storage_json.json`, `datetime.json`
+  and `pystr.json`; `datetime.json` is generated and checked only by Python 3.14 (`PYTHON_GATED`),
+  other interpreters skip it.
 
 ### Documentation
 

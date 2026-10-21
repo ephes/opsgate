@@ -29,9 +29,16 @@ opsgate-runner = { path = "crates/opsgate-runner" }
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 gethostname = "1"
 ipnet = "2"
-serde_json = "1"
-sha2 = "0.11"
 tempfile = "3"
+# JSON with number tokens preserved (PLAN.md 4.8, 6.2): the checksum formatter
+# classifies and re-renders every token itself and sorts object keys itself,
+# so a crate that enables serde_json's `preserve_order` cannot change it.
+serde = "1"
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+ryu = "1"
+sha2 = "0.11"
+chrono = { version = "0.4", default-features = false, features = ["std", "now"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

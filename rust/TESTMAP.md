@@ -126,8 +126,8 @@ section ("Rust-only tests") with their paths.
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_api_rejects_non_text_plan_fields` | `core::validate` | S2c | A |
 | `test_claim_rejects_non_text_stored_plan` | `store::claim` | S3b | A |
-| `test_api_rejects_utc_expiry_overflow` | `core::time + core::validate` | S2a | A |
-| `test_datetime_overflow_is_value_error` | `core::time + core::validate` | S2a | A |
+| `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half; the `invalid_expires_at` mapping is `core::validate`, S2c) | S2a + S2c | A |
+| `test_datetime_overflow_is_value_error` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` | S2a | A |
 | `test_api_accepts_trimmed_plan_and_optional_expiry` | `core::validate` | S2c | A |
 | `test_ui_pages_cannot_be_framed` | `web::headers` | S4a | A |
 | `test_api_error_and_redirect_responses_carry_security_headers` | `web::headers` | S4a | A |
@@ -255,3 +255,10 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-core/tests/proxy_fix_fixture.rs` | `proxy_fix.json`: 26 header sets through waitress's proxy-header middleware and Werkzeug `ProxyFix`, with and without `OPSGATE_TRUST_PROXY_HEADERS`: the socket view is kept; `Host` joining and latin-1 (4.4) | S2b |
 | `crates/opsgate-core/tests/containment.rs` | step-log containment (4.12): symlink escapes (file, directory, dangling, relative), missing inside → `log_not_found`, missing outside → `invalid_log_path`, containment before existence, `..` escapes, symlink loops, CPython 3.14 `realpath` corner cases | S2b |
 | `crates/opsgate-core/src/{pytext,settings,log_preview}.rs` unit tests | Python whitespace and line-boundary sets, `int()` grammar and the 4300-digit limit, non-UTF-8 values, redacted `Debug`, CIDR prefixes, directories and missing files | S2b |
+| `crates/opsgate-core/tests/checksum_fixture.rs` | `checksum.json`: canonical text and payload checksum byte-exact for 552 inputs (production-shaped and adversarial, incl. objects keyed by serde_json's internal number key and an overlong integer hidden by a duplicate key), D-2 and undecodable inputs rejected; `storage_json.json`: stored-column text equal to Python's (4.8) | S2a |
+| `crates/opsgate-core/tests/float_repr_fixture.rs` | `float_repr.json`: `repr(float)` of 10 471 doubles (subnormals, powers of ten and neighbours, exponent boundaries, random bits) and the reading of number tokens incl. overflow (4.8) | S2a |
+| `crates/opsgate-core/tests/datetime_fixture.rs` | `datetime.json` (CPython 3.14): every accepted input normalises to Python's instant, every rejected input is rejected by Python or marked D-7; `isoformat_z` (4.9) | S2a |
+| `crates/opsgate-core/tests/pystr_fixture.rs` | `pystr.json`: `str()` of JSON scalars (D-2/D-3 rejected), `strip`, `lower`, Python's whitespace set over all code points, the non-ASCII characters whose lowercase is ASCII (4.6) | S2a |
+| `crates/opsgate-core/tests/formatter_properties.rs` | property test: canonical and stored texts are ASCII, parse back to the same value and are fixed points (7.1) | S2a |
+| `crates/opsgate-core/src/{json,pytext,time}.rs::tests` (S2a parts) | unit tests: escapes, separators, number classification, 4300-digit limit, BOM and UTF-8 handling of bodies, depth limit at 64 (and serde_json's 128), float `repr` examples, ISO parsing corners | S2a |
+| `tests/test_rust_fixtures.py::test_python_gated_fixtures_follow_the_interpreter` | fixtures gated to another CPython version (`PYTHON_GATED`) are neither written nor checked, and are checked on their own version (7.2) | S2a |

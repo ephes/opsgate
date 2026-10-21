@@ -13,9 +13,11 @@ name: CI
 # rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3) against
 # Python and, for the landed web slices, the Rust release binary. The
 # `parity-runner` job runs the black-box runner parity harness
-# (rust/parity/runner, rust/PLAN.md 7.4) with real tmux on Linux and macOS:
-# against the Python runner now, against the Rust runner once slice S6b has
-# landed (S8 switches that leg on).
+# (rust/parity/runner, rust/PLAN.md 7.4) with real tmux on Linux and macOS
+# against the Python runner and the Rust release binary (every stack with Rust:
+# cross-implementation recovery and the four mixed API/runner stacks, since
+# slice S8). Both parity diffs run with --complete: no scenario may be skipped
+# on one side.
 
 on:
   push:
@@ -71,9 +73,10 @@ jobs:
 
   parity-api:
     # rust/PLAN.md 7.3: black-box API scenarios against a real `python -m opsgate serve` process per
-    # scenario, then against the Rust release binary (`--impl rust`; only the scenarios whose web slices
-    # are in harness.RUST_SLICES_LANDED run, since slice S4a) and the record diff with compare.py. The
-    # binary is built first: the Python leg's cross-implementation scenarios use it as their peer.
+    # scenario, then against the Rust release binary (`--impl rust`; every web slice is in
+    # harness.RUST_SLICES_LANDED since S5) and the record diff with compare.py, which fails on a
+    # scenario recorded by only one run (--complete, since S8). The binary is built first: the Python
+    # leg's cross-implementation scenarios use it as their peer.
     name: API parity harness (Python and Rust)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -128,7 +131,7 @@ jobs:
       - name: Record diff (compare.py)
         run: >-
           uv run python rust/parity/api/compare.py "$RUNNER_TEMP/parity-api/python" "$RUNNER_TEMP/parity-api/rust"
-          --report "$RUNNER_TEMP/parity-api/report.json"
+          --report "$RUNNER_TEMP/parity-api/report.json" --complete
 
   rust:
     name: Rust port (${{ matrix.os }}; fmt, clippy, deny, tests, release build)
@@ -228,9 +231,9 @@ jobs:
           echo "opsgate release binary (${{ matrix.os }}): ${size} bytes" >> "$GITHUB_STEP_SUMMARY"
 
   parity-runner:
-    name: Runner parity harness (${{ matrix.os }}; Python runner)
+    name: Runner parity harness (${{ matrix.os }}; Python and Rust)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -269,7 +272,29 @@ jobs:
           uv run ruff check rust/parity/runner
           uv run ruff format --check rust/parity/runner
           uv run mypy rust/parity/runner
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        working-directory: rust
+        run: |
+          rustup toolchain install
+          rustc --version
+      - name: Cache cargo registry and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            rust/target
+          key: parity-runner-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust/rust-toolchain.toml', 'rust/Cargo.lock') }}
+          restore-keys: parity-runner-rust-${{ runner.os }}-${{ runner.arch }}-
+      - name: Release build of the Rust binary
+        working-directory: rust
+        run: cargo build --release --locked
       - name: Runner parity harness against Python
-        run: uv run pytest rust/parity/runner --impl python --records "$RUNNER_TEMP/parity-runner/python"
-      - name: Records are comparable
-        run: uv run python rust/parity/runner/compare.py "$RUNNER_TEMP/parity-runner/python"
+        run: uv run pytest rust/parity/runner -rs --impl python --records "$RUNNER_TEMP/parity-runner/python"
+      - name: Runner parity harness against Rust (every stack with a Rust runner or API)
+        run: uv run pytest rust/parity/runner -rs --impl rust --records "$RUNNER_TEMP/parity-runner/rust"
+      - name: Record diff (compare.py)
+        run: >-
+          uv run python rust/parity/runner/compare.py "$RUNNER_TEMP/parity-runner/python"
+          "$RUNNER_TEMP/parity-runner/rust" --require-rust --complete

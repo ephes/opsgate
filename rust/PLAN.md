@@ -1435,7 +1435,9 @@ session cookie attributes, normalised DB snapshot: ids mapped, timestamps
 masked, temp paths masked, JSON columns parsed, error `message` texts masked as
 P2; flash texts that are a decoder's or `fromisoformat`'s free-text message are
 masked too where the scenario says so, `Recorder.mask_flash_texts`, S5). `just rs-parity-api` runs the suite against both and diffs the records
-(`compare.py`; scenarios that name a P3 divergence are reported as explained);
+(`compare.py`; scenarios that name a P3 divergence are reported as explained;
+with `--complete`, which CI and the recipe pass since S8, a scenario recorded
+by only one run fails);
 CI runs it on every push (job `parity-api`: the Rust release binary is built
 first, since the Python run's cross-implementation scenarios use it as their
 peer from S4b on; then Python, since S4a Rust, and the record diff). Every scenario names the Rust slices it needs
@@ -1509,7 +1511,9 @@ the release binary for each runner OS; `deny.toml` checks the release target
 for the store's round trip (`OPSGATE_REQUIRE_PYTHON=1`, S3b), release
 build, `opsgate --version` smoke test against the checked-out commit,
 binary-size report; and parity jobs running 7.3 (`parity-api`, S7a) and 7.4
-(`parity-runner`, S7b; Linux and macOS, Python now, Rust from S8). `justfile`:
+(`parity-runner`, S7b; Linux and macOS; Python, and since S8 every stack
+with Rust). Since S8 both record diffs run with `--complete` (a scenario
+recorded by only one run, or a skipped runner stack, fails). `justfile`:
 `rs-check` (fmt, clippy, test), `rs-test`, `rs-deny`, `rs-fmt`,
 `rs-fixtures`, `rs-build` (S1), `rs-parity-api` (S7a), `rs-parity-runner`
 (S7b). The Python jobs stay unchanged apart from the fixture drift test,
@@ -1834,7 +1838,7 @@ run with `just test` as today).
 | S6b | Runner II: supervisor loop, signal handling, recovery, worker failure + verified cleanup, state files, `--once`, log lines, `runner` wiring | opsgate | S6a | yes (S3-, S4-, S5) | 4 | no |
 | S7a | API parity harness (7.3), green against Python; Rust target switched on as routes land | opsgate | S1 | yes (all) | 4 | no |
 | S7b | Runner parity harness (7.4) incl. cross-implementation recovery and mixed stacks, green against Python | opsgate | S1 | yes (all) | 4 | no |
-| S8 | Integration: both harnesses green for Rust and all mixed combinations, fixes, TESTMAP complete, docs (README runtime/config sections incl. the timeout variable name, `rust/README.md`, CHANGELOG) | opsgate | S4b, S5, S6b, S7a, S7b | no | 3 | no |
+| S8 | Integration: both harnesses green for Rust and all mixed combinations (CI: Rust leg of `parity-runner`, `--complete` diffs), fixes, `check-config` (3.1; unassigned before), TESTMAP complete, docs (README runtime/config sections incl. the timeout variable name, `rust/README.md`, CHANGELOG) | opsgate | S4b, S5, S6b, S7a, S7b | no | 3 | no |
 | S9 | Release pipeline (section 9) + `release_checks.py` and tests; tag `rs-v0.3.0` after S8 | opsgate | S1 (workflow), S8 (tag) | yes (from W1) | 3 | no |
 | S10 | Role switch (10.1) incl. Python-plist copy for emergencies, tests, README, CHANGELOG | ops-library | S1o; archive format of section 9 | yes (from W1) | 4 | no |
 | S11 | ops-control wiring (10.2) + install deploy (11.1) under the lock | ops-control | S9 tag, S10 (and S1o) in a coordinator ops-library release | no | 2 | yes (no switch) |
@@ -1894,12 +1898,15 @@ Acceptance criteria (beyond green checks and a clean review):
   `test_ui_forms_reject_non_ascii_form_token`) belong to S8. Black-box parity per slice only where the
   scenario needs no other open slice: S4a the bearer/gate/header/health
   scenarios, S4b the login/logout/throttle/CSRF scenarios; the authenticated
-  UI scenarios run against Rust from S8, which needs both S4b and S5.
+  UI scenarios need both S4b and S5 (they ran against Rust from the S5 merge
+  on, since S4b had landed first; the plan had named S8).
 - **S6a/S6b:** every runner row of TESTMAP passes; `tmux` integration tests
   pass on macOS and Linux.
 - **S7a/S7b:** suites green against Python, documented in `rust/README.md`.
 - **S8:** both harnesses green against Rust with zero unexplained differences
-  and all four mixed stacks; docs reviewed.
+  and all four mixed stacks; docs reviewed. `opsgate check-config` (3.1),
+  which no slice owned and which S9's release checks and S10's install task
+  run, lands with S8 too.
 - **S9:** a `workflow_dispatch` run produces archive + checksum passing all
   checks; release `rs-v0.3.0` exists.
 - **S10:** unit tests render both plists per impl; guard tests green; README

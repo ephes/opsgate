@@ -2,15 +2,17 @@
 
 Usage::
 
-    python rust/parity/api/compare.py RECORDS_A RECORDS_B [--report FILE]
+    python rust/parity/api/compare.py RECORDS_A RECORDS_B [--report FILE] [--complete]
 
 Each directory holds the records ``pytest rust/parity/api --records DIR``
 wrote for one implementation. A scenario recorded by both runs must have
 equal records, unless the scenario names a P3 divergence (PLAN.md section 5;
 ``Recorder.divergence``): then the difference is reported as explained. A
 scenario recorded by only one run (the other skipped it, e.g. because the
-Rust slice has not landed) is listed, not failed. A scenario that did not
-pass in a run (also one recorded by only one run) fails the comparison. Exit status: 0 when no unexplained
+Rust slice has not landed) is listed, not failed, unless ``--complete`` is
+given (CI since slice S8, when every web slice has landed): then it fails the
+comparison too. A scenario that did not pass in a run (also one recorded by
+only one run) fails the comparison. Exit status: 0 when no unexplained
 difference was found, 1 otherwise. Standard library only.
 """
 
@@ -52,7 +54,7 @@ def differences(left: Any, right: Any, path: str = "") -> list[str]:
     return []
 
 
-def compare(first: Path, second: Path) -> dict[str, Any]:
+def compare(first: Path, second: Path, *, complete: bool = False) -> dict[str, Any]:
     a, b = load(first), load(second)
     report: dict[str, Any] = {
         "first": str(first),
@@ -84,7 +86,8 @@ def compare(first: Path, second: Path) -> dict[str, Any]:
             report["explained"][name] = {"divergences": divergences, "differences": found[:20]}
         else:
             report["different"][name] = found[:50]
-    report["ok"] = not report["different"] and not report["not_passed"]
+    one_sided = bool(report["only_first"] or report["only_second"])
+    report["ok"] = not report["different"] and not report["not_passed"] and not (complete and one_sided)
     return report
 
 
@@ -93,11 +96,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("first", type=Path)
     parser.add_argument("second", type=Path)
     parser.add_argument("--report", type=Path, help="write the full report as JSON")
+    parser.add_argument(
+        "--complete", action="store_true", help="fail when a scenario was recorded by only one of the runs"
+    )
     args = parser.parse_args(argv)
     for directory in (args.first, args.second):
         if not directory.is_dir():
             parser.error(f"{directory} is not a directory")
-    report = compare(args.first, args.second)
+    report = compare(args.first, args.second, complete=args.complete)
     if args.report:
         args.report.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     print(
@@ -112,6 +118,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"    {line}")
     for name, outcomes in report["not_passed"].items():
         print(f"NOT PASSED {name}: {outcomes}")
+    if args.complete:
+        for name in report["only_first"]:
+            print(f"ONLY IN {args.first.name} {name}")
+        for name in report["only_second"]:
+            print(f"ONLY IN {args.second.name} {name}")
     for name, item in report["explained"].items():
         print(f"explained {name} ({', '.join(item['divergences'])})")
     return 0 if report["ok"] else 1

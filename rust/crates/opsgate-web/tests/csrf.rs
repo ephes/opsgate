@@ -544,3 +544,143 @@ async fn test_ui_ticket_actions_reject_non_ascii_form_token() {
         assert_eq!(app.snapshot(), before, "{action}");
     }
 }
+
+// ------------------------------- UI-CSRF across the web slices (S8, 4.5.4)
+//
+// These Python tests need the real sign-in and logout of S4b and the form
+// actions of S5, so they land with the integration slice.
+
+/// `test_ui_archive_routes_require_csrf_token`: after a real sign-in, the
+/// archive and unarchive forms without a token are "Invalid form token" on
+/// the detail page; with the session's token the archive goes through.
+#[tokio::test]
+async fn test_ui_archive_routes_require_csrf_token() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "archive-ui-csrf-1").await;
+    app.login("/login").await;
+    let reject = app
+        .send(
+            app.csrf_header(
+                Call::post(&format!("/api/v1/tickets/{ticket_id}/reject"))
+                    .json(&json!({"reason": "done"})),
+            ),
+        )
+        .await;
+    assert_eq!(reject.status, StatusCode::OK, "{}", reject.text());
+    let detail_path = format!("/tickets/{ticket_id}");
+
+    let archive = app
+        .send(Call::post(&format!("/tickets/{ticket_id}/archive")).form(&[]))
+        .await;
+    assert_eq!(archive.status, StatusCode::FOUND);
+    assert_eq!(archive.location(), Some(detail_path.as_str()));
+    let archive_detail = app.get(&detail_path).await;
+    assert!(archive_detail.text().contains("Invalid form token"));
+    let archived_at: Option<String> = app
+        .connection()
+        .query_row(
+            "SELECT archived_at FROM tickets WHERE id = ?",
+            [&ticket_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived_at, None);
+
+    let token = app.csrf_token();
+    let archived = app
+        .post_form(&format!("/tickets/{ticket_id}/archive"), &token, &[])
+        .await;
+    assert_eq!(archived.status, StatusCode::FOUND);
+    let archived_at: Option<String> = app
+        .connection()
+        .query_row(
+            "SELECT archived_at FROM tickets WHERE id = ?",
+            [&ticket_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(archived_at.is_some());
+
+    let before = app.snapshot();
+    let unarchive = app
+        .send(Call::post(&format!("/tickets/{ticket_id}/unarchive")).form(&[]))
+        .await;
+    assert_eq!(unarchive.status, StatusCode::FOUND);
+    assert_eq!(unarchive.location(), Some(detail_path.as_str()));
+    let unarchive_detail = app.get(&detail_path).await;
+    assert!(unarchive_detail.text().contains("Invalid form token"));
+    assert_eq!(app.snapshot(), before);
+}
+
+/// `test_ui_post_routes_require_csrf_token`: logout and the approve,
+/// reject and cancel forms without a token redirect (logout to the list,
+/// the actions to the detail page) and the next page shows "Invalid form
+/// token"; nothing changes and the approver stays signed in.
+#[tokio::test]
+async fn test_ui_post_routes_require_csrf_token() {
+    for (route, fields) in [
+        ("logout", vec![]),
+        ("approve", vec![]),
+        ("reject", vec![("reason", "nope")]),
+        ("cancel", vec![("reason", "stop")]),
+    ] {
+        let app = TestApp::new();
+        let ticket_id = pending_ticket(&app, &format!("ui-csrf-{route}")).await;
+        app.login("/login").await;
+        let (path, expected_location) = if route == "logout" {
+            ("/logout".to_owned(), "/tickets".to_owned())
+        } else {
+            (
+                format!("/tickets/{ticket_id}/{route}"),
+                format!("/tickets/{ticket_id}"),
+            )
+        };
+        let before = app.snapshot();
+        let response = app.send(Call::post(&path).form(&fields)).await;
+        assert_eq!(response.status, StatusCode::FOUND, "{route}");
+        assert_eq!(
+            response.location(),
+            Some(expected_location.as_str()),
+            "{route}"
+        );
+        let page = app.get(&expected_location).await;
+        assert_eq!(page.status, StatusCode::OK, "{route}");
+        assert!(page.text().contains("Invalid form token"), "{route}");
+        assert_eq!(app.snapshot(), before, "{route}");
+        assert!(app.authenticated(&ticket_id).await, "{route}");
+    }
+}
+
+/// `test_ui_forms_reject_non_ascii_form_token`: a non-ASCII form token on
+/// the login form, the logout form and the manual ticket form is refused
+/// with a redirect; a signed-in approver stays signed in, and the login
+/// form does not sign anyone in.
+#[tokio::test]
+async fn test_ui_forms_reject_non_ascii_form_token() {
+    for path in ["/login", "/logout", "/tickets"] {
+        let app = TestApp::new();
+        if path == "/login" {
+            assert_eq!(app.get("/login").await.status, StatusCode::OK);
+        } else {
+            app.login("/login").await;
+        }
+        let before = app.snapshot();
+        let response = app
+            .send(Call::post(path).form(&[
+                ("csrf_token", "té-über"),
+                ("username", APPROVER),
+                ("password", common::PASSWORD),
+            ]))
+            .await;
+        assert_eq!(response.status, StatusCode::FOUND, "{path}");
+        assert_eq!(response.location(), Some("/tickets"), "{path}");
+        let tickets = app.get("/tickets").await;
+        let expected = if path == "/login" {
+            StatusCode::FOUND
+        } else {
+            StatusCode::OK
+        };
+        assert_eq!(tickets.status, expected, "{path}");
+        assert_eq!(app.snapshot(), before, "{path}");
+    }
+}

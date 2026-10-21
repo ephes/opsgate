@@ -94,3 +94,15 @@ def test_every_baseline_is_checked(tmp_path: Path, capsys: pytest.CaptureFixture
     out = capsys.readouterr().out
     assert "s: api=fake runners=python (second baseline" in out and "differs at /a" in out
     assert "t: baseline api=fake runners=python failed" in out
+
+
+def test_complete_fails_on_a_skipped_stack(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    python = write(tmp_path / "py", record("s", "fake", ["python"], {"a": 1}))
+    rust = write(
+        tmp_path / "rs",
+        record("s", "fake", ["rust"], {"a": 1}),
+        record("s", "rust", ["rust"], {}, outcome="skipped"),
+    )
+    assert compare.main([str(python), str(rust), "--require-rust"]) == 0
+    assert compare.main([str(python), str(rust), "--require-rust", "--complete"]) == 1
+    assert "s: api=rust runners=rust skipped" in capsys.readouterr().out

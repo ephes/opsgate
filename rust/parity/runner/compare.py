@@ -2,7 +2,7 @@
 
 Usage::
 
-    python rust/parity/runner/compare.py RECORDS_DIR [RECORDS_DIR ...] [--require-rust]
+    python rust/parity/runner/compare.py RECORDS_DIR [RECORDS_DIR ...] [--require-rust] [--complete]
 
 Every record (written by ``pytest rust/parity/runner --records DIR``) names its
 scenario and its stack (API: ``fake``, ``python`` or ``rust``; the runner
@@ -11,7 +11,8 @@ the baseline (every all-Python record of a scenario must have passed and agree
 with the first); every other stack that ran must have passed and must have
 observed exactly the same normalised values. Skipped stacks are counted, not
 compared. Exit status 1 on any difference, a failed stack, a scenario without
-a passing baseline, or (with ``--require-rust``) when no Rust stack ran.
+a passing baseline, (with ``--require-rust``) when no Rust stack ran, or (with
+``--complete``, CI since slice S8) when any stack was skipped.
 """
 
 from __future__ import annotations
@@ -68,12 +69,18 @@ def load(dirs: list[Path]) -> dict[str, list[dict[str, Any]]]:
     return scenarios
 
 
-def compare(scenarios: dict[str, list[dict[str, Any]]], *, require_rust: bool = False) -> tuple[list[str], int]:
+def compare(
+    scenarios: dict[str, list[dict[str, Any]]], *, require_rust: bool = False, complete: bool = False
+) -> tuple[list[str], int]:
     """Return (problems, number of compared non-baseline stacks)."""
     problems: list[str] = []
     compared = 0
     for name in sorted(scenarios):
         records = scenarios[name]
+        if complete:
+            for record in records:
+                if record["outcome"] == "skipped":
+                    problems.append(f"{name}: {stack_label(record['stack'])} skipped ({record['_file']})")
         ran = [r for r in records if r["outcome"] != "skipped"]
         baselines = [r for r in ran if is_python_only(r["stack"])]
         others = [r for r in ran if not is_python_only(r["stack"])]
@@ -112,9 +119,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("dirs", nargs="+", type=Path)
     parser.add_argument("--require-rust", action="store_true", help="fail when no Rust stack ran")
+    parser.add_argument("--complete", action="store_true", help="fail when any stack was skipped")
     args = parser.parse_args(argv)
     scenarios = load(args.dirs)
-    problems, compared = compare(scenarios, require_rust=args.require_rust)
+    problems, compared = compare(scenarios, require_rust=args.require_rust, complete=args.complete)
     skipped = sum(1 for records in scenarios.values() for r in records if r["outcome"] == "skipped")
     print(f"{len(scenarios)} scenarios, {compared} non-baseline stacks compared, {skipped} skipped")
     for problem in problems:

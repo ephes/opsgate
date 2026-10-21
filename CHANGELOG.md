@@ -4,6 +4,20 @@
 
 ### Development
 
+- Rust port slice S8 (integration): both black-box parity harnesses now run every scenario against
+  both implementations in CI — the `parity-runner` job (Linux and macOS) builds the Rust binary and
+  runs every stack with Rust, including SIGKILL-and-restart recovery across implementations and all
+  four API/runner stacks (Python/Rust × Python/Rust) — and both record diffs fail on a scenario that
+  ran on one side only (`compare.py --complete`, also in `just rs-parity-api` and
+  `just rs-parity-runner`). No unexplained difference remains (API: 29 differences explained by the
+  documented divergences D-2/D-3/D-4). `opsgate check-config api|runner` works: it loads the settings
+  as `serve` or `runner` would, prints only non-secret values and exits 0 or 1, for the release
+  checks and the role's install task. The three UI-CSRF tests that need both sign-in and the form
+  actions are ported (in-process and as parity scenarios); every Python test now has its Rust
+  counterpart in `rust/TESTMAP.md`. Documentation: the README names the session timeout variable
+  correctly (`OPSGATE_UI_SESSION_TIMEOUT_SECONDS`, default 28800) and lists the remaining settings
+  (`OPSGATE_SERVICE_NAME`, `OPSGATE_EXECUTION_DATA_DIR`, `TMUX_TMPDIR`, the default CIDRs). Nothing
+  deploys or runs the Rust binary yet; the Python implementation is unchanged.
 - Rust port slice S5 (`rust/crates/opsgate-web`): `opsgate serve` answers the approver's pages and
   form actions — `GET /`, the ticket list with its `view` filter and the manual ticket form
   (multi-step and legacy fields, role defaults and prompt scaffolding, the operator reviewer floor,

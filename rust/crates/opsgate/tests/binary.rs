@@ -58,23 +58,6 @@ fn version_commit_is_head_of_the_source_tree() {
 }
 
 #[test]
-fn unlanded_commands_are_stubs_that_exit_2() {
-    for (args, name) in [
-        (&["check-config", "api"][..], "check-config"),
-        (&["check-config", "runner"], "check-config"),
-    ] {
-        let output = opsgate(args);
-        assert_eq!(output.status.code(), Some(2), "{args:?}");
-        assert!(output.stdout.is_empty(), "{args:?}");
-        assert_eq!(
-            text(&output.stderr),
-            format!("opsgate {name}: not implemented yet (rust/PLAN.md section 12)\n"),
-            "{args:?}"
-        );
-    }
-}
-
-#[test]
 fn check_db_reports_and_exits_0_or_1() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("opsgate.sqlite3");
@@ -624,4 +607,120 @@ fn serve_exits_within_the_grace_period_with_a_locked_database() {
     assert!(elapsed < Duration::from_secs(9), "{elapsed:?}");
     drop(lock);
     request.join().unwrap();
+}
+
+// ----- check-config (slice S8) --------------------------------------------------
+
+/// `check-config api|runner` with valid settings: exit 0, the `ok` line and
+/// the non-secret values on stdout, nothing on stderr, no secret anywhere,
+/// and nothing created (database, execution data directory).
+#[test]
+fn check_config_accepts_valid_settings_without_printing_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    let api_env = serve_env(dir.path(), &[]);
+    let output = runner_command(&["check-config", "api"], &api_env)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert!(output.stderr.is_empty());
+    let stdout = text(&output.stdout);
+    assert_eq!(
+        stdout,
+        format!(
+            "opsgate check-config api: ok\nservice_name: opsgate-binary-test\nbind: 192.0.2.1:1\n\
+             db_path: {}\nexecution_data_dir: {}\ndisable_file_path: {}\n",
+            dir.path().join("env-db/opsgate.sqlite3").display(),
+            dir.path().join("exec").display(),
+            dir.path().join("exec/.disabled").display(),
+        )
+    );
+    for secret in [SESSION_SECRET, RUNNER_TOKEN, "nyxmon-token", "$2b$"] {
+        assert!(!stdout.contains(secret), "{secret}");
+    }
+    assert!(!dir.path().join("env-db").exists());
+    assert!(!dir.path().join("exec").exists());
+
+    let runner_env = runner_env(dir.path(), &[]);
+    let output = runner_command(&["check-config", "runner"], &runner_env)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert!(output.stderr.is_empty());
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.starts_with("opsgate check-config runner: ok\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("runner_host: runner-binary-test\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("tmux_socket_label: og-binary-test\n"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains(RUNNER_TOKEN), "{stdout}");
+    assert!(!stdout.contains("127.0.0.1"), "{stdout}");
+    assert!(!dir.path().join("execution").exists());
+}
+
+/// Invalid settings: exit 1, one stderr line naming the setting and never
+/// its value, nothing on stdout. The API's settings are checked against the
+/// API's rules and the runner's against the runner's.
+#[test]
+fn check_config_names_the_failing_setting_and_exits_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.env");
+    let short_dir = dir.path().join("short");
+    let port_dir = dir.path().join("port");
+    std::fs::create_dir_all(&short_dir).unwrap();
+    std::fs::create_dir_all(&port_dir).unwrap();
+    let missing_env = vec![("OPSGATE_ENV_FILE".to_owned(), missing.display().to_string())];
+    let poll_dir = dir.path().join("poll");
+    std::fs::create_dir_all(&poll_dir).unwrap();
+    let runner_poll = runner_env(&poll_dir, &[("OPSGATE_RUNNER_POLL_INTERVAL_SECONDS", "0")]);
+    for (target, env, named) in [
+        ("api", vec![], "OPSGATE_"),
+        ("api", missing_env.clone(), "Env file does not exist"),
+        (
+            "api",
+            serve_env(
+                &short_dir,
+                &[("OPSGATE_SESSION_SECRET", "too-short-secret")],
+            ),
+            "OPSGATE_SESSION_SECRET",
+        ),
+        (
+            "api",
+            serve_env(&port_dir, &[("OPSGATE_BIND_PORT", "70000")]),
+            "OPSGATE_BIND_PORT",
+        ),
+        // The runner's env file is not an API configuration.
+        ("api", runner_env(dir.path(), &[]), "OPSGATE_"),
+        ("runner", vec![], "OPSGATE_RUNNER_TOKEN"),
+        ("runner", missing_env, "Env file does not exist"),
+        (
+            "runner",
+            runner_poll,
+            "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS",
+        ),
+    ] {
+        let output = runner_command(&["check-config", target], &env)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{target} {env:?}");
+        assert!(output.stdout.is_empty(), "{target} {env:?}");
+        let stderr = text(&output.stderr);
+        assert_eq!(stderr.lines().count(), 1, "{stderr}");
+        assert!(
+            stderr.starts_with(&format!(
+                "opsgate check-config {target}: configuration error: "
+            )),
+            "{stderr}"
+        );
+        assert!(stderr.contains(named), "{stderr}");
+        for secret in ["too-short-secret", RUNNER_TOKEN, SESSION_SECRET] {
+            assert!(!stderr.contains(secret), "{stderr}");
+        }
+    }
 }

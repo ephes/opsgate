@@ -31,6 +31,15 @@ const WORKER_THREADS: usize = 2;
 /// How long requests in flight may take after a stop signal (4.1).
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+/// The configuration error of a `OPSGATE_BIND_PORT` that is not a port.
+pub(crate) const BIND_PORT_ERROR: &str = "OPSGATE_BIND_PORT is not a port (0-65535)";
+
+/// The port `serve` listens on; `None` when `OPSGATE_BIND_PORT` is outside
+/// 0..=65535 (Python fails later, when waitress binds).
+pub(crate) fn bind_port(settings: &opsgate_core::settings::ApiSettings) -> Option<u16> {
+    u16::try_from(settings.bind_port).ok()
+}
+
 /// Runs the API until it is stopped.
 pub fn run(args: ServeArgs) -> ExitCode {
     let mut environment = Environment::from_process();
@@ -54,8 +63,8 @@ pub fn run(args: ServeArgs) -> ExitCode {
     if let Some(port) = args.bind_port {
         settings.bind_port = i64::from(port);
     }
-    let Ok(port) = u16::try_from(settings.bind_port) else {
-        eprintln!("opsgate serve: configuration error: OPSGATE_BIND_PORT is not a port (0-65535)");
+    let Some(port) = bind_port(&settings) else {
+        eprintln!("opsgate serve: configuration error: {BIND_PORT_ERROR}");
         return ExitCode::FAILURE;
     };
     init_logging();

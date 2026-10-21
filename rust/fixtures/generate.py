@@ -24,9 +24,11 @@ with a ``skipped fixture:`` line (``UV_PYTHON=3.14 just rs-fixtures``).
 from __future__ import annotations
 
 import argparse
+import base64
 import dataclasses
 import functools
 import hashlib
+import importlib.metadata
 import ipaddress
 import json
 import math
@@ -44,12 +46,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import bcrypt
 from waitress.adjustments import Adjustments  # type: ignore[import-untyped]
 from waitress.parser import HTTPRequestParser  # type: ignore[import-untyped]
 from waitress.proxy_headers import proxy_headers_middleware  # type: ignore[import-untyped]
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from opsgate import log_preview
+from opsgate.app import LoginThrottle
 from opsgate.config import (
     OpsGateSettings,
     SettingsError,
@@ -2497,7 +2501,278 @@ def build_store() -> str:
     })
 
 
+# ---------------------------------------------------------------- bcrypt.json (S4b)
+#
+# ``ui_login`` checks the password with ``bcrypt.checkpw(password, hash)`` and
+# treats ``ValueError`` as a mismatch (PLAN.md 4.5.3). pyca bcrypt 4.3
+# (pinned ``<5.0``) parses the hash itself and runs the ``bcrypt`` crate's
+# ``hash_with_salt``; the Rust port reproduces that wrapper. Salts are fixed,
+# so the hashes are deterministic; costs stay at 4 and 5 to keep the tests
+# fast.
+
+_BCRYPT_STD = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+_BCRYPT_ALPHABET = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def _bcrypt_salt(seed: int, prefix: str = "2b", cost: str = "04") -> bytes:
+    """``$<prefix>$<cost>$<22 characters>`` for 16 bytes derived from ``seed``."""
+    raw = hashlib.sha256(f"opsgate-bcrypt-fixture-{seed}".encode()).digest()[:16]
+    encoded = base64.b64encode(raw).decode("ascii").rstrip("=")
+    salt = encoded.translate(str.maketrans(_BCRYPT_STD, _BCRYPT_ALPHABET))
+    return f"${prefix}${cost}${salt}".encode("ascii")
+
+
+def _bcrypt_case(name: str, password: bytes, hashed: str) -> dict[str, Any]:
+    try:
+        matches = bcrypt.checkpw(password, hashed.encode("utf-8"))
+        raises = False
+    except ValueError:
+        matches = False
+        raises = True
+    return {"name": name, "password_hex": password.hex(), "hash": hashed, "matches": matches, "raises": raises}
+
+
+def build_bcrypt() -> str:
+    """``bcrypt.json``: (password bytes, stored hash) → ``checkpw`` result,
+    ``ValueError`` counting as no match (``ui_login``)."""
+    cases: list[dict[str, Any]] = []
+    secret = b"secret-password"
+    for index, prefix in enumerate(("2a", "2b", "2y", "2x")):
+        hashed = bcrypt.hashpw(secret, _bcrypt_salt(index, prefix)).decode("ascii")
+        cases.append(_bcrypt_case(f"${prefix}$ right password", secret, hashed))
+        cases.append(_bcrypt_case(f"${prefix}$ wrong password", b"secret-passwore", hashed))
+        cases.append(_bcrypt_case(f"${prefix}$ empty password", b"", hashed))
+    cost5 = bcrypt.hashpw(secret, _bcrypt_salt(10, "2b", "05")).decode("ascii")
+    cases.append(_bcrypt_case("cost 5", secret, cost5))
+    cases.append(_bcrypt_case("cost 5, prefix of the password", secret[:-1], cost5))
+    empty = bcrypt.hashpw(b"", _bcrypt_salt(11)).decode("ascii")
+    cases.append(_bcrypt_case("empty password, its hash", b"", empty))
+    cases.append(_bcrypt_case("NUL against the empty password's hash", b"\x00", empty))
+    long72 = bytes(range(33, 105))
+    assert len(long72) == 72
+    long_hash = bcrypt.hashpw(long72, _bcrypt_salt(12)).decode("ascii")
+    cases.append(_bcrypt_case("72 bytes", long72, long_hash))
+    cases.append(_bcrypt_case("73 bytes: truncated to 72", long72 + b"x", long_hash))
+    cases.append(_bcrypt_case("500 bytes: truncated to 72", long72 + b"y" * 428, long_hash))
+    cases.append(_bcrypt_case("71 bytes", long72[:71], long_hash))
+    long71 = bcrypt.hashpw(long72[:71], _bcrypt_salt(13)).decode("ascii")
+    cases.append(_bcrypt_case("71 bytes, their hash", long72[:71], long71))
+    cases.append(_bcrypt_case("72 bytes against the 71-byte hash", long72, long71))
+    nul = b"abc\x00def"
+    nul_hash = bcrypt.hashpw(nul, _bcrypt_salt(14)).decode("ascii")
+    cases.append(_bcrypt_case("embedded NUL, matching", nul, nul_hash))
+    cases.append(_bcrypt_case("embedded NUL, prefix before the NUL", b"abc", nul_hash))
+    cases.append(_bcrypt_case("embedded NUL, other bytes after the NUL", b"abc\x00xyz", nul_hash))
+    cases.append(_bcrypt_case("embedded NUL, trailing NUL added", b"abc\x00def\x00", nul_hash))
+    trailing = bcrypt.hashpw(b"abc\x00", _bcrypt_salt(15)).decode("ascii")
+    cases.append(_bcrypt_case("trailing NUL, matching", b"abc\x00", trailing))
+    cases.append(_bcrypt_case("trailing NUL, without it", b"abc", trailing))
+    unicode = "pässwörd-€".encode()
+    unicode_hash = bcrypt.hashpw(unicode, _bcrypt_salt(16)).decode("ascii")
+    cases.append(_bcrypt_case("UTF-8 password", unicode, unicode_hash))
+    cases.append(_bcrypt_case("the same text in latin-1", "pässwörd".encode("latin-1"), unicode_hash))
+
+    good = bcrypt.hashpw(secret, _bcrypt_salt(20)).decode("ascii")
+    salt22 = good[7:29]
+    digest = good[29:]
+    malformed = [
+        ("empty hash", ""),
+        ("no hash", "not-a-bcrypt-hash"),
+        ("prefix and cost only", "$2b$04$"),
+        ("short remainder", "$2b$04$" + salt22[:21]),
+        ("salt only (gensalt form)", "$2b$04$" + salt22),
+        ("unknown version 2c", "$2c$04$" + salt22 + digest),
+        ("unknown version 2", "$2$04$" + salt22 + digest),
+        ("uppercase version", "$2B$04$" + salt22 + digest),
+        ("cost 3", "$2b$03$" + salt22 + digest),
+        ("cost 32", "$2b$32$" + salt22 + digest),
+        ("cost without leading zero", "$2b$4$" + salt22 + digest),
+        ("cost with plus sign", "$2b$+4$" + salt22 + digest),
+        ("cost with leading zeros", "$2b$004$" + salt22 + digest),
+        ("cost not a number", "$2b$x4$" + salt22 + digest),
+        ("cost beyond u32", "$2b$99999999999$" + salt22 + digest),
+        ("cost empty", "$2b$$" + salt22 + digest),
+        ("salt with an invalid character", "$2b$04$!" + salt22[1:] + digest),
+        ("salt with non-zero trailing bits", "$2b$04$" + salt22[:21] + "/" + digest),
+        ("non-ASCII salt", "$2b$04$é" + salt22[2:] + digest),
+        ("digest cut short", "$2b$04$" + salt22 + digest[:-1]),
+        ("digest with an extra character", "$2b$04$" + salt22 + digest + "a"),
+        ("digest changed", "$2b$04$" + salt22 + digest[:-1] + ("a" if digest[-1] != "a" else "b")),
+        ("no leading dollar", good[1:]),
+        ("doubled dollars", "$$2b$$04$$" + salt22 + digest),
+        ("trailing dollar", good + "$"),
+        ("four parts", "$2b$04$" + salt22 + "$" + digest),
+        ("leading space", " " + good),
+        ("trailing newline", good + "\n"),
+        ("the valid hash", good),
+    ]
+    for name, hashed in malformed:
+        cases.append(_bcrypt_case(name, secret, hashed))
+    return render_json({
+        "generated_by": GENERATED_BY,
+        "library": f"pyca bcrypt {importlib.metadata.version('bcrypt')}",
+        "cases": cases,
+    })
+
+
+# --------------------------------------------------------------- throttle.json (S4b)
+#
+# ``LoginThrottle`` (PLAN.md 4.5.3) driven by a fake clock: every step's result
+# and the tracked failures afterwards, in the dictionary's order (which decides
+# ties when the overflow drops clients).
+
+
+class _FixtureClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _throttle_scenario(
+    name: str, limit: int, window_seconds: float, max_tracked_clients: int, ops: list[tuple[str, str, float]]
+) -> dict[str, Any]:
+    clock = _FixtureClock()
+    throttle = LoginThrottle(
+        limit=limit, window_seconds=window_seconds, max_tracked_clients=max_tracked_clients, clock=clock
+    )
+    steps = []
+    for op, key, now in ops:
+        clock.now = now
+        result: bool | None = None
+        if op == "fail":
+            throttle.record_failure(key)
+        elif op == "locked":
+            result = throttle.is_locked(key)
+        elif op == "reset":
+            throttle.reset(key)
+        else:
+            raise ValueError(op)
+        steps.append({
+            "op": op,
+            "key": key,
+            "now": now,
+            "result": result,
+            "failures": [[tracked, list(stamps)] for tracked, stamps in throttle._failures.items()],
+        })
+    return {
+        "name": name,
+        "limit": limit,
+        "window_seconds": window_seconds,
+        "max_tracked_clients": max_tracked_clients,
+        "steps": steps,
+    }
+
+
+def build_throttle() -> str:
+    """``throttle.json``: event sequences against ``LoginThrottle`` with a fake
+    clock → each result and the tracked failures."""
+    scenarios = [
+        _throttle_scenario("defaults: five failures lock for 15 minutes", 5, 15 * 60.0, 10_000, [
+            *[("fail", "100.64.0.1", 1000.0 + step) for step in range(4)],
+            ("locked", "100.64.0.1", 1004.0),
+            ("fail", "100.64.0.1", 1004.0),
+            ("locked", "100.64.0.1", 1004.0),
+            ("locked", "100.64.0.2", 1004.0),
+            ("locked", "100.64.0.1", 1900.0),
+            ("locked", "100.64.0.1", 1900.5),
+            ("locked", "100.64.0.1", 1904.0),
+            ("locked", "100.64.0.1", 1904.0000001),
+        ]),
+        _throttle_scenario("a window boundary is exclusive", 2, 60.0, 10, [
+            ("fail", "a", 10.0),
+            ("fail", "a", 20.0),
+            ("locked", "a", 69.9),
+            ("locked", "a", 70.0),
+            ("fail", "a", 80.0),
+            ("locked", "a", 80.0),
+            ("locked", "a", 140.0),
+        ]),
+        _throttle_scenario("a failure keeps the last stamps only", 3, 100.0, 10, [
+            *[("fail", "k", float(step)) for step in range(8)],
+            ("locked", "k", 8.0),
+            ("locked", "k", 104.0),
+            ("locked", "k", 105.0),
+        ]),
+        _throttle_scenario("reset forgets the client", 2, 60.0, 10, [
+            ("fail", "a", 1.0),
+            ("fail", "a", 2.0),
+            ("locked", "a", 3.0),
+            ("reset", "a", 3.0),
+            ("locked", "a", 3.0),
+            ("reset", "missing", 3.0),
+            ("fail", "a", 4.0),
+            ("locked", "a", 4.0),
+        ]),
+        _throttle_scenario("clients are counted apart", 1, 60.0, 10, [
+            ("fail", "127.0.0.1", 1.0),
+            ("locked", "127.0.0.1", 1.0),
+            ("locked", "100.64.0.7", 1.0),
+            ("locked", "unknown", 1.0),
+            ("fail", "unknown", 2.0),
+            ("locked", "unknown", 2.0),
+        ]),
+        _throttle_scenario("test_login_throttle_bounds_tracked_clients", 2, 60.0, 3, [
+            *[("fail", f"10.0.0.{index}", 1001.0 + index) for index in range(5)],
+            ("fail", "10.0.0.4", 1005.0),
+            ("locked", "10.0.0.4", 1005.0),
+        ]),
+        _throttle_scenario("the overflow drops expired clients first", 3, 10.0, 2, [
+            ("fail", "old", 0.0),
+            ("fail", "mid", 5.0),
+            ("fail", "new", 12.0),
+            ("fail", "newer", 13.0),
+        ]),
+        _throttle_scenario("ties go by insertion order, re-added keys move last", 5, 100.0, 2, [
+            ("fail", "a", 1.0),
+            ("fail", "b", 1.0),
+            ("fail", "c", 1.0),
+            ("fail", "x", 1.0),
+            ("fail", "y", 1.0),
+            ("locked", "x", 150.0),
+            ("fail", "x", 150.0),
+            ("fail", "z", 150.0),
+            ("fail", "w", 150.0),
+        ]),
+        _throttle_scenario("updating a tracked key keeps its place", 5, 100.0, 2, [
+            ("fail", "a", 1.0),
+            ("fail", "b", 2.0),
+            ("fail", "a", 2.0),
+            ("fail", "c", 2.0),
+        ]),
+        _throttle_scenario("a check drops the expired client", 2, 10.0, 10, [
+            ("fail", "a", 1.0),
+            ("fail", "b", 5.0),
+            ("locked", "a", 11.0),
+            ("locked", "b", 11.0),
+        ]),
+        _throttle_scenario("fractional clock values", 2, 0.3, 10, [
+            ("fail", "a", 0.1),
+            ("fail", "a", 0.2),
+            ("locked", "a", 0.4),
+            ("locked", "a", 0.5),
+            ("locked", "a", 0.1 + 0.3),
+        ]),
+    ]
+    rng = random.Random(4523)
+    for index in range(40):
+        limit = rng.randint(1, 5)
+        window = rng.choice([1.5, 10.0, 30.0, 60.0, 900.0])
+        max_tracked = rng.randint(1, 5)
+        keys = [f"100.64.0.{number}" for number in range(rng.randint(2, 8))]
+        now = rng.uniform(0, 1000)
+        ops = []
+        for _ in range(rng.randint(20, 60)):
+            now += rng.choice([0.0, 0.0, 0.25, 1.0, rng.uniform(0, window), window, rng.uniform(0, 2 * window)])
+            op = rng.choices(["fail", "locked", "reset"], weights=[6, 4, 1])[0]
+            ops.append((op, rng.choice(keys), now))
+        scenarios.append(_throttle_scenario(f"random {index}", limit, window, max_tracked, ops))
+    return render_json({"generated_by": GENERATED_BY, "scenarios": scenarios})
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
+    "bcrypt.json": build_bcrypt,
     "checksum.json": build_checksum,
     "datetime.json": build_datetime,
     "float_repr.json": build_float_repr,
@@ -2508,6 +2783,7 @@ GENERATORS: dict[str, Callable[[], str]] = {
     "settings.json": build_settings,
     "storage_json.json": build_storage_json,
     "store.json": build_store,
+    "throttle.json": build_throttle,
     "validation.json": build_validation,
 }
 

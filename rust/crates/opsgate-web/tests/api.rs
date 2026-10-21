@@ -1,10 +1,11 @@
-//! The bearer routes and health over HTTP (`web::api`, slice S4a): ports
+//! The API routes over HTTP (`web::api`): the bearer routes and health
+//! (slice S4a) and the approver's cookie-authenticated actions (S4b); ports
 //! of `tests/test_api.py` and the JSON body rules of PLAN.md 4.6.
 
 mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{Call, NYXMON_TOKEN, OPENCLAW_TOKEN, RUNNER_TOKEN, TestApp, ticket_payload};
+use common::{APPROVER, Call, NYXMON_TOKEN, OPENCLAW_TOKEN, RUNNER_TOKEN, TestApp, ticket_payload};
 use serde_json::{Value, json};
 
 #[tokio::test]
@@ -285,9 +286,9 @@ async fn claim_and_status_over_http() {
     }
 }
 
-/// `test_json_decode_errors_are_domain_responses` for the bearer endpoints
-/// (the approver's reject and cancel cases need slice S4b's routes): a body
-/// nested 2000 levels deep is 400 `invalid_json` and changes nothing.
+/// `test_json_decode_errors_are_domain_responses`: a body nested 2000
+/// levels deep is 400 `invalid_json` and changes nothing, on the bearer
+/// endpoints (S4a) and the approver's reject and cancel (S4b).
 #[tokio::test]
 async fn test_json_decode_errors_are_domain_responses() {
     let app = TestApp::new();
@@ -305,6 +306,205 @@ async fn test_json_decode_errors_are_domain_responses() {
         assert_eq!(response.error(), "invalid_json", "{endpoint}");
         assert_eq!(app.snapshot(), before, "{endpoint}");
     }
+    let ticket_id = app
+        .create_ticket(NYXMON_TOKEN, ticket_payload("Deep", None))
+        .await;
+    app.login("/login").await;
+    for action in ["reject", "cancel"] {
+        let endpoint = format!("/api/v1/tickets/{ticket_id}/{action}");
+        let before = app.snapshot();
+        let response = app
+            .send(app.csrf_header(Call::post(&endpoint).raw_json(body.clone())))
+            .await;
+        assert_eq!(response.status, StatusCode::BAD_REQUEST, "{endpoint}");
+        assert_eq!(response.error(), "invalid_json", "{endpoint}");
+        assert_eq!(app.snapshot(), before, "{endpoint}");
+    }
+}
+
+// ------------------------------------- the approver's API actions (S4b)
+
+/// Approve, reject and cancel with a signed-in session: the transitions of
+/// 4.7.2 with the approver as actor and the socket peer as address; reject
+/// and cancel take the optional `reason` (`str()` of a scalar, stripped;
+/// empty → the default reason).
+#[tokio::test]
+async fn approver_actions_run_the_transitions() {
+    let app = TestApp::new();
+    app.login("/login").await;
+    let action = |path: String, body: Option<Value>| {
+        let mut call = app
+            .csrf_header(Call::post(&path))
+            .header("user-agent", "browser/1");
+        if let Some(body) = body {
+            call = call.json(&body);
+        }
+        call
+    };
+    let approved = app
+        .create_ticket(NYXMON_TOKEN, ticket_payload("Approve", Some("a")))
+        .await;
+    let response = app
+        .send(action(format!("/api/v1/tickets/{approved}/approve"), None))
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.content_type(), "application/json");
+    let ticket = response.json();
+    assert_eq!(ticket["state"], "approved");
+    assert_eq!(ticket["approved_by"], APPROVER);
+    assert_eq!(
+        ticket["approved_payload_checksum"],
+        ticket["payload_checksum"]
+    );
+
+    for (verb, state, body, result_detail) in [
+        ("reject", "rejected", None, "rejected_by_approver"),
+        (
+            "reject",
+            "rejected",
+            Some(json!({"reason": "  no thanks  "})),
+            "no thanks",
+        ),
+        ("reject", "rejected", Some(json!({"reason": null})), "None"),
+        ("reject", "rejected", Some(json!({"reason": 1.5})), "1.5"),
+        (
+            "reject",
+            "rejected",
+            Some(json!([])),
+            "rejected_by_approver",
+        ),
+        ("cancel", "canceled", None, "canceled_by_approver"),
+        (
+            "cancel",
+            "canceled",
+            Some(json!({"reason": false})),
+            "False",
+        ),
+        (
+            "cancel",
+            "canceled",
+            Some(json!({"reason": ""})),
+            "canceled_by_approver",
+        ),
+    ] {
+        let ticket_id = app
+            .create_ticket(
+                NYXMON_TOKEN,
+                ticket_payload(&format!("{verb} {body:?}"), None),
+            )
+            .await;
+        let response = app
+            .send(action(
+                format!("/api/v1/tickets/{ticket_id}/{verb}"),
+                body.clone(),
+            ))
+            .await;
+        assert_eq!(response.status, StatusCode::OK, "{verb} {body:?}");
+        assert_eq!(response.json()["state"], state, "{verb} {body:?}");
+        assert_eq!(
+            response.json()["result_detail"],
+            result_detail,
+            "{verb} {body:?}"
+        );
+    }
+
+    let (actor, source_ip, user_agent): (String, String, String) = app
+        .connection()
+        .query_row(
+            "SELECT actor, source_ip, user_agent FROM audit_events \
+             WHERE ticket_id = ? AND event_type = 'ticket_approved'",
+            [&approved],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (actor.as_str(), source_ip.as_str(), user_agent.as_str()),
+        (
+            format!("approver:{APPROVER}").as_str(),
+            "127.0.0.1",
+            "browser/1"
+        )
+    );
+}
+
+/// Archive and unarchive with a session (4.7.2); the store's errors are API
+/// errors (JSON with their status).
+#[tokio::test]
+async fn approver_archive_and_errors() {
+    let app = TestApp::new();
+    app.login("/login").await;
+    let ticket_id = app
+        .create_ticket(NYXMON_TOKEN, ticket_payload("Archive", None))
+        .await;
+    let call =
+        |verb: &str, id: &str| app.csrf_header(Call::post(&format!("/api/v1/tickets/{id}/{verb}")));
+    let archived = app.send(call("archive", &ticket_id)).await;
+    assert_eq!(archived.status, StatusCode::OK);
+    assert_eq!(archived.json()["is_archived"], true);
+    assert_eq!(archived.json()["archived_by"], APPROVER);
+    let again = app.send(call("archive", &ticket_id)).await;
+    assert_eq!(
+        (again.status, again.error().as_str()),
+        (StatusCode::CONFLICT, "already_archived")
+    );
+    let approve = app.send(call("approve", &ticket_id)).await;
+    assert_eq!(approve.status.as_u16() / 100, 4, "{}", approve.text());
+    let restored = app.send(call("unarchive", &ticket_id)).await;
+    assert_eq!(restored.status, StatusCode::OK);
+    assert_eq!(restored.json()["is_archived"], false);
+    for verb in ["approve", "reject", "cancel", "archive", "unarchive"] {
+        let missing = app.send(call(verb, "missing")).await;
+        assert_eq!(
+            (missing.status, missing.error().as_str()),
+            (StatusCode::NOT_FOUND, "ticket_not_found"),
+            "{verb}"
+        );
+    }
+    // A truthy body that is no object (D-4: Python 500).
+    let rejected = app
+        .send(call("reject", &ticket_id).json(&json!(["x"])))
+        .await;
+    assert_eq!(
+        (rejected.status, rejected.error().as_str()),
+        (StatusCode::BAD_REQUEST, "invalid_json")
+    );
+    // A container reason (D-3).
+    let rejected = app
+        .send(call("reject", &ticket_id).json(&json!({"reason": ["x"]})))
+        .await;
+    assert_eq!(rejected.error(), "invalid_json");
+    assert_eq!(app.ticket_state(&ticket_id).await, "pending_approval");
+}
+
+/// The action routes take `POST` only (405 otherwise) and answer `OPTIONS`
+/// without authentication.
+#[tokio::test]
+async fn approver_action_routing() {
+    let app = TestApp::new();
+    for verb in ["approve", "reject", "cancel", "archive", "unarchive"] {
+        let path = format!("/api/v1/tickets/x/{verb}");
+        for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+            let response = app.send(Call::new(method.clone(), &path)).await;
+            assert_eq!(
+                response.status,
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{method} {path}"
+            );
+        }
+        let options = app.send(Call::new(Method::OPTIONS, &path)).await;
+        assert_eq!(options.status, StatusCode::OK);
+        assert_eq!(options.headers["allow"], "OPTIONS, POST");
+    }
+    for (path, allow) in [
+        ("/login", "GET, HEAD, OPTIONS, POST"),
+        ("/logout", "OPTIONS, POST"),
+    ] {
+        let options = app.send(Call::new(Method::OPTIONS, path)).await;
+        assert_eq!(options.status, StatusCode::OK, "{path}");
+        assert_eq!(options.headers["allow"], allow, "{path}");
+    }
+    let get_logout = app.get("/logout").await;
+    assert_eq!(get_logout.status, StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]

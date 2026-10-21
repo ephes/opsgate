@@ -165,9 +165,11 @@ pub fn json_response(status: StatusCode, value: &Value) -> Response {
     }
 }
 
-/// `redirect(location)`: 302 with the `Location` header.
+/// `redirect(location)` to a local target: 302 with the `Location` header,
+/// which Werkzeug passes through `iri_to_uri` ([`urls::local_iri_to_uri`];
+/// targets built by `url_for` are unchanged by it).
 pub fn redirect(location: &str) -> Response {
-    redirect_with_status(location, StatusCode::FOUND)
+    redirect_with_status(&urls::local_iri_to_uri(location), StatusCode::FOUND)
 }
 
 /// A redirect with `status` (302, or 308 for Werkzeug's routing redirects).

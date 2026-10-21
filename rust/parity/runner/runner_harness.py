@@ -47,12 +47,12 @@ IMPLS = ("python", "rust")
 
 # Rust slices (PLAN.md section 12) that have landed on main. A scenario runs a
 # Rust runner only once S6b (supervisor and ``runner`` wiring) is listed, and a
-# Rust API in the mixed stacks only once S4a and S4b (bearer routes, login and
-# cookie-authenticated approval) are listed. Each of those slices adds its id
-# here when it merges.
-RUST_SLICES_LANDED: frozenset[str] = frozenset({"S6b"})
+# Rust API in the mixed stacks only once S4a, S4b and S5 (bearer routes, login,
+# cookie-authenticated approval and the step log pages the mixed stacks read)
+# are listed. Each of those slices adds its id here when it merges.
+RUST_SLICES_LANDED: frozenset[str] = frozenset({"S4a", "S4b", "S6b"})
 RUST_RUNNER_SLICES = ("S6b",)
-RUST_API_SLICES = ("S4a", "S4b")
+RUST_API_SLICES = ("S4a", "S4b", "S5")
 
 RUNNER_TOKEN = "runner-token-000000000000"
 RUNNER_HOST = "runner-parity"

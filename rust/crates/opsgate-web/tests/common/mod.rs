@@ -18,6 +18,7 @@ use http_body_util::BodyExt;
 use opsgate_core::settings::{Environment, load_api_settings};
 use opsgate_store::Store;
 use opsgate_web::session::SessionData;
+use opsgate_web::throttle::LoginThrottle;
 use opsgate_web::{AppState, app, testing};
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -28,8 +29,12 @@ pub const OPENCLAW_TOKEN: &str = "openclaw-token-0000000000";
 pub const OPERATOR_TOKEN: &str = "operator-token-00000000000";
 pub const RUNNER_TOKEN: &str = "runner-token-000000000000";
 pub const APPROVER: &str = "opsgate-admin";
-/// A bcrypt hash; S4a never verifies it (`POST /login` is slice S4b's).
-pub const PASSWORD_HASH: &str = "$2b$04$fixture.hash.not.verified.in.these.tests.xxxxxxxxxxxx";
+/// The approver's password and its bcrypt hash (pyca bcrypt 4.3, cost 4 to
+/// keep the tests fast).
+pub const PASSWORD: &str = "secret-password";
+pub const PASSWORD_HASH: &str = "$2b$04$opsgate.web.tests.salezoqvixJbosqEq7QGh7eviroBJi2OVf2";
+/// The hash of `new-password` (a password change).
+pub const NEW_PASSWORD_HASH: &str = "$2b$04$opsgate.web.tests.newuZFOsbS5ob8qvmKyBKxsxkVdivuAWp2S";
 
 /// The security headers every response carries (`EXPECTED_SECURITY_HEADERS`).
 pub const SECURITY_HEADERS: [(&str, &str); 5] = [
@@ -60,6 +65,26 @@ impl TestApp {
 
     /// As [`TestApp::new`] with some variables replaced or added.
     pub fn with_env(extra: &[(&str, &str)]) -> Self {
+        Self::build(extra, LoginThrottle::default())
+    }
+
+    /// As [`TestApp::new`] with another login throttle
+    /// (`_client_for(settings, throttle=…)`).
+    pub fn with_throttle(throttle: LoginThrottle) -> Self {
+        Self::build(&[], throttle)
+    }
+
+    /// Another application process on this one's database (a second
+    /// browser, a restart, a changed setting), with its own cookie jar and
+    /// throttle.
+    pub fn sharing(&self, extra: &[(&str, &str)]) -> Self {
+        let db = self.db_path();
+        let mut vars = vec![("OPSGATE_DB_PATH", db.to_str().unwrap())];
+        vars.extend_from_slice(extra);
+        Self::build(&vars, LoginThrottle::default())
+    }
+
+    fn build(extra: &[(&str, &str)], throttle: LoginThrottle) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("opsgate.sqlite3");
         let exec = dir.path().join("exec");
@@ -93,7 +118,8 @@ impl TestApp {
         }
         let mut environment = Environment::from_vars(vars);
         let settings = load_api_settings(&mut environment).expect("test settings are valid");
-        let state = AppState::new(Store::open(settings).unwrap()).unwrap();
+        let state =
+            AppState::with_login_throttle(Store::open(settings).unwrap(), throttle).unwrap();
         Self {
             router: app(state.clone()),
             state,
@@ -199,6 +225,96 @@ impl TestApp {
 
     pub async fn get(&self, path: &str) -> TestResponse {
         self.send(Call::new(Method::GET, path)).await
+    }
+
+    /// The session's CSRF token (`session_csrf_token`).
+    pub fn csrf_token(&self) -> String {
+        self.session()
+            .csrf_token
+            .expect("the session has a CSRF token")
+    }
+
+    /// `X-CSRF-Token` with the session's token (`csrf_headers`).
+    pub fn csrf_header(&self, call: Call) -> Call {
+        match self.session().csrf_token {
+            Some(token) => call.header("x-csrf-token", token),
+            None => call,
+        }
+    }
+
+    /// Opens the login page `path` and posts the form with `username` and
+    /// `password` from `peer` (`login` and `_failed_login` of the Python
+    /// tests).
+    pub async fn post_login(
+        &self,
+        path: &str,
+        username: &str,
+        password: &str,
+        peer: &str,
+    ) -> TestResponse {
+        let page = self
+            .send(Call::new(Method::GET, path).peer(Some(peer)))
+            .await;
+        assert_eq!(page.status, StatusCode::OK, "{path}");
+        let token = self.csrf_token();
+        self.send(Call::post(path).peer(Some(peer)).form(&[
+            ("csrf_token", &token),
+            ("username", username),
+            ("password", password),
+        ]))
+        .await
+    }
+
+    /// `login(client, path)`: signs the approver in through the form; the
+    /// answer is a 302 and the CSRF token changed.
+    pub async fn login(&self, path: &str) -> TestResponse {
+        let page = self.get(path).await;
+        assert_eq!(page.status, StatusCode::OK, "{path}");
+        let pre_login_token = self.csrf_token();
+        let response = self
+            .send(Call::post(path).form(&[
+                ("csrf_token", &pre_login_token),
+                ("username", APPROVER),
+                ("password", PASSWORD),
+            ]))
+            .await;
+        assert_eq!(response.status, StatusCode::FOUND, "{}", response.text());
+        assert_ne!(self.csrf_token(), pre_login_token);
+        response
+    }
+
+    /// `_failed_login(client, password)`: the answer's status.
+    pub async fn failed_login(&self, password: &str) -> StatusCode {
+        self.post_login("/login", APPROVER, password, "127.0.0.1:50000")
+            .await
+            .status
+    }
+
+    /// Whether the browser's session authenticates, observed through
+    /// `GET /api/v1/tickets/{id}` (200 or 401).
+    pub async fn authenticated(&self, ticket_id: &str) -> bool {
+        let status = self
+            .get(&format!("/api/v1/tickets/{ticket_id}"))
+            .await
+            .status;
+        assert!(
+            status == StatusCode::OK || status == StatusCode::UNAUTHORIZED,
+            "{status}"
+        );
+        status == StatusCode::OK
+    }
+
+    /// The ticket's state, read with a submit token (`_ticket_state`).
+    pub async fn ticket_state(&self, ticket_id: &str) -> String {
+        let response = self
+            .send(
+                Call::new(Method::GET, &format!("/api/v1/tickets/{ticket_id}"))
+                    .bearer(NYXMON_TOKEN)
+                    .without_jar(),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::OK);
+        response.json()["state"].as_str().unwrap().to_owned()
     }
 
     /// Submits a ticket with `token`; panics unless 201.

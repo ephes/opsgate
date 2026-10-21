@@ -339,9 +339,11 @@ impl FromRequestParts<AppState> for OptionalApprover {
     }
 }
 
-/// The approver of an authenticated session; without one the request fails
-/// with 401 `auth_required` (`require_approver_session`; the API-CSRF check
-/// that follows it is slice S4b's).
+/// The approver of a cookie-authenticated API call
+/// (`require_approver_session`): without an authenticated session the
+/// request fails with 401 `auth_required`, then the API-CSRF check
+/// ([`crate::csrf::enforce_api_session_csrf`], 403 `csrf_required` or
+/// `invalid_csrf`) runs, both before the body is read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Approver(pub String);
 
@@ -349,14 +351,19 @@ impl FromRequestParts<AppState> for Approver {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, AppError> {
-        match OptionalApprover::from_request_parts(parts, state).await?.0 {
-            Some(user) => Ok(Self(user)),
-            None => Err(AppError::service(
+        let Some(user) = OptionalApprover::from_request_parts(parts, state).await?.0 else {
+            return Err(AppError::service(
                 "Authentication required",
                 401,
                 "auth_required",
-            )),
-        }
+            ));
+        };
+        crate::csrf::enforce_api_session_csrf(
+            parts,
+            &SessionHandle::from_parts(parts),
+            state.settings(),
+        )?;
+        Ok(Self(user))
     }
 }
 

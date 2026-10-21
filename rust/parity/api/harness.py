@@ -44,7 +44,7 @@ IMPLS = ("python", "rust")
 # Rust slices (PLAN.md section 12) whose routes have landed on main. A scenario
 # runs against Rust only when every slice it names in its ``rust`` marker is
 # listed here; each web slice adds its id when it merges (S4a, S4b, S5).
-RUST_SLICES_LANDED: frozenset[str] = frozenset({"S4a"})
+RUST_SLICES_LANDED: frozenset[str] = frozenset({"S4a", "S4b"})
 
 USERNAME = "opsgate-admin"
 PASSWORD = "secret-password"

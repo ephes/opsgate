@@ -8,7 +8,11 @@ name: CI
 # The Rust port in rust/ runs in the `rust` job (`just rs-check` plus
 # cargo-deny, a release build and a `--version` smoke test) on Linux and
 # macOS (rust/PLAN.md 7.6); the black-box API parity harness in
-# rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3).
+# rust/parity/api runs in the `parity-api` job (rust/PLAN.md 7.3). The
+# `parity-runner` job runs the black-box runner parity harness
+# (rust/parity/runner, rust/PLAN.md 7.4) with real tmux on Linux and macOS:
+# against the Python runner now, against the Rust runner once slice S6b has
+# landed (S8 switches that leg on).
 
 on:
   push:
@@ -172,3 +176,50 @@ jobs:
           size=$(wc -c < target/release/opsgate | tr -d ' ')
           echo "opsgate release binary (${{ matrix.os }}): ${size} bytes"
           echo "opsgate release binary (${{ matrix.os }}): ${size} bytes" >> "$GITHUB_STEP_SUMMARY"
+
+  parity-runner:
+    name: Runner parity harness (${{ matrix.os }}; Python runner)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    env:
+      UV_PYTHON: "3.14"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.23"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install tmux (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+      - name: Install tmux (macOS)
+        if: runner.os == 'macOS'
+        run: brew list tmux >/dev/null 2>&1 || brew install tmux
+      - name: Show tmux version
+        run: tmux -V
+      - name: Sync locked dependencies (just _sync)
+        run: uv sync --extra dev
+      - name: Lint and typecheck the harness
+        run: |
+          uv run ruff check rust/parity/runner
+          uv run ruff format --check rust/parity/runner
+          uv run mypy rust/parity/runner
+      - name: Runner parity harness against Python
+        run: uv run pytest rust/parity/runner --impl python --records "$RUNNER_TEMP/parity-runner/python"
+      - name: Records are comparable
+        run: uv run python rust/parity/runner/compare.py "$RUNNER_TEMP/parity-runner/python"

@@ -4,6 +4,13 @@
 
 ### Development
 
+- Add the black-box runner parity harness `rust/parity/runner` (Rust port plan slice S7b): real
+  runner processes with real tmux on a private socket, fake `codex`/`claude` agents and a scripted
+  stand-in API (HTTP errors, dropped connections), covering execution, retries and outages,
+  recovery, shutdown, SIGKILL and restart across Python and Rust runners, and real API × real runner
+  stacks; `compare.py` diffs the normalised records of different stacks. Green against the Python
+  runner; Rust stacks are skipped until their slices land. New recipe `just rs-parity-runner` and CI
+  job `parity-runner` (Linux and macOS). The Python implementation is unchanged.
 - Start the Rust port in `rust/` (plan slice S1): Cargo workspace with toolchain 1.99.0, `deny.toml`,
   an `opsgate` command-line skeleton (`--version` prints version and git commit; `serve`, `runner`,
   `check-config` and `check-db` are stubs that exit 2), the fixture generator

@@ -320,5 +320,6 @@ the Python package stays the production implementation and the rollback target. 
 `just rs-check` (rustup needed) and in the `rust` CI job on Linux and macOS; the drift test of its
 Python-generated fixtures (`tests/test_rust_fixtures.py`) is part of `just test`. The black-box parity
 harnesses (`just rs-parity-api`, `just rs-parity-runner`; CI jobs `parity-api` and `parity-runner`) run
-every scenario against both implementations, including mixed Python/Rust API and runner stacks. See
-`rust/README.md`.
+every scenario against both implementations, including mixed Python/Rust API and runner stacks. Release
+builds for macOS arm64 are published as GitHub releases `rs-v<version>` by `.github/workflows/rust-release.yml`.
+See `rust/README.md`.

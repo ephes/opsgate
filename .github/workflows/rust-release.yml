@@ -1,0 +1,176 @@
+name: Rust release
+
+# Release pipeline of the Rust port (rust/PLAN.md section 9), adapted from
+# mailgun-relay's rust-release.yml for the macOS target.
+#
+# - Tag `rs-v<semver>`: the tag must equal the opsgate crate version; fmt,
+#   clippy and tests, a release build for aarch64-apple-darwin (minimum macOS
+#   14.0), the Mach-O checks (system libraries only, minos, arm64 only, the
+#   ad-hoc linker signature), a `--version` and `check-config api|runner`
+#   smoke test and the deterministic archive + sha256 file, then a GitHub
+#   release with both files.
+# - workflow_dispatch: the same build and checks, uploaded as a workflow
+#   artifact only (no release, no tag check).
+#
+# No cargo cache: release builds start from a clean state. Only the release
+# job gets `contents: write`.
+
+on:
+  push:
+    tags:
+      - "rs-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check (aarch64-apple-darwin, macOS >= 14.0)
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        # An explicit bash adds `-o pipefail`: a failing check piped into
+        # `tee` still fails the step.
+        shell: bash
+        working-directory: rust
+    env:
+      CARGO_TERM_COLOR: always
+      TARGET: aarch64-apple-darwin
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+      # Embedded into `opsgate --version` by crates/opsgate/build.rs.
+      OPSGATE_GIT_COMMIT: ${{ github.sha }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      archive: ${{ steps.pack.outputs.archive }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python (release checks, the store's round trip with the Python service)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+          rustc --version
+          python3 --version
+          xcrun --show-sdk-version
+      - name: Check the version (tag must equal the crate version)
+        id: version
+        run: |
+          cargo metadata --format-version 1 --no-deps --locked > "$RUNNER_TEMP/metadata.json"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            version=$(python3 -I scripts/release_checks.py version --metadata "$RUNNER_TEMP/metadata.json" --tag "$GITHUB_REF_NAME")
+          else
+            version=$(python3 -I scripts/release_checks.py version --metadata "$RUNNER_TEMP/metadata.json")
+          fi
+          echo "opsgate version: ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Format (cargo fmt)
+        run: cargo fmt --all --check
+      - name: Lint (cargo clippy)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install tmux (runner integration tests, rust/PLAN.md 7.1)
+        run: |
+          command -v tmux >/dev/null || brew install tmux
+          tmux -V
+      - name: Tests (cargo test)
+        # The runner's tmux integration tests and the store's Python round trip fail instead of
+        # skipping when tmux or Python is missing.
+        env:
+          OPSGATE_REQUIRE_TMUX: "1"
+          OPSGATE_REQUIRE_PYTHON: "1"
+        run: cargo test --workspace --locked
+      - name: Release build
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Mach-O checks (libraries, minos, architecture, signature)
+        run: |
+          python3 -I scripts/release_checks.py macho --max-minos "$MACOSX_DEPLOYMENT_TARGET" --arch arm64 \
+            "target/$TARGET/release/opsgate" | tee -a "$RUNNER_TEMP/checks.log"
+      - name: Smoke test (--version names version and commit, check-config api and runner pass)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 -I scripts/release_checks.py smoke --binary "target/$TARGET/release/opsgate" \
+            --version "$VERSION" --commit "$GITHUB_SHA" | tee -a "$RUNNER_TEMP/checks.log"
+      - name: Pack archive and checksum
+        id: pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          archive=$(python3 -I scripts/release_checks.py pack \
+            --binary "target/$TARGET/release/opsgate" --license ../LICENSE \
+            --version "$VERSION" --target "$TARGET" \
+            --mtime "$(git log -1 --format=%ct)" --out-dir "$dist")
+          (cd "$dist" && shasum -a 256 --check "${archive}.sha256")
+          sha256=$(cut -d ' ' -f 1 "$dist/${archive}.sha256")
+          size=$(stat -f %z "target/$TARGET/release/opsgate")
+          echo "archive=${archive}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${sha256}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### opsgate ${VERSION}"
+            echo
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- archive: \`${archive}\`"
+            echo "- sha256: \`${sha256}\`"
+            echo "- binary size: ${size} bytes"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/checks.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload archive and checksum
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opsgate-${{ steps.version.outputs.version }}-aarch64-apple-darwin
+          path: |
+            ${{ runner.temp }}/dist/${{ steps.pack.outputs.archive }}
+            ${{ runner.temp }}/dist/${{ steps.pack.outputs.archive }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download archive and checksum
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: opsgate-${{ needs.build.outputs.version }}-aarch64-apple-darwin
+          path: dist
+      - name: Verify the checksum
+        env:
+          ARCHIVE: ${{ needs.build.outputs.archive }}
+        run: cd dist && sha256sum --check "${ARCHIVE}.sha256"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ARCHIVE: ${{ needs.build.outputs.archive }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          notes="opsgate ${VERSION} (Rust port), built from ${GITHUB_SHA} for aarch64-apple-darwin (macOS >= 14.0).
+
+          sha256 of ${ARCHIVE}: ${SHA256}"
+          # A semver pre-release version (0.3.0-rc.1) becomes a GitHub pre-release.
+          prerelease=()
+          case "$VERSION" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/${ARCHIVE}" "dist/${ARCHIVE}.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag "${prerelease[@]}" \
+            --title "opsgate ${VERSION}" --notes "$notes"

@@ -13,7 +13,9 @@
 - Rust port slice S2b (`rust/crates/opsgate-core`): the env-file loader and the API and runner
   settings with every rule of `config.py` (same check order and messages), step log previews and
   the step log page, step-log path containment with CPython's non-strict `Path.resolve()`, and the
-  `ProxyFix` client/scheme/host selection behind waitress. New Python-generated fixtures
+  client address/scheme/host selection. The latter documents that in production waitress removes
+  `X-Forwarded-*` before Werkzeug's `ProxyFix` runs, so `OPSGATE_TRUST_PROXY_HEADERS` has no effect;
+  the Rust port keeps that behaviour. New Python-generated fixtures
   `settings.json`, `log_preview.json` and `proxy_fix.json` pin them. Nothing calls this code yet.
 
 ### Documentation

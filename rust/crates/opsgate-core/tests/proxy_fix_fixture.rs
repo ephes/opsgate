@@ -1,8 +1,9 @@
 //! `rust/fixtures/proxy_fix.json` (PLAN.md 4.4 step 1): the client address,
-//! scheme and host Werkzeug's `ProxyFix(x_for=1, x_proto=1, x_host=1)`
-//! produces behind waitress for the same header lines.
+//! scheme and host the Python application sees in production (waitress with
+//! default adjustments around the Flask app with or without Werkzeug's
+//! `ProxyFix`) for the same header lines.
 
-use opsgate_core::proxy_fix::{ClientView, ForwardedHeaders, apply, wsgi_header_value};
+use opsgate_core::proxy_fix::{ClientView, client_view, wsgi_header_value};
 use serde_json::{Value, json};
 
 const FIXTURE: &str = include_str!("../../../fixtures/proxy_fix.json");
@@ -14,25 +15,21 @@ fn latin1_bytes(text: &str) -> Vec<u8> {
         .collect()
 }
 
-/// The WSGI value of header `name` (case-insensitive, as HTTP header names
-/// are; hyper keeps `X_Forwarded_For` a different name, as waitress drops it).
+/// The WSGI value of header `name` (names compare case-insensitively).
 fn header(headers: &[(String, Vec<u8>)], name: &str) -> Option<String> {
-    let values: Vec<&[u8]> = headers
-        .iter()
-        .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_slice())
-        .collect();
-    if values.is_empty() {
-        None
-    } else {
-        wsgi_header_value(values)
-    }
+    wsgi_header_value(
+        headers
+            .iter()
+            .filter(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_slice()),
+    )
 }
 
 #[test]
-fn cases_match_werkzeug() {
+fn cases_match_python_behind_waitress() {
     let fixture: Value = serde_json::from_str(FIXTURE).expect("proxy_fix.json parses");
     let cases = fixture["cases"].as_array().unwrap();
+    assert!(cases.len() >= 20);
     let mut failures = Vec::new();
     for case in cases {
         let name = case["name"].as_str().unwrap();
@@ -47,29 +44,42 @@ fn cases_match_werkzeug() {
                 )
             })
             .collect();
-        let forwarded_for = header(&headers, "X-Forwarded-For");
-        let forwarded_proto = header(&headers, "X-Forwarded-Proto");
-        let forwarded_host = header(&headers, "X-Forwarded-Host");
-        let original = ClientView {
-            remote_addr: case["remote_addr"].as_str().unwrap().to_owned(),
-            scheme: case["scheme"].as_str().unwrap().to_owned(),
-            host: header(&headers, "Host"),
-        };
-        let view = apply(
-            original,
-            ForwardedHeaders {
-                x_forwarded_for: forwarded_for.as_deref(),
-                x_forwarded_proto: forwarded_proto.as_deref(),
-                x_forwarded_host: forwarded_host.as_deref(),
-            },
-        );
-        let actual =
-            json!({"remote_addr": view.remote_addr, "scheme": view.scheme, "host": view.host});
-        if actual != case["result"] {
-            failures.push(format!("{name}: {actual} != {}", case["result"]));
+        for (key, trust) in [("untrusted", false), ("trusted", true)] {
+            let socket = ClientView {
+                remote_addr: case["remote_addr"].as_str().unwrap().to_owned(),
+                scheme: case["scheme"].as_str().unwrap().to_owned(),
+                host: header(&headers, "Host"),
+            };
+            let view = client_view(socket, trust);
+            let actual =
+                json!({"remote_addr": view.remote_addr, "scheme": view.scheme, "host": view.host});
+            if actual != case["result"][key] {
+                failures.push(format!(
+                    "{name} ({key}): {actual} != {}",
+                    case["result"][key]
+                ));
+            }
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn forwarded_headers_reach_the_fixture_cases() {
+    // The corpus does send forwarded headers that Werkzeug's ProxyFix alone
+    // would apply, so the identical results above are waitress's doing.
+    let fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+    let single = fixture["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["name"] == "single proxy")
+        .unwrap();
+    assert_eq!(
+        single["headers"][1],
+        json!(["X-Forwarded-For", "100.64.0.9"])
+    );
+    assert_eq!(single["result"]["trusted"]["remote_addr"], "100.64.0.1");
 }
 
 #[test]

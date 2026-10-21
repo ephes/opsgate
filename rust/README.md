@@ -93,7 +93,7 @@ builders to `GENERATORS` in `generate.py`.
 | Fixture | Content | Used by |
 | --- | --- | --- |
 | `log_preview.json` | file contents (as recipes) and limits → `read_tail_lines` preview lines and `read_step_log` text (long step logs by SHA-256, length, head and tail) | `opsgate-core/tests/log_preview_fixture.rs` |
-| `proxy_fix.json` | request header lines → client address, scheme and `Host` behind waitress and Werkzeug `ProxyFix(x_for=1, x_proto=1, x_host=1)` | `opsgate-core/tests/proxy_fix_fixture.rs` |
+| `proxy_fix.json` | request header lines → client address, scheme and `Host` the app sees in production (waitress's proxy-header middleware around the Flask app with and without `ProxyFix`): forwarded headers never apply | `opsgate-core/tests/proxy_fix_fixture.rs` |
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 

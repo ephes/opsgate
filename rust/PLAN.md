@@ -434,17 +434,25 @@ every `GET` route.
 
 ### 4.4 Request processing order, gates, headers, errors
 
-1. **Proxy fix** (`trust_proxy_headers`): Werkzeug `ProxyFix(x_for=1,
-   x_proto=1, x_host=1)` — the client address is the **last** value of
-   `X-Forwarded-For`, the scheme the last `X-Forwarded-Proto` (not
-   lower-cased), the host the last `X-Forwarded-Host`; a header without
-   values is ignored. Values are split by Werkzeug 3.1's `parse_list_header`
-   (commas inside a quoted string do not split, items are stripped of spaces
-   and tabs only, empty items are dropped, a fully quoted item is unquoted, an
-   unclosed quoted string makes the header empty) after waitress joined
-   repeated header lines with `", "` and decoded the bytes as latin-1. P1,
-   fixture-tested against waitress + Werkzeug (`proxy_fix.json`). Without the
-   setting, the socket peer address is used and headers are ignored.
+1. **Proxy fix** (`trust_proxy_headers`): `create_app` wraps the app in
+   Werkzeug `ProxyFix(x_for=1, x_proto=1, x_host=1)`, **but in production it
+   never sees a forwarded header**: `waitress.serve(app, …)` with default
+   adjustments (`__main__.py`) wraps the application in waitress's
+   proxy-header middleware (`trusted_proxy=None`,
+   `clear_untrusted_proxy_headers=True`), which deletes `X-Forwarded-For`,
+   `-Host`, `-Proto`, `-Port`, `-By` and `Forwarded` before `ProxyFix` runs
+   (checked against a running waitress server, S2b). So the client address is
+   always the socket peer, the scheme the connection's (`http`) and the host
+   the `Host` header (waitress joins repeated lines with `", "`, latin-1), with
+   or without `OPSGATE_TRUST_PROXY_HEADERS`. That is the P1 contract
+   (`proxy_fix.json`, generated through waitress's middleware; Rust
+   `opsgate_core::proxy_fix::client_view` ignores the forwarded headers). The
+   in-process Python test
+   `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` uses
+   the Flask test client, which bypasses waitress; Rust ports it with the
+   production expectation. Honouring the headers would let any client that
+   reaches the port spoof an allowed address past the network gate: a change
+   of the security model, not part of this port.
 2. **Network gate** (`enforce_tailscale_context`, before every request except
    `/api/v1/health`): if `require_tailscale_context` and the client address
    (scope id `%…` removed) is in none of the CIDRs → 403. Empty address →
@@ -1106,9 +1114,9 @@ and filesystem work in `spawn_blocking`).
 
 No hand-rolled protocols. The only Python-compatibility code is small and
 fixture-pinned: the checksum formatter (4.8), Python `str.strip` whitespace,
-Python `int()` for ASCII, the ISO subset parser, Werkzeug ProxyFix selection
-(with `parse_list_header`), and the non-strict path resolution of 4.12 (a port
-of CPython 3.14 `posixpath.realpath(strict=False)`).
+Python `int()` for ASCII, the ISO subset parser, waitress's header joining
+(4.4), and the non-strict path resolution of 4.12 (a port of CPython 3.14
+`posixpath.realpath(strict=False)`).
 
 ### 6.3 Templates
 
@@ -1155,7 +1163,7 @@ the D-7 subset marked), `pystr.json` (`str()` of scalars, `strip`, `lower`),
 `settings.json` (env sets → settings or `SettingsError` setting name; env-file
 parsing cases), `validation.json` (payload → normalised ticket or error code;
 covers 4.7.1 order), `log_preview.json`, `proxy_fix.json` (headers → client
-address/scheme/host via Werkzeug), `bcrypt.json` (hash/password → result,
+address/scheme/host via waitress and Werkzeug, 4.4), `bcrypt.json` (hash/password → result,
 generated with pyca bcrypt 4.3 incl. long and NUL passwords),
 `throttle.json` (event sequences with clock → locked/unlocked), `schema.sql`
 (Python-initialised `sqlite_master`).
@@ -1174,7 +1182,7 @@ database (`OPSGATE_IMPL=python|rust`), then runs scenarios ported from
 `tests/test_api.py` and the races where they are observable over HTTP:
 create/dedupe/expiry/approve/reject/cancel/archive/unarchive/claim/status
 flows, every error code, gate and proxy cases (`trust_proxy_headers` with
-`X-Forwarded-*`), login/throttle/logout/generation, both CSRF mechanisms,
+`X-Forwarded-*`: ignored by both, 4.4), login/throttle/logout/generation, both CSRF mechanisms,
 security headers, manual form, log previews against a prepared artifact tree.
 Each scenario records (status, `error`, normalised JSON, redirect target,
 flash texts via the next page, normalised DB snapshot: ids mapped, timestamps
@@ -1527,7 +1535,7 @@ run with `just test` as today).
 | S1 | Foundations: workspace, toolchain 1.99.0, deny.toml, CI `rust` job (Linux+macOS), justfile recipes, `.gitignore`, build.rs, CLI skeleton (`--version`, stub subcommands exit 2), fixture generator + drift test, README, TESTMAP | opsgate | — | — | 3 | no |
 | S1o | Exclude `rust/` from the Python app rsync (`opsgate_rsync_excludes`), test, CHANGELOG | ops-library | — | yes (with all) | 1 | no |
 | S2a | Core JSON/time/str: checksum formatter, stored-JSON formatter, `py_str`, depth check, number classification, Python `strip`/`lower`, ISO subset parse + `isoformat_z`; fixtures `checksum`, `float_repr`, `storage_json`, `datetime`, `pystr` | opsgate | S1 | yes (S2b, S6-, S7a/b, S9, S10) | 4 | no |
-| S2b | Core settings and files: env-file loader, API and runner settings with all rules of 4.2, log preview + step log, non-strict path containment, ProxyFix selection; fixtures `settings`, `log_preview`, `proxy_fix` | opsgate | S1 | yes (S2a, …) | 3 | no |
+| S2b | Core settings and files: env-file loader, API and runner settings with all rules of 4.2, log preview + step log, non-strict path containment, proxy-header selection (4.4); fixtures `settings`, `log_preview`, `proxy_fix` | opsgate | S1 | yes (S2a, …) | 3 | no |
 | S2c | Core validation: ticket normalisation of 4.7.1 steps 1–10, plan/policy/merge/enforce, duration, D-2/D-3 rules; fixture `validation` | opsgate | S2a | yes (S2b, S6a) | 3 | no |
 | S3a | Store I: DDL verbatim, connection setup, `init_db`, session-state sync/generation/revoke, create (lazy expiry + dedupe + unique mapping), get/list/serialise, health, `check-db`; schema contract test | opsgate | S2a, S2b, S2c | yes (S6a/S6b) | 3 | no |
 | S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests | opsgate | S3a | yes (S6b) | 4 | no |
@@ -1625,7 +1633,7 @@ Acceptance criteria (beyond green checks and a clean review):
   claim tests, S12 data parity over all production tickets.
 - **R2 Security regressions** in auth/CSRF/session/gate code. Mitigation: all
   security rows of TESTMAP as in-process tests *and* black-box scenarios,
-  review at high reasoning per slice, ProxyFix fixtures, owner login during
+  review at high reasoning per slice, proxy-header fixtures (4.4), owner login during
   S13, immediate rollback criterion.
 - **R3 Privileged execution twice** after a crash/cutover. Mitigation: resume
   rules as P1 contract with cross-implementation recovery tests, S12 SIGKILL

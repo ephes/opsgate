@@ -36,6 +36,7 @@ from typing import Any
 
 from waitress.adjustments import Adjustments  # type: ignore[import-untyped]
 from waitress.parser import HTTPRequestParser  # type: ignore[import-untyped]
+from waitress.proxy_headers import proxy_headers_middleware  # type: ignore[import-untyped]
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from opsgate import log_preview
@@ -675,40 +676,65 @@ def _waitress_environ(headers: list[tuple[str, str]], remote_addr: str, scheme: 
     return environ
 
 
-def _behind_proxy_fix(environ: dict[str, Any]) -> dict[str, Any]:
-    """The environ the application receives from ``ProxyFix``."""
+def _served(environ: dict[str, Any], trust_proxy_headers: bool) -> dict[str, Any]:
+    """The environ the Flask application code receives in production: the
+    application object ``create_app`` builds (``ProxyFix(x_for=1, x_proto=1,
+    x_host=1)`` around ``wsgi_app`` only with ``OPSGATE_TRUST_PROXY_HEADERS``),
+    wrapped by waitress exactly as ``waitress.server`` does for
+    ``serve(app, ...)`` with default adjustments (``__main__.py``): the
+    proxy-header middleware with ``trusted_proxy=None`` and
+    ``clear_untrusted_proxy_headers=True``, which removes the forwarded
+    headers before the application sees them."""
     seen: dict[str, Any] = {}
 
-    def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
+    def capture(environ: dict[str, Any], start_response: Any) -> list[bytes]:
         seen.update(environ)
         return []
 
-    ProxyFix(app, x_for=1, x_proto=1, x_host=1)(environ, None)  # type: ignore[arg-type]
+    inner: Any = ProxyFix(capture, x_for=1, x_proto=1, x_host=1) if trust_proxy_headers else capture  # type: ignore[arg-type]
+    adj = Adjustments()
+    assert adj.trusted_proxy or adj.clear_untrusted_proxy_headers  # waitress.server wraps the app
+    served = proxy_headers_middleware(
+        inner,
+        trusted_proxy=adj.trusted_proxy,
+        trusted_proxy_count=adj.trusted_proxy_count,
+        trusted_proxy_headers=adj.trusted_proxy_headers,
+        clear_untrusted=adj.clear_untrusted_proxy_headers,
+        log_untrusted=adj.log_untrusted_proxy_headers,
+    )
+    served(environ, None)
     return seen
 
 
 def build_proxy_fix() -> str:
-    """``proxy_fix.json``: request headers → client address, scheme and Host
-    the application sees behind Werkzeug ``ProxyFix(x_for=1, x_proto=1,
-    x_host=1)`` (``app.py:create_app`` with ``OPSGATE_TRUST_PROXY_HEADERS``;
-    PLAN.md 4.4 step 1)."""
+    """``proxy_fix.json``: request header lines → client address, scheme and
+    Host the application sees in production (``python -m opsgate serve``:
+    waitress with default adjustments around the Flask app of
+    ``create_app``), with and without ``OPSGATE_TRUST_PROXY_HEADERS``
+    (PLAN.md 4.4 step 1). Waitress removes ``X-Forwarded-*`` and
+    ``Forwarded`` before Werkzeug's ``ProxyFix`` runs, so the socket's view
+    is kept in both cases."""
     cases = []
     for name, headers, remote_addr, scheme in PROXY_CASES:
-        seen = _behind_proxy_fix(_waitress_environ(headers, remote_addr, scheme))
+        results = {}
+        for trust in (False, True):
+            seen = _served(_waitress_environ(headers, remote_addr, scheme), trust)
+            results["trusted" if trust else "untrusted"] = {
+                "remote_addr": seen["REMOTE_ADDR"],
+                "scheme": seen["wsgi.url_scheme"],
+                "host": seen.get("HTTP_HOST"),
+            }
         cases.append({
             "name": name,
             "headers": [list(header) for header in headers],
             "remote_addr": remote_addr,
             "scheme": scheme,
-            "result": {
-                "remote_addr": seen["REMOTE_ADDR"],
-                "scheme": seen["wsgi.url_scheme"],
-                "host": seen.get("HTTP_HOST"),
-            },
+            "result": results,
         })
     return render_json({
         "generated_by": GENERATED_BY,
-        "source": "werkzeug.middleware.proxy_fix.ProxyFix(x_for=1, x_proto=1, x_host=1) behind waitress",
+        "source": "waitress.server proxy_headers_middleware (default adjustments) around"
+        " werkzeug ProxyFix(x_for=1, x_proto=1, x_host=1)",
         "cases": cases,
     })
 

@@ -71,7 +71,7 @@ section ("Rust-only tests") with their paths.
 | `test_runner_claim_isolates_corrupt_stored_json` | `store::claim` | S3b | A |
 | `test_runner_claim_accepts_stored_json_at_depth_limit` | `store::claim` | S3b | A |
 | `test_ui_post_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
-| `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `web::gate` | S4a | A |
+| `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `web::gate` (production expectation: forwarded headers ignored behind waitress, PLAN.md 4.4 step 1; the Python test bypasses waitress) | S4a | A |
 | `test_login_ignores_external_next_path` | `web::login` | S4b | A |
 | `test_login_form_uses_autofill_friendly_fields` | `web::login` | S4b | A |
 | `test_login_head_is_side_effect_free` | `web::login` | S4b | A |
@@ -252,6 +252,6 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |
 | `crates/opsgate-core/tests/settings_fixture.rs` | `settings.json`: 490 environment sets (every variable and rule of 4.2, check order, env-file override, D-8/D-10 cases) and 21 env-file parsing cases; coverage of every 4.2 variable; the merged environment children get (4.13.8) | S2b |
 | `crates/opsgate-core/tests/log_preview_fixture.rs` | `log_preview.json`: preview and step log for 31 contents (window and line cuts, CR/LF forms, invalid UTF-8 replacement, 2 MiB boundary) (4.12) | S2b |
-| `crates/opsgate-core/tests/proxy_fix_fixture.rs` | `proxy_fix.json`: 26 header sets through waitress and Werkzeug `ProxyFix` (last value, joined lines, quoted items, unclosed quotes, latin-1 bytes) (4.4) | S2b |
+| `crates/opsgate-core/tests/proxy_fix_fixture.rs` | `proxy_fix.json`: 26 header sets through waitress's proxy-header middleware and Werkzeug `ProxyFix`, with and without `OPSGATE_TRUST_PROXY_HEADERS`: the socket view is kept; `Host` joining and latin-1 (4.4) | S2b |
 | `crates/opsgate-core/tests/containment.rs` | step-log containment (4.12): symlink escapes (file, directory, dangling, relative), missing inside → `log_not_found`, missing outside → `invalid_log_path`, containment before existence, `..` escapes, symlink loops, CPython 3.14 `realpath` corner cases | S2b |
 | `crates/opsgate-core/src/{pytext,settings,log_preview}.rs` unit tests | Python whitespace and line-boundary sets, `int()` grammar and the 4300-digit limit, non-UTF-8 values, redacted `Debug`, CIDR prefixes, directories and missing files | S2b |

@@ -1199,7 +1199,12 @@ A fixture whose content depends on the CPython minor version is listed in
 interpreter 3.14: `datetime.json` (`fromisoformat` changed after 3.11). Other
 interpreters (the 3.11 CI leg, a local 3.15) skip it with a
 `skipped fixture:` line; regenerate it with `UV_PYTHON=3.14 just
-rs-fixtures`. Every other fixture is identical on 3.11 to 3.15.
+rs-fixtures`. Every other fixture is identical on 3.11 to 3.15 and on
+macOS and Linux; random corpora therefore use only correctly rounded float
+operations, never libm functions (`pow`, `log`), whose last bit differs
+between the platforms. `datetime.json` also differs between 3.14 patch
+releases (3.14.2 and 3.14.8 disagree on three inputs); it follows the
+current 3.14 release that CI and production run (3.14.8).
 
 ### 7.3 API parity harness (`rust/parity/api/`, black box)
 

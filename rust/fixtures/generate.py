@@ -779,6 +779,9 @@ def _float_to_bits(value: float) -> int:
 
 
 def _random_float(rng: random.Random) -> float:
+    """A random double. Only correctly rounded operations (parsing, the four
+    arithmetic operations, ``round``), never libm functions such as ``pow``
+    or ``log``, whose last bit differs between macOS and Linux."""
     kind = rng.randrange(9)
     if kind == 0:
         return round(rng.uniform(0, 100), rng.randint(0, 6))
@@ -787,7 +790,7 @@ def _random_float(rng: random.Random) -> float:
     if kind == 2:
         return float(rng.randint(-(10**6), 10**6))
     if kind == 3:
-        return 10.0 ** rng.randint(-30, 30) * rng.choice([1.0, -1.0, 1.5, 9.999, 0.3])
+        return float(f"1e{rng.randint(-30, 30)}") * rng.choice([1.0, -1.0, 1.5, 9.999, 0.3])
     if kind == 4:
         value = _bits_to_float(rng.getrandbits(64))
         return value if math.isfinite(value) else 0.5
@@ -797,7 +800,7 @@ def _random_float(rng: random.Random) -> float:
     if kind == 6:
         return rng.random()
     if kind == 7:
-        return rng.expovariate(1e-3)
+        return rng.random() * float(f"1e{rng.randint(0, 6)}")
     return _bits_to_float(rng.getrandbits(52))  # subnormal or zero
 
 

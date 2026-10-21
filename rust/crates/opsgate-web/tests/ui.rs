@@ -58,8 +58,14 @@ async fn detail_page_login_round_trip() {
     assert_eq!(to_login.status, StatusCode::FOUND);
     let login_path = to_login.location().unwrap().to_owned();
     let signed_in = app.login(&login_path).await;
-    assert_eq!(signed_in.location(), Some(format!("/tickets/{id}").as_str()));
-    assert_eq!(app.get(&format!("/tickets/{id}")).await.status, StatusCode::OK);
+    assert_eq!(
+        signed_in.location(),
+        Some(format!("/tickets/{id}").as_str())
+    );
+    assert_eq!(
+        app.get(&format!("/tickets/{id}")).await.status,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]

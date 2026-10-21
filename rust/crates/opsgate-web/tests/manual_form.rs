@@ -391,9 +391,11 @@ async fn test_manual_ticket_creation_rejects_tampered_csrf_token() {
 }
 
 /// `test_manual_context_rejects_excessive_nesting`: Python fakes a
-/// `RecursionError` of `json.loads`; Rust's decoder stops at its own
-/// recursion limit, which this nesting exceeds (400 `invalid_context_json`,
-/// nothing written).
+/// `RecursionError` of `json.loads` (message "context_json must be valid
+/// JSON: nesting is too deep"); Rust's decoder stops at its own recursion
+/// limit, which this nesting exceeds, and reports the depth check's text, as
+/// Python does for this depth without the fake (400 `invalid_context_json`,
+/// nothing written; the message is P2).
 #[tokio::test]
 async fn test_manual_context_rejects_excessive_nesting() {
     let app = TestApp::new();
@@ -415,7 +417,13 @@ async fn test_manual_context_rejects_excessive_nesting() {
         )
         .await;
     assert_eq!(response.status, StatusCode::BAD_REQUEST);
-    assert!(response.text().contains("context_json must be valid JSON"));
+    assert_eq!(
+        response.page().flashes,
+        vec![(
+            "error".to_owned(),
+            "JSON nesting exceeds 64 levels".to_owned()
+        )]
+    );
     assert_eq!(app.snapshot(), before);
 }
 

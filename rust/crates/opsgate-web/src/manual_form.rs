@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use opsgate_core::json::{ParseError, check_depth, parse};
+use opsgate_core::json::{ParseError, TooDeep, check_depth, parse};
 use opsgate_core::pytext::{py_lower, strip};
 use opsgate_core::settings::py_int_decimal;
 use regex::Regex;
@@ -311,10 +311,13 @@ pub fn payload(
                     "context_json: integer token beyond 4300 digits (ValueError)".to_owned(),
                 ));
             }
+            // Deeper than `serde_json`'s 128 levels, so deeper than 64: the
+            // text of Python's depth check, which is what Python reports at
+            // such depths below its own recursion limit (beyond it Python
+            // says "context_json must be valid JSON: nesting is too deep";
+            // the message is P2).
             Err(error) if error.exceeds_recursion_limit() => {
-                return Err(invalid_context_json(
-                    "context_json must be valid JSON: nesting is too deep".to_owned(),
-                ));
+                return Err(invalid_context_json(TooDeep.to_string()));
             }
             Err(error) => {
                 return Err(invalid_context_json(format!(

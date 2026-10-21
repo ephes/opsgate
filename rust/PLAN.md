@@ -7,7 +7,8 @@ login page; the API parity harness runs its S4a scenarios against Rust in CI),
 S4b web II (`POST /login`, logout, the throttle, API-CSRF and the approver's
 API actions; the S4b scenarios of both parity harnesses run against Rust), S5
 web III (the ticket pages, the manual ticket form and the approver's form
-actions), S6a
+actions; with S4b the UI scenarios of the API parity harness and the runner
+harness's mixed stacks with a Rust API run against Rust), S6a
 runner I, S6b runner II (`opsgate runner` works; the runner
 parity harness is green against it locally) and the S7b runner parity harness
 landed); owner
@@ -1432,7 +1433,8 @@ Each scenario records (status, `error`, normalised JSON, redirect target,
 flash texts via the next page, the forms and internal links of every page,
 session cookie attributes, normalised DB snapshot: ids mapped, timestamps
 masked, temp paths masked, JSON columns parsed, error `message` texts masked as
-P2). `just rs-parity-api` runs the suite against both and diffs the records
+P2; flash texts that are a decoder's or `fromisoformat`'s free-text message are
+masked too where the scenario says so, `Recorder.mask_flash_texts`, S5). `just rs-parity-api` runs the suite against both and diffs the records
 (`compare.py`; scenarios that name a P3 divergence are reported as explained);
 CI runs it on every push (job `parity-api`: the Rust release binary is built
 first, since the Python run's cross-implementation scenarios use it as their

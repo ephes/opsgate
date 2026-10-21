@@ -331,8 +331,8 @@ stacks are parametrised over the stacks: `--impl python` runs the all-Python
 stacks, `--impl rust` every stack that contains Rust. A Rust runner runs once
 `RUST_SLICES_LANDED` in `runner_harness.py` contains S6b (it does since S6b
 merged), a Rust API once it contains S4a, S4b and S5 (the mixed stacks read
-the API's step log pages, S5's routes; S4a and S4b are listed); until then
-those stacks are skipped. Each record holds
+the API's step log pages, S5's routes; all three are listed since S5 merged,
+and every stack with a Rust API equals its all-Python baseline). Each record holds
 the runner's API calls (consecutive identical heartbeats collapsed), the
 artifact tree (names, modes, JSON values, text; timestamps masked, paths
 relative to the execution data directory, shell words instead of quoting),
@@ -427,6 +427,9 @@ messages, the forms and internal links of HTML pages and the session cookie
 attributes, plus a snapshot of every table (JSON columns parsed). HTML bytes
 are never compared. A scenario that covers a P3 divergence calls
 `rec.divergence("D-n")`; `compare.py` then reports a difference as explained.
+A scenario whose flashes carry a free-text error message (a JSON decoder's or
+`fromisoformat`'s text, P2) calls `rec.mask_flash_texts()`; the flash
+categories and count stay compared.
 
 Rust switch-on: every scenario carries `@pytest.mark.rust(<slices>)` naming the
 web slices it needs; against Rust it runs only when all of them are listed in

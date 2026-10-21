@@ -317,8 +317,13 @@ else that differs is a bug.
 - `serve` stops on SIGTERM/SIGINT (waitress default). Rust: graceful
   shutdown, in-flight requests finish (≤ 5 s), exit 0.
 - `runner`: SIGTERM/SIGINT set the stop flag (`runner.py:install_signal_handlers`);
-  the loop and every worker observe it within ≤ 1 s (4.13.6); the process
-  exits 0 after all workers stopped (`_wait_for_workers`). launchd sends
+  workers observe it at their next 1 s poll, the supervisor after its current
+  `time.sleep(poll_interval)` (default 5 s), and an HTTP request in flight
+  finishes first (≤ 15 s timeout); the process exits 0 after all workers
+  stopped (`_wait_for_workers`). What happens at shutdown (4.13.4: kill the
+  active session, metadata `interrupted`, or leave an existing exit code for
+  adoption) is P1; Rust may observe the flag sooner (stop-aware sleeps and
+  cancellable requests, D-16). launchd sends
   SIGTERM on `bootout`/`kickstart -k`, SIGKILL after its exit timeout.
 - `runner --once`: one recovery pass, one claim round; exits after the
   started workers finished, or immediately if nothing was claimed or the
@@ -508,8 +513,10 @@ see D-1).
   `username`, `auth_at=now`, generation, new `csrf_token`
   (`secrets.token_urlsafe(32)`), 302 to `next` or `/tickets`.
 - bcrypt parity (fixture): `$2a$`, `$2b$`, `$2y$` hashes; passwords longer
-  than 72 bytes are truncated (pyca bcrypt 4.3, pinned `<5.0`); NUL bytes and
-  malformed hashes behave as Python (false).
+  than 72 bytes are truncated (pyca bcrypt 4.3, pinned `<5.0`); passwords
+  with embedded NUL bytes are passed unchanged and **verify against a matching
+  hash** (pyca 4.3 accepts them; the fixture includes matching and
+  non-matching NUL passwords); malformed hashes → false.
 - Throttle: per key, failures within 15 min; locked when ≥ 5 recent failures;
   a failure keeps the last 5 stamps; success resets; at most 10 000 tracked
   keys — on overflow first expired entries are dropped, then the keys whose
@@ -656,7 +663,9 @@ failed, rejected, canceled, expired`; archivable terminal ∪ pending.
 
 #### 4.7.4 Runner status (`update_runner_status`)
 
-`event = str(event or "heartbeat").strip().lower() or "heartbeat"` ∈
+`event = str(payload.get("event", "heartbeat")).strip().lower() or "heartbeat"`
+(only a *missing* key defaults; explicit `null`/`false`/`0` become `none`/
+`false`/`0` and are rejected; an empty or blank string becomes `heartbeat`) ∈
 {`heartbeat, step_started, step_finished, step_failed, timeout, failed,
 ticket_succeeded, invalid_plan`} else 400 `invalid_runner_event` (before the
 transaction). In the transaction: 404; terminal → 409 `invalid_state`; not
@@ -668,8 +677,13 @@ terminal from running sets `finished_at`. Result derived from state
 (success/failure/canceled) or given `result` ∈ {success, failure, timeout,
 canceled} and compatible (succeeded→success; failed→failure|timeout;
 canceled→canceled) else 400 `invalid_runner_result` — without any write.
-`result_detail` written only if non-empty; `tmux_sessions` must be a list (400
-`invalid_tmux_sessions`) and replaces the column. `runner_host` and
+`state: null` and `result: null` count as absent (`is not None` checks);
+`result_detail = str(payload.get("result_detail", "")).strip()` (so `null`
+stores `None`) is written only if non-empty; `tmux_sessions: null` or absent
+leaves the column unchanged, any other non-list → 400 `invalid_tmux_sessions`,
+a list replaces the column. The parity harness has cases for each explicit
+`null`/`false`/`0` value of `event`, `state`, `result`, `result_detail`,
+`tmux_sessions` and `runner_host`. `runner_host` and
 `last_heartbeat_at` always written; CAS on `(id, previous state)`; heartbeat
 upsert; audit `runner_<event>` `{event, result_detail}`.
 
@@ -1016,6 +1030,10 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   writers in both.
 - **D-15 Rust-only CLI**: `--version`, `check-config`, `check-db`,
   `serve --db/--bind-host/--bind-port` (tests and shadow only).
+- **D-16 Faster shutdown observation**: the Rust runner's sleeps and HTTP
+  requests are cancellable, so SIGTERM is observed sooner than Python's
+  poll-interval sleep and 15 s request timeout; the shutdown actions
+  themselves are unchanged (4.1, 4.13.4).
 
 ---
 
@@ -1103,7 +1121,7 @@ implementations by the parity harness.
 `rust/fixtures/generate.py` (run with the project's uv environment, imports
 `opsgate`) writes JSON fixtures; a pytest drift test regenerates them in a temp
 dir and fails on any difference (fixtures are never edited by hand). Files:
-`checksum.json`, `float_repr.json`, `storage_json.json` (stored-column text),
+`checksum.json`, `float_repr.json`, `storage_json.json` (stored-column values, compared semantically),
 `datetime.json` (parse/normalise/format, accepted and rejected inputs, with
 the D-7 subset marked), `pystr.json` (`str()` of scalars, `strip`, `lower`),
 `settings.json` (env sets → settings or `SettingsError` setting name; env-file
@@ -1317,18 +1335,29 @@ Root SSH session in tmux, no production unit touched:
    comparison; the comparison must show zero differences and every
    `approved_payload_checksum` that matched in Python matches in Rust.
 2. **Shadow API**: `opsgate serve --db <copy> --bind-host 127.0.0.1
-   --bind-port 8712` as `control_service_user` with a **shadow env file**
-   containing fresh random tokens, a fresh bcrypt hash and session secret
-   (never the production secrets), production values for everything else
-   (CIDRs, proxy trust off). Run the API parity suite (7.3) against it (the
-   suite accepts an external base URL and credentials), plus reads of every
-   production ticket through the shadow runner token.
+   --bind-port 8712` as `control_service_user` with **shadow env files** (API
+   and runner, root-owned 0640 with the service group, in the shadow
+   directory) containing fresh random tokens, a fresh bcrypt hash and session
+   secret (never the production secrets), production values for the CIDRs and
+   policy floors, and deliberately for this isolated plain-HTTP loopback test:
+   `OPSGATE_TRUST_PROXY_HEADERS=false`, `OPSGATE_SESSION_COOKIE_SECURE=false`
+   (a `Secure` cookie would not be sent over `http://127.0.0.1`), and
+   `OPSGATE_EXECUTION_DATA_DIR=/Users/ops/remediation-shadow` with
+   `OPSGATE_DISABLE_FILE_PATH` inside it — the **same artifact root as the
+   shadow runner**, so log views of shadow tickets resolve. Production
+   tickets in the copy reference `/Users/ops/remediation/sessions/…` and are
+   therefore expected to show `invalid_log_path` in the shadow (checked as such,
+   and identically for the Python serialisation of step 1). Run the API parity
+   suite (7.3) against it (the suite accepts an external base URL and
+   credentials), plus reads of every production ticket through the shadow
+   runner token.
 3. **Shadow runner**: `opsgate runner` as `ops` against the shadow API, with
-   `OPSGATE_EXECUTION_DATA_DIR=/Users/ops/remediation-shadow`, socket label
-   `remediation-shadow`, `TMUX_TMPDIR` under that dir, and the fake agents of
-   7.4 first on `PATH`: one multi-step ticket, one SIGTERM, one SIGKILL +
-   restart adoption, one timeout — on the real macOS tmux/bash/launchd-like
-   environment (started through `bash -lc` as in 10.1).
+   the same `OPSGATE_EXECUTION_DATA_DIR=/Users/ops/remediation-shadow`
+   (`ops`:`ops` 0750, so `control_service_user` can read logs through the
+   group), socket label `remediation-shadow`, `TMUX_TMPDIR` under that dir,
+   and the fake agents of 7.4 first on `PATH`: one multi-step ticket, one
+   SIGTERM, one SIGKILL + restart adoption, one timeout — on the real macOS
+   tmux/bash/launchd-like environment (started through `bash -lc` as in 10.1).
 4. Memory (section 8) for both shadow processes.
 5. Clean up: stop processes, kill the shadow tmux server, delete the copy, the
    shadow env file and the shadow directories. Report to `docs/OPSGATE_RUST.md`.
@@ -1355,21 +1384,33 @@ re-login.
 
 ### 11.4 Runner cutover (S14)
 
-Preconditions: S13 soaked ≥ 24 h (Q2); no ticket in `running` (read-only
-check; if one runs, wait — the Rust runner could adopt it, but a cutover
-during a privileged step is avoided).
+Preconditions: S13 soaked ≥ 24 h (Q2).
 
-1. Under the lock: `opsgate_runner_impl: rust`, deploy. Verify pid, heartbeat
-   advancing in health, `runner-state/` empty, no errors in the err log.
+Claims are paused with the existing kill switch for the whole switch, so the
+old runner cannot claim between the drain check and its restart: the API's
+claim returns `null` and the runner loop skips claiming while
+`OPSGATE_DISABLE_FILE_PATH` (`/Users/ops/remediation/.disabled`) exists
+(4.7.3, 4.13.6).
+
+1. Under the lock: create the disable file (`ops`:`ops`, empty); wait until no
+   ticket is `running` (read-only query; the Rust runner could adopt one, but
+   a switch during a privileged step is avoided) and `runner-state/` is empty;
+   set `opsgate_runner_impl: rust`, deploy. Verify pid → versioned binary, no
+   errors in the err log, health reachable. Remove the disable file; verify the
+   heartbeat advances again (idle claims record heartbeats only without the
+   disable file).
 2. Real execution (Q4): the owner approves one operator ticket with a single
    `investigator` step, agent `claude`, prompt "Report hostname, uptime and
    the tmux version. Do not change anything." → state `succeeded`, artifacts
    with the expected names and modes, UI preview and step log, attach command
    shown.
-3. **Rollback drill**: flip to `python`, deploy, verify Python runner claims
-   (heartbeat) and that a second test ticket (optional, owner) runs; flip back
-   to `rust`, deploy, re-verify.
+3. **Rollback drill** with the same pause procedure each way: disable file,
+   drain, flip to `python`, deploy, verify the Python pid, remove the disable
+   file, verify the heartbeat and (optional, owner) a second test ticket; then
+   disable, drain, flip back to `rust`, deploy, re-enable, re-verify.
 4. Memory +1 h / +24 h.
+5. If any step fails, the disable file stays until the runner is verified (a
+   paused runner only delays tickets; it never runs one twice).
 
 ### 11.5 Soak and acceptance (S15)
 
@@ -1384,6 +1425,22 @@ Acceptance report in `docs/OPSGATE_RUST.md` and the coordinator item.
 
 Removes the Python implementation from role, inventory and repository and
 deletes the venvs/app dirs on studio (production change, owner approval).
+Order is strict, because the deployed role keeps syncing the opsgate checkout
+and running `uv sync` for both users until it is retired:
+
+1. S16a (ops-library): when both impls are `rust`, the role no longer syncs
+   the Python source or runs `uv sync`; the plists' `WorkingDirectory` and the
+   `cd` of the launch wrapper move off the app dirs (API:
+   `/usr/local/var/opsgate/run/control`, runner: `execution_data_dir`
+   unchanged); a guarded task removes `/Users/control_service_user/opsgate`
+   and `/Users/ops/opsgate` only after the units were verified running from
+   the new working directories; the `python` impl value is removed.
+2. S16b (ops-control): inventory/playbook cleanup and the production deploy of
+   that role release under the lock; verify both units, health, heartbeat and
+   that the app dirs are gone.
+3. S16c (opsgate repository) only **after S16b is verified in production**:
+   until then `origin/main` must keep the Python package, because any deploy
+   with the older role would sync `main` and run `uv sync`.
 
 ---
 
@@ -1409,9 +1466,9 @@ coordinator/owner.
 | S2c | Core validation: ticket normalisation of 4.7.1 steps 1–10, plan/policy/merge/enforce, duration, D-2/D-3 rules; fixture `validation` | opsgate | S2a | yes (S2b, S6a) | 3 | no |
 | S3a | Store I: DDL verbatim, connection setup, `init_db`, session-state sync/generation/revoke, create (lazy expiry + dedupe + unique mapping), get/list/serialise, health, `check-db`; schema contract test | opsgate | S2a, S2b, S2c | yes (S6a/S6b) | 3 | no |
 | S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests | opsgate | S3a | yes (S6b) | 4 | no |
-| S4a | Web I: `serve`, router, proxy fix, gate, security headers, error mapping, JSON body rules, body limit, session cookie storage + extractor + flashes, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
-| S4b | Web II: login (GET/HEAD/POST, next, bcrypt, throttle), logout/revocation, UI-CSRF layer, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
-| S5 | Web III: minijinja with the shared templates, globals/filters, all UI pages and UI action routes, manual form, log views | opsgate | S4a | yes (S4b) | 4 | no |
+| S4a | Web I (shared foundations): `serve`, router, proxy fix, gate, security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
+| S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, UI-CSRF layer, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
+| S5 | Web III: remaining UI pages and UI action routes, manual form, log views (rendered through the S4a environment; authenticated in tests through the S4a session helper with the session's CSRF token in forms) | opsgate | S4a | yes (S4b) | 4 | no |
 | S6a | Runner I: API client, tmux adapter, artifacts/atomic writes, commands/script, executor (fresh path, heartbeats, cancel, timeout, post-status retry) | opsgate | S2a, S2b | yes (S2c, S3-, S4-, S5) | 4 | no |
 | S6b | Runner II: resume rules, shutdown, supervisor loop, recovery, worker failure + verified cleanup, state files, `--once`, log lines, `runner` wiring | opsgate | S6a | yes (S3-, S4-, S5) | 4 | no |
 | S7a | API parity harness (7.3), green against Python; Rust target switched on as routes land | opsgate | S1 | yes (all) | 4 | no |
@@ -1424,9 +1481,9 @@ coordinator/owner.
 | S13 | API cutover + rollback drill (11.3) | ops-control | S12 | no | 2 | yes |
 | S14 | Runner cutover + rollback drill (11.4) | ops-control | S13 + 24 h | no | 2 | yes |
 | S15 | Soak 7 days and acceptance (11.5) | ops-control docs | S14 | no | 1 | read-only |
-| S16a | Retire Python in the role (impl options, source sync, uv sync, venv removal task) | ops-library | S15 + 30 days | yes (S16b, S16c) | 2 | no |
-| S16b | Retire in ops-control (vars, playbook source resolution, docs) + deploy removing venvs/app dirs (owner approval) | ops-control | S16a released | no | 2 | yes |
-| S16c | Retire in the repository: templates into `rust/`, Python package/tests removed, fixtures frozen (generator removed, drift test removed), CI/README/AGENTS updated | opsgate | S15 + 30 days | yes (S16a) | 2 | no |
+| S16a | Retire Python in the role (no source sync/uv sync with both impls rust, working directories moved, guarded app-dir removal, `python` impl removed) | ops-library | S15 + 30 days | no | 2 | no |
+| S16b | Retire in ops-control (vars, playbook source resolution, docs) + deploy of the S16a release removing venvs/app dirs (owner approval) | ops-control | S16a in an ops-library release | no | 2 | yes |
+| S16c | Retire in the repository: templates into `rust/`, Python package/tests removed, fixtures frozen (generator and drift test removed), CI/README/AGENTS updated | opsgate | S16b verified in production | no | 2 | no |
 
 Parallel waves (maximum concurrency):
 
@@ -1438,7 +1495,7 @@ Parallel waves (maximum concurrency):
 - **W4:** S3b.
 - **W5:** S4a.
 - **W6:** S4b ∥ S5.
-- **W7:** S8 → tag (S9) → S11 → S12 → S13 → S14 → S15 → (30 days) S16a ∥ S16c → S16b.
+- **W7:** S8 → tag (S9) → S11 → S12 → S13 → S14 → S15 → (30 days) S16a → S16b → S16c.
 
 The runner track (S6a/S6b) runs alongside the whole API track (S2c–S5); the
 harnesses (S7a/S7b), the release workflow (S9) and the role (S10) run from W1.
@@ -1448,8 +1505,10 @@ Acceptance criteria (beyond green checks and a clean review):
 - **S1:** CI job green on both OSes; `opsgate --version` prints version and
   commit; drift test fails on a hand-edited fixture.
 - **S1o:** a deploy dry run (`--check`) of the role shows `rust/` excluded.
-- **S2a:** all fixture cases match byte-exactly (checksum, float repr,
-  storage text, `py_str`); datetime fixtures match for every input Rust
+- **S2a:** checksum and float-repr fixtures match **byte-exactly** (the
+  only byte-level contract, 4.8); `py_str` fixtures match exactly (they are
+  stored values); stored-JSON fixtures match semantically (parsed values
+  equal; text formatting is P2); datetime fixtures match for every input Rust
   accepts, and every rejected input is listed as D-7 or rejected by Python
   too.
 - **S2b:** settings fixture (≥ 80 cases incl. every row of 4.2 and the
@@ -1460,8 +1519,12 @@ Acceptance criteria (beyond green checks and a clean review):
 - **S3a/S3b:** every store row of TESTMAP passes; race tests pass 100 runs;
   schema contract test; Python→Rust and Rust→Python database round trip
   (create in one, approve in the other, claim in the first).
-- **S4a/S4b/S5:** every web row of TESTMAP passes in-process; the parity
-  harness runs green against Rust for the routes of the slice.
+- **S4a/S4b/S5:** every web row of TESTMAP owned by the slice passes
+  in-process (S5 authenticates through the S4a session helper, so it does not
+  need S4b's login to merge). Black-box parity per slice only where the
+  scenario needs no other open slice: S4a the bearer/gate/header/health
+  scenarios, S4b the login/logout/throttle/CSRF scenarios; the authenticated
+  UI scenarios run against Rust from S8, which needs both S4b and S5.
 - **S6a/S6b:** every runner row of TESTMAP passes; `tmux` integration tests
   pass on macOS and Linux.
 - **S7a/S7b:** suites green against Python, documented in `rust/README.md`.

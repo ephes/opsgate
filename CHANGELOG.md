@@ -4,6 +4,15 @@
 
 ### Development
 
+- Rust port slice S6b (`rust/crates/opsgate-runner`, `rust/crates/opsgate`): the runner's
+  supervisor (claim loop up to `OPSGATE_MAX_PARALLEL_JOBS`, one worker per ticket, restart recovery
+  from state files, tmux sessions and, once per start, artifact directories, verified tmux cleanup
+  before a failure report, runner state files, disable file, stop-aware sleeps) and the working
+  `opsgate runner [--once]` command (settings from the env file, SIGTERM/SIGINT, plain log lines on
+  stderr with the same `Runner claim failed`/`Runner API unavailable` lines as Python). The runner
+  parity harness now runs the Rust runner (`just rs-parity-runner`; cross-implementation restart
+  scenarios included) and shows no difference to the Python runner; its CI leg follows with slice
+  S8. Nothing deploys or runs the Rust runner yet; the Python implementation is unchanged.
 - Add the black-box runner parity harness `rust/parity/runner` (Rust port plan slice S7b): real
   runner processes with real tmux on a private socket, fake `codex`/`claude` agents and a scripted
   stand-in API (HTTP errors, dropped connections), covering execution, retries and outages,

@@ -107,6 +107,7 @@ pub enum ConfigTarget {
 pub fn run(cli: Cli) -> ExitCode {
     match cli.into_command() {
         Command::CheckDb { db } => check_db(&db),
+        Command::Runner(args) => crate::runner::run(args.once),
         command => {
             eprintln!(
                 "opsgate {}: not implemented yet (rust/PLAN.md section 12)",

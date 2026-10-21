@@ -45,11 +45,14 @@ tokio = { version = "1", default-features = false }
 tokio-util = { version = "0.7", default-features = false }
 reqwest = { version = "0.13", default-features = false }
 shlex = "2"
+# Logging (PLAN.md 4.15): plain lines on stderr, no ANSI colours.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 # Test-only fake API of the runner tests (PLAN.md 7.1).
 axum = { version = "0.8", default-features = false }
 # Store (PLAN.md 6.2): SQLite with a pinned, bundled library (the same
 # SQLite on macOS and in CI), constant-time compare, ticket ids; regex for
-# the store tests.
+# the store tests and the runner's ticket-id and tmux-session patterns.
 regex = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 subtle = "2"

@@ -10,14 +10,15 @@ canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
 header selection; S2c: ticket validation), the first half of the SQLite store
 (S3a: schema, ticket creation, get/list, health, session generation and
-`check-db`), the runner's first half (S6a: API client, tmux adapter,
-artifacts, agent commands and the ticket executor), the black-box API parity
-harness (S7a, green against Python) and the black-box runner parity harness
-(S7b, green against the Python runner). The workspace, CI, the fixture
-generator and the command-line skeleton exist; `check-db` works, every other
-command is still a stub that exits 2. The Python package in `src/opsgate` is
-the production implementation and the oracle for the contract. Nothing
-deploys or runs this code yet.
+`check-db`), the runner (S6a: API client, tmux adapter, artifacts, agent
+commands and the ticket executor; S6b: the supervisor and the `opsgate runner
+[--once]` command), the black-box API parity harness (S7a, green against
+Python) and the black-box runner parity harness (S7b, green against the
+Python runner and, run locally, against the Rust runner). The workspace, CI,
+the fixture generator and the command-line skeleton exist; `check-db` and
+`runner` work, every other command is still a stub that exits 2. The Python
+package in `src/opsgate` is the production implementation and the oracle for
+the contract. Nothing deploys or runs this code yet.
 
 ## Layout
 
@@ -66,8 +67,11 @@ children started with exactly the merged settings environment, 4.13.8),
 `artifacts` (step paths, atomic 0600 JSON writes, 4.13.2/4.13.7),
 `commands` (slugs, session names, agent command lines, the attach command
 and `run_step.sh`, 4.13.3) and `executor` (one ticket's steps, heartbeats,
-cancel, timeout, status retries and the resume rules, 4.13.4/4.13.5); the
-supervisor and the `runner` command follow with S6b.
+cancel, timeout, status retries and the resume rules, 4.13.4/4.13.5); and
+of S6b: `supervisor` (the claim loop, one worker task per ticket, restart
+recovery from state files, tmux sessions and artifact directories, verified
+tmux cleanup, runner state files, SIGTERM/SIGINT, 4.13.6). The binary's
+`runner` module wires them into `opsgate runner [--once]`.
 
 `opsgate-store` (S3a) is the SQLite store of `service.py`, one connection per
 operation (WAL, foreign keys, 5 s busy timeout) and `BEGIN IMMEDIATE` for
@@ -132,8 +136,18 @@ environment built from an allowlist (no exported shell functions; own `HOME`, `S
 tmux configuration is reached. The executor test's tmux keeps finished
 sessions (`remain-on-exit`, from a `.tmux.conf` in that `HOME`): the poll
 checks `exit_code` before it probes the session, as Python does, and a fake
-agent that ends within milliseconds could otherwise end between the two. Without `tmux` these tests skip; with
+agent that ends within milliseconds could otherwise end between the two. The
+same file runs the supervisor's session discovery and verified cleanup
+against a real server. Without `tmux` these tests skip; with
 `OPSGATE_REQUIRE_TMUX=1` (set in CI) they fail instead.
+
+`tests/supervisor.rs` runs the supervisor with the real executor against a
+fake API with several tickets and a scripted tmux (`tmux ls`, kills, absent
+server, missing binary) on paused tokio time: the ports of the Python worker,
+recovery and cleanup tests plus the claim loop, `--once` and shutdown. The
+binary's own tests (`crates/opsgate/tests/binary.rs`) start `opsgate runner`
+as a process: configuration errors, `--once`, the P1 claim-failure log line,
+SIGTERM and SIGINT.
 
 ## CI
 
@@ -147,7 +161,9 @@ verified cargo-deny release), `cargo test --locked` (with tmux installed and
 `--version` smoke test (version and the checked-out commit) and the release
 binary size in the job summary. The fixture drift test runs in the Python job
 as part of pytest. The `parity-runner` job runs the runner parity harness
-against the Python runner on both systems (tmux from apt or Homebrew).
+against the Python runner on both systems (tmux from apt or Homebrew); its
+Rust leg is switched on by slice S8 (until then run `just rs-parity-runner`
+locally).
 
 ## Runner parity harness
 
@@ -182,8 +198,9 @@ The cross-implementation scenarios (SIGKILL one implementation, continue with
 the other on the same artifacts, state files and tmux server) and the mixed
 stacks are parametrised over the stacks: `--impl python` runs the all-Python
 stacks, `--impl rust` every stack that contains Rust. A Rust runner runs once
-`RUST_SLICES_LANDED` in `runner_harness.py` contains S6b, a Rust API once it
-contains S4a and S4b; until then those stacks are skipped. Each record holds
+`RUST_SLICES_LANDED` in `runner_harness.py` contains S6b (it does since S6b
+merged), a Rust API once it contains S4a and S4b; until then those stacks are
+skipped. Each record holds
 the runner's API calls (consecutive identical heartbeats collapsed), the
 artifact tree (names, modes, JSON values, text; timestamps masked, paths
 relative to the execution data directory, shell words instead of quoting),
@@ -310,8 +327,18 @@ opsgate --version
 
 No command (plain `opsgate`) means `serve` without overrides, as with
 `python -m opsgate`; the overrides need the `serve` command. Until their slices
-land, the commands print `opsgate <command>: not implemented yet` on stderr and
-exit 2; usage errors also exit 2. `opsgate --version` prints
+land, the commands other than `runner` print `opsgate <command>: not
+implemented yet` on stderr and exit 2; usage errors also exit 2.
+
+`opsgate runner [--once]` reads the runner settings like `python -m opsgate
+runner` (`OPSGATE_ENV_FILE`, then the variables of PLAN.md 4.2) and runs until
+SIGTERM or SIGINT (exit 0), or with `--once` for one recovery pass and one
+claim round. A configuration error is one stderr line naming the setting
+(never its value), exit 1. It logs plain lines on stderr: an INFO startup line
+(version, `implementation=rust`, runner host, socket label, worker limit),
+the P1 lines `Runner claim failed: status=<s> category=<c>` and `Runner API
+unavailable: status=<s> category=<c>`, and one line per unexpected worker
+error instead of Python's traceback (D-12). `opsgate --version` prints
 `opsgate <version> (<full commit>)`. `build.rs` takes the commit from
 `OPSGATE_GIT_COMMIT` (40 or 64 lowercase hex digits; the release workflow sets
 it), else from `git rev-parse HEAD`, else `unknown`, and records the choice in

@@ -3,13 +3,16 @@
 
 #![allow(dead_code)]
 
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, TimeZone, Utc};
 use opsgate_core::settings::{Environment, RunnerSettings, load_runner_settings_with_host};
-use opsgate_runner::{Clock, JsonObject, RunnerApi, RunnerApiError, Tmux, TmuxError};
+use opsgate_runner::{
+    Clock, JsonObject, RunnerApi, RunnerApiError, SessionListing, Tmux, TmuxError,
+};
 use serde_json::Value;
 
 /// `CLOCK_START` of `tests/test_runner.py`.
@@ -19,6 +22,7 @@ pub fn clock_start() -> DateTime<Utc> {
 
 /// The wall clock as `CLOCK_START` plus the tokio time elapsed since
 /// creation (the Python tests' patched `utc_now`).
+#[derive(Clone, Copy)]
 pub struct TestClock {
     start: tokio::time::Instant,
 }
@@ -188,12 +192,30 @@ impl RunnerApi for FakeApi {
     }
 }
 
+/// What `tmux ls` of [`FakeTmux`] does.
+#[derive(Debug, Clone, Default)]
+pub enum Listing {
+    /// Lists `FakeTmux::sessions` (exit 0).
+    #[default]
+    Sessions,
+    /// `tmux` is not on `PATH` (spawn error `NotFound`).
+    MissingBinary,
+    /// `tmux` cannot be started for another reason.
+    SpawnFails,
+    /// Exits 1 with this diagnostic on stderr.
+    Fails(&'static str),
+}
+
 type TmuxHook = Box<dyn Fn(&FakeTmux) + Send + Sync>;
 type LaunchHook = Box<dyn Fn(&FakeTmux, &Path) + Send + Sync>;
 
 /// `StubTicketExecutor`'s tmux: `has_session` answers a flag, `new_session`
 /// records the launch and (with `auto_exit_code`) writes `session.log` and
 /// `exit_code` next to the script, `kill_session` records the name.
+///
+/// For the supervisor, `list_sessions` follows [`Listing`] and lists
+/// `sessions`, which `kill_session` empties unless `sticky` is set; `calls`
+/// records `ls` and `kill-session <name>` in order.
 #[derive(Default)]
 pub struct FakeTmux {
     pub has_session: AtomicBool,
@@ -202,6 +224,10 @@ pub struct FakeTmux {
     pub scripts: Mutex<Vec<PathBuf>>,
     pub killed: Mutex<Vec<String>>,
     pub probes: AtomicUsize,
+    pub sessions: Mutex<Vec<String>>,
+    pub sticky: AtomicBool,
+    pub listing: Mutex<Listing>,
+    pub calls: Mutex<Vec<String>>,
     on_probe: Option<TmuxHook>,
     on_launch: Option<LaunchHook>,
 }
@@ -234,6 +260,24 @@ impl FakeTmux {
     pub fn killed(&self) -> Vec<String> {
         self.killed.lock().unwrap().clone()
     }
+
+    /// Sessions `tmux ls` lists.
+    pub fn with_sessions(self, sessions: &[&str]) -> Self {
+        *self.sessions.lock().unwrap() = sessions.iter().map(|name| (*name).to_owned()).collect();
+        self
+    }
+
+    pub fn set_listing(&self, listing: Listing) {
+        *self.listing.lock().unwrap() = listing;
+    }
+
+    pub fn sessions(&self) -> Vec<String> {
+        self.sessions.lock().unwrap().clone()
+    }
+
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
 }
 
 impl Tmux for FakeTmux {
@@ -247,6 +291,7 @@ impl Tmux for FakeTmux {
 
     async fn new_session(&self, session_name: &str, script_path: &Path) -> Result<(), TmuxError> {
         self.launched.lock().unwrap().push(session_name.to_owned());
+        self.sessions.lock().unwrap().push(session_name.to_owned());
         self.scripts.lock().unwrap().push(script_path.to_owned());
         if let Some(code) = self.auto_exit_code {
             let step_dir = script_path.parent().unwrap();
@@ -261,11 +306,173 @@ impl Tmux for FakeTmux {
 
     async fn kill_session(&self, session_name: &str) -> Result<(), TmuxError> {
         self.killed.lock().unwrap().push(session_name.to_owned());
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("kill-session {session_name}"));
+        if !self.sticky.load(Ordering::SeqCst) {
+            self.sessions
+                .lock()
+                .unwrap()
+                .retain(|name| name != session_name);
+        }
         Ok(())
+    }
+
+    async fn list_sessions(&self) -> Result<SessionListing, TmuxError> {
+        self.calls.lock().unwrap().push("ls".to_owned());
+        let listing = self.listing.lock().unwrap().clone();
+        match listing {
+            Listing::Sessions => Ok(SessionListing {
+                success: true,
+                stdout: self
+                    .sessions()
+                    .iter()
+                    .map(|name| format!("{name}: 1 windows (created Thu Jan  1 00:00:00 2026)\n"))
+                    .collect(),
+                stderr: String::new(),
+            }),
+            Listing::MissingBinary => Err(TmuxError::Spawn(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            ))),
+            Listing::SpawnFails => Err(TmuxError::Spawn(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            ))),
+            Listing::Fails(diagnostic) => Ok(SessionListing {
+                success: false,
+                stdout: String::new(),
+                stderr: format!("{diagnostic}\n"),
+            }),
+        }
     }
 }
 
 /// Read a JSON file.
 pub fn read_json(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+type FleetGetHook = Box<dyn FnMut(&str) -> Result<(), RunnerApiError> + Send>;
+type FleetUpdateHook = Box<dyn FnMut(&str, &JsonObject) -> Result<(), RunnerApiError> + Send>;
+
+/// An API with several tickets for the supervisor tests: scripted claim
+/// results (an empty script claims nothing), tickets by id (an unknown id is
+/// `404 http_error`), recorded `GET`s and status updates, which change the
+/// ticket like [`FakeApi`]. Hooks run before a call and can fail it.
+#[derive(Default)]
+pub struct FleetApi {
+    pub tickets: Mutex<BTreeMap<String, JsonObject>>,
+    pub claims: Mutex<VecDeque<Result<Option<JsonObject>, RunnerApiError>>>,
+    pub claim_calls: AtomicUsize,
+    pub gets: Mutex<Vec<String>>,
+    pub updates: Mutex<Vec<(String, JsonObject)>>,
+    get_hook: Mutex<Option<FleetGetHook>>,
+    update_hook: Mutex<Option<FleetUpdateHook>>,
+}
+
+impl FleetApi {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn insert(&self, ticket: JsonObject) {
+        let id = ticket["id"].as_str().unwrap().to_owned();
+        self.tickets.lock().unwrap().insert(id, ticket);
+    }
+
+    pub fn queue_claim(&self, claim: Result<Option<JsonObject>, RunnerApiError>) {
+        self.claims.lock().unwrap().push_back(claim);
+    }
+
+    pub fn on_get(&self, hook: impl FnMut(&str) -> Result<(), RunnerApiError> + Send + 'static) {
+        *self.get_hook.lock().unwrap() = Some(Box::new(hook));
+    }
+
+    pub fn on_update(
+        &self,
+        hook: impl FnMut(&str, &JsonObject) -> Result<(), RunnerApiError> + Send + 'static,
+    ) {
+        *self.update_hook.lock().unwrap() = Some(Box::new(hook));
+    }
+
+    pub fn state(&self, ticket_id: &str) -> Value {
+        self.tickets.lock().unwrap()[ticket_id]["state"].clone()
+    }
+
+    pub fn gets(&self) -> Vec<String> {
+        self.gets.lock().unwrap().clone()
+    }
+
+    pub fn updates(&self) -> Vec<(String, JsonObject)> {
+        self.updates.lock().unwrap().clone()
+    }
+
+    /// The `(ticket id, event, result_detail)` of every recorded update.
+    pub fn events(&self) -> Vec<(String, String, String)> {
+        self.updates()
+            .into_iter()
+            .map(|(id, update)| {
+                let text = |key: &str| {
+                    update
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned()
+                };
+                (id, text("event"), text("result_detail"))
+            })
+            .collect()
+    }
+}
+
+impl RunnerApi for FleetApi {
+    async fn claim_ticket(&self, runner_host: &str) -> Result<Option<JsonObject>, RunnerApiError> {
+        assert_eq!(runner_host, "runner-a");
+        self.claim_calls.fetch_add(1, Ordering::SeqCst);
+        let claim = self.claims.lock().unwrap().pop_front().unwrap_or(Ok(None));
+        if let Ok(Some(ticket)) = &claim
+            && let Some(Value::String(id)) = ticket.get("id")
+        {
+            self.tickets
+                .lock()
+                .unwrap()
+                .insert(id.clone(), ticket.clone());
+        }
+        claim
+    }
+
+    async fn get_ticket(&self, ticket_id: &str) -> Result<JsonObject, RunnerApiError> {
+        self.gets.lock().unwrap().push(ticket_id.to_owned());
+        if let Some(hook) = self.get_hook.lock().unwrap().as_mut() {
+            hook(ticket_id)?;
+        }
+        self.tickets
+            .lock()
+            .unwrap()
+            .get(ticket_id)
+            .cloned()
+            .ok_or_else(|| RunnerApiError::new("not found", 404, "http_error"))
+    }
+
+    async fn update_status(
+        &self,
+        ticket_id: &str,
+        payload: &JsonObject,
+    ) -> Result<JsonObject, RunnerApiError> {
+        if let Some(hook) = self.update_hook.lock().unwrap().as_mut() {
+            hook(ticket_id, payload)?;
+        }
+        self.updates
+            .lock()
+            .unwrap()
+            .push((ticket_id.to_owned(), payload.clone()));
+        let mut tickets = self.tickets.lock().unwrap();
+        let ticket = tickets.entry(ticket_id.to_owned()).or_default();
+        for key in ["state", "result", "result_detail", "tmux_sessions"] {
+            if let Some(value) = payload.get(key) {
+                ticket.insert(key.into(), value.clone());
+            }
+        }
+        Ok(ticket.clone())
+    }
 }

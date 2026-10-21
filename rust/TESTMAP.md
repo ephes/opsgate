@@ -3,7 +3,7 @@
 Plan section 7.5. Every Python test of `tests/` (187 at `c81d3cc`) maps to the
 Rust test that ports it and to the slice that owns it (`rust/PLAN.md`
 section 12). When a slice merges, it replaces the target with the actual test
-path (`crates/<crate>/…::<test>`) and checks the row. Columns:
+path (`crates/<crate>/…::<test>`) and checks the row (`<slice> ✓`). Columns:
 
 - **Rust target**: planned module (`core` = `opsgate-core`, `store` =
   `opsgate-store`, `web` = `opsgate-web`, `runner` = `opsgate-runner`).
@@ -144,7 +144,7 @@ section ("Rust-only tests") with their paths.
 | `test_ticket_duration_accepts_boundaries` | `core::validate` | S2c | A |
 | `test_ticket_duration_rejects_json_exponent_overflow` | `core::validate` | S2c | A |
 | `test_manual_ticket_duration_rejects_invalid_values` | `web::ui::manual_form` | S5 | A |
-| `test_direct_settings_duration_default_is_validated` | `core::settings` | S2b | - |
+| `test_direct_settings_duration_default_is_validated` | `crates/opsgate-core/tests/settings_fixture.rs::direct_settings_duration_default_is_validated` | S2b ✓ | - |
 | `test_ticket_text_rejects_unpaired_surrogates` | `core::validate (P3 D-5: Rust answers invalid_json for lone surrogates)` | S2c | A |
 | `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `core::validate + store::claim` | S3b | A |
 | `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `core::validate (P3 D-5: Rust answers invalid_json for lone surrogates)` | S2c | A |
@@ -167,30 +167,30 @@ section ("Rust-only tests") with their paths.
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_load_env_file_strips_wrapping_quotes` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_settings_requires_explicit_session_secret` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_runner_settings_accepts_runner_only_env` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_runner_settings_requires_runner_token` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_settings_allows_missing_openclaw_submit_token` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_settings_supports_secure_session_cookie` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_load_runner_settings_reports_invalid_integer_env` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_boolean_typo_rejects_settings` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_boolean_spellings_load_settings` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_boolean_defaults_and_policy_inheritance` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_disabled_openclaw_policy_still_rejects_typo` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_explicit_submitter_policy_overrides_global_floor` | `core::settings (fixture settings.json)` | S2b | - |
-| `test_duration_default_validates_supported_bounds` | `core::settings (fixture settings.json)` | S2b | - |
+| `test_load_env_file_strips_wrapping_quotes` | `crates/opsgate-core/tests/settings_fixture.rs::env_file_cases_match_python` (fixture `settings.json`, `env_file_cases`) | S2b ✓ | - |
+| `test_load_settings_requires_explicit_session_secret` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_load_runner_settings_accepts_runner_only_env` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_load_runner_settings_requires_runner_token` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_load_settings_allows_missing_openclaw_submit_token` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_load_settings_supports_secure_session_cookie` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_load_runner_settings_reports_invalid_integer_env` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_boolean_typo_rejects_settings` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_boolean_spellings_load_settings` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_boolean_defaults_and_policy_inheritance` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_disabled_openclaw_policy_still_rejects_typo` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_explicit_submitter_policy_overrides_global_floor` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
+| `test_duration_default_validates_supported_bounds` | `crates/opsgate-core/tests/settings_fixture.rs::settings_cases_match_python` (fixture `settings.json`) | S2b ✓ | - |
 
 ### `tests/test_log_preview.py`
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_large_log_reads_only_bounded_tail` | `core::log_preview (fixture log_preview.json)` | S2b | - |
-| `test_normal_final_40_lines` | `core::log_preview (fixture log_preview.json)` | S2b | - |
-| `test_utf8_fragments_and_huge_single_line` | `core::log_preview (fixture log_preview.json)` | S2b | - |
-| `test_small_logs` | `core::log_preview (fixture log_preview.json)` | S2b | - |
-| `test_tail_window_splits_utf8_character` | `core::log_preview (fixture log_preview.json)` | S2b | - |
-| `test_step_log_boundaries` | `core::log_preview (fixture log_preview.json)` | S2b | - |
+| `test_large_log_reads_only_bounded_tail` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
+| `test_normal_final_40_lines` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
+| `test_utf8_fragments_and_huge_single_line` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
+| `test_small_logs` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
+| `test_tail_window_splits_utf8_character` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
+| `test_step_log_boundaries` | `crates/opsgate-core/tests/log_preview_fixture.rs::cases_match_python` (fixture `log_preview.json`) | S2b ✓ | - |
 
 ### `tests/test_atomic_json.py`
 
@@ -250,3 +250,8 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2, usage errors exit 2, `--help` | S1 |
 | `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
 | `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |
+| `crates/opsgate-core/tests/settings_fixture.rs` | `settings.json`: 490 environment sets (every variable and rule of 4.2, check order, env-file override, D-8/D-10 cases) and 21 env-file parsing cases; coverage of every 4.2 variable; the merged environment children get (4.13.8) | S2b |
+| `crates/opsgate-core/tests/log_preview_fixture.rs` | `log_preview.json`: preview and step log for 31 contents (window and line cuts, CR/LF forms, invalid UTF-8 replacement, 2 MiB boundary) (4.12) | S2b |
+| `crates/opsgate-core/tests/proxy_fix_fixture.rs` | `proxy_fix.json`: 26 header sets through waitress and Werkzeug `ProxyFix` (last value, joined lines, quoted items, unclosed quotes, latin-1 bytes) (4.4) | S2b |
+| `crates/opsgate-core/tests/containment.rs` | step-log containment (4.12): symlink escapes (file, directory, dangling, relative), missing inside → `log_not_found`, missing outside → `invalid_log_path`, containment before existence, `..` escapes, symlink loops, CPython 3.14 `realpath` corner cases | S2b |
+| `crates/opsgate-core/src/{pytext,settings,log_preview}.rs` unit tests | Python whitespace and line-boundary sets, `int()` grammar and the 4300-digit limit, non-UTF-8 values, redacted `Debug`, CIDR prefixes, directories and missing files | S2b |

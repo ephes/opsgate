@@ -10,6 +10,11 @@
   `rust/fixtures/generate.py` with its first fixture `schema.sql` and a pytest drift test, the
   `rust` CI job on Linux and macOS, and `just rs-*` recipes. `rust/target/` is ignored. Nothing
   deploys or runs the Rust code yet; the Python implementation is unchanged.
+- Rust port slice S2b (`rust/crates/opsgate-core`): the env-file loader and the API and runner
+  settings with every rule of `config.py` (same check order and messages), step log previews and
+  the step log page, step-log path containment with CPython's non-strict `Path.resolve()`, and the
+  `ProxyFix` client/scheme/host selection behind waitress. New Python-generated fixtures
+  `settings.json`, `log_preview.json` and `proxy_fix.json` pin them. Nothing calls this code yet.
 
 ### Documentation
 

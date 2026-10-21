@@ -20,15 +20,33 @@ carry ``"divergence": "D-n"`` and the Rust expectation.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
+import ipaddress
 import json
+import os
+import socket
 import sqlite3
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from opsgate.config import OpsGateSettings, SubmitterPolicy
+from waitress.adjustments import Adjustments  # type: ignore[import-untyped]
+from waitress.parser import HTTPRequestParser  # type: ignore[import-untyped]
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+from opsgate import log_preview
+from opsgate.config import (
+    OpsGateSettings,
+    SettingsError,
+    SubmitterPolicy,
+    load_env_file,
+    load_runner_settings,
+    load_settings,
+)
 from opsgate.service import OpsGateService
 
 FIXTURES_DIR = Path(__file__).resolve().parent
@@ -99,8 +117,607 @@ def build_schema() -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- settings.json (PLAN.md 4.2; slice S2b) ----------------------------------
+
+#: A valid API environment; cases add, replace or remove variables.
+API_BASE_ENV = {
+    "OPSGATE_UI_USERNAME": "opsgate-admin",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+}
+
+#: A valid runner environment.
+RUNNER_BASE_ENV = {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_RUNNER_HOST": "fixture-host",
+}
+
+API_BOOL_SETTINGS = (
+    "OPSGATE_TRUST_PROXY_HEADERS",
+    "OPSGATE_SESSION_COOKIE_SECURE",
+    "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP",
+    "OPSGATE_REQUIRE_TAILSCALE_CONTEXT",
+    "OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP",
+    "OPSGATE_SUBMIT_POLICY_NYXMON_REQUIRE_REVIEWER_STEP",
+    "OPSGATE_SUBMIT_POLICY_OPERATOR_REQUIRE_REVIEWER_STEP",
+)
+
+BOOL_VALUES = (
+    "1", "true", "yes", "on", " TRUE ", "Yes", "0", "false", "no", "off", " OFF ", "No",
+    "", "  ", "\u3000true\x1c", "treu", "2", "y", "secret-invalid-value",
+)
+
+#: Integer spellings: Python ``int(value.strip())``; ``D-8`` marks the inputs
+#: Python accepts and Rust rejects at startup (PLAN.md section 5).
+INT_VALUES: tuple[tuple[str, str | None], ...] = (
+    ("8712", None), (" 8712 ", None), ("+8712", None), ("-1", None), ("0", None), ("-0", None),
+    ("08712", None), ("8_712", None), ("8__712", None), ("_8712", None), ("8712_", None), ("+_8712", None),
+    ("", None), ("  ", None), ("abc", None), ("1.5", None), ("0x10", None), ("1e3", None), ("1 000", None),
+    ("9223372036854775807", None), ("-9223372036854775808", None),
+    ("9223372036854775808", "D-8"), ("99999999999999999999", "D-8"),
+    ("\uff11\uff12", "D-8"), ("\u0661\u0662", "D-8"), ("1" * 4301, None),
+)
+
+
+def _case(name: str, loader: str, env: dict[str, str | None], **extra: Any) -> dict[str, Any]:
+    base = API_BASE_ENV if loader == "api" else RUNNER_BASE_ENV
+    merged: dict[str, str] = dict(base)
+    for key, value in env.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    case: dict[str, Any] = {"name": name, "loader": loader, "env": merged}
+    case.update(extra)
+    return case
+
+
+def _settings_corpus() -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    add = cases.append
+    add(_case("api defaults", "api", {}))
+    add(_case("runner defaults", "runner", {}))
+    for name in API_BASE_ENV:
+        add(_case(f"api without {name}", "api", {name: None}))
+        add(_case(f"api blank {name}", "api", {name: " \t\u3000\x1f"}))
+    for name in RUNNER_BASE_ENV:
+        add(_case(f"runner without {name}", "runner", {name: None}))
+    # Lengths count code points of the stripped value.
+    for name in ("OPSGATE_SESSION_SECRET", "OPSGATE_RUNNER_TOKEN", "OPSGATE_SUBMIT_TOKEN_NYXMON",
+                 "OPSGATE_SUBMIT_TOKEN_OPERATOR", "OPSGATE_SUBMIT_TOKEN_OPENCLAW"):
+        add(_case(f"api {name} 19 chars", "api", {name: "s" * 19}))
+        add(_case(f"api {name} 20 chars", "api", {name: "s" * 20}))
+        add(_case(f"api {name} 19 chars padded", "api", {name: "  " + "s" * 19 + "  "}))
+        add(_case(f"api {name} 20 non-ASCII chars", "api", {name: "\u00e9" * 20}))
+        add(_case(f"api {name} 19 non-ASCII chars", "api", {name: "\u00e9" * 19}))
+    for value in ("runner-token-00000000", "short", "\u00e9" * 19, "\u00e9" * 20):
+        add(_case(f"runner token {value!r}", "runner", {"OPSGATE_RUNNER_TOKEN": value}))
+    add(_case("api username and password stripped", "api",
+              {"OPSGATE_UI_USERNAME": "  admin\u00a0", "OPSGATE_UI_PASSWORD_BCRYPT": "\thash\n"}))
+    add(_case("api openclaw token empty", "api", {"OPSGATE_SUBMIT_TOKEN_OPENCLAW": ""}))
+    add(_case("api openclaw token set", "api", {"OPSGATE_SUBMIT_TOKEN_OPENCLAW": "openclaw-token-0000000000"}))
+    # Booleans.
+    for name in API_BOOL_SETTINGS:
+        for value in BOOL_VALUES:
+            add(_case(f"api {name}={value!r}", "api",
+                      {name: value, "OPSGATE_SUBMIT_TOKEN_OPENCLAW": "openclaw-token-0000000000"}))
+    for floor in ("true", "false"):
+        for source in ("OPENCLAW", "NYXMON", "OPERATOR"):
+            explicit = "false" if floor == "true" else "true"
+            add(_case(f"api floor {floor}, {source} explicit {explicit}", "api", {
+                "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP": floor,
+                f"OPSGATE_SUBMIT_POLICY_{source}_REQUIRE_REVIEWER_STEP": explicit,
+                "OPSGATE_SUBMIT_TOKEN_OPENCLAW": "openclaw-token-0000000000",
+            }))
+    add(_case("api floor true inherited", "api", {
+        "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP": "on",
+        "OPSGATE_SUBMIT_TOKEN_OPENCLAW": "openclaw-token-0000000000",
+    }))
+    add(_case("api openclaw policy typo without token", "api",
+              {"OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP": "treu"}))
+    # Integers.
+    api_ints = ("OPSGATE_BIND_PORT", "OPSGATE_UI_SESSION_TIMEOUT_SECONDS", "OPSGATE_MAX_DURATION_SECONDS_DEFAULT")
+    runner_ints = ("OPSGATE_BIND_PORT", "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS",
+                   "OPSGATE_RUNNER_HEARTBEAT_INTERVAL_SECONDS", "OPSGATE_MAX_PARALLEL_JOBS",
+                   "OPSGATE_MAX_DURATION_SECONDS_DEFAULT")
+    for loader, names in (("api", api_ints), ("runner", runner_ints)):
+        for name in names:
+            for value, divergence in INT_VALUES:
+                extra: dict[str, Any] = {}
+                # Out-of-range ASCII integers for the duration default fail its
+                # bounds check in both implementations (same message); every
+                # other D-8 input is accepted by Python only.
+                overflow_bounded = name == "OPSGATE_MAX_DURATION_SECONDS_DEFAULT" and value.isascii()
+                if divergence is not None and not overflow_bounded:
+                    extra = {"divergence": divergence, "rust_error": f"{name} must be an integer"}
+                label = value if len(value) < 40 else f"{len(value)} digits"
+                add(_case(f"{loader} {name}={label!r}", loader, {name: value}, **extra))
+    for value in ("1", "31536000", "31536001", "999999999999999999999999999", "1" * 4300):
+        for loader in ("api", "runner"):
+            label = value if len(value) < 40 else f"{len(value)} digits"
+            add(_case(f"{loader} duration default {label}", loader, {"OPSGATE_MAX_DURATION_SECONDS_DEFAULT": value}))
+    # Strings and paths.
+    add(_case("api strings stripped", "api", {
+        "OPSGATE_SERVICE_NAME": " svc\u2003", "OPSGATE_BIND_HOST": " 127.0.0.1 ", "OPSGATE_DB_PATH": " /x/db.sqlite3 ",
+        "OPSGATE_EXECUTION_DATA_DIR": " /data ", "OPSGATE_DISABLE_FILE_PATH": "\t/data/off\n",
+    }))
+    add(_case("api empty strings", "api", {
+        "OPSGATE_SERVICE_NAME": "", "OPSGATE_BIND_HOST": "  ", "OPSGATE_DB_PATH": "  ",
+        "OPSGATE_EXECUTION_DATA_DIR": "", "OPSGATE_DISABLE_FILE_PATH": "  ",
+    }))
+    add(_case("api execution dir sets the disable default", "api", {"OPSGATE_EXECUTION_DATA_DIR": "/srv/rem"}))
+    # CIDRs.
+    cidr_values: tuple[tuple[str | None, str | None], ...] = (
+        (None, None), ("", None), (" , ,", None), ("10.0.0.0/8, 192.168.1.7/24 ,,", None),
+        ("10.1.2.3", None), ("10.0.0.0/08", None), ("::1", None), ("64:ff9b::1.2.3.4/96", None),
+        ("fe80::1%eth0/64", None), ("2001:DB8::/32", None), ("0.0.0.0/0", None), ("::/0", None),
+        ("10.0.0.0/33", None), ("::1/129", None), ("10.0.0.0/+8", None), ("10.0.0.0/-8", None),
+        ("10.0.0.0/", None), ("/8", None), ("010.0.0.0/8", None), ("1.2.3.4/32/1", None),
+        ("10.0.0.256/8", None), ("fe80::1%/64", None), ("1.2.3.4%x/32", None), ("10.0.0.0/8 ", None),
+        ("10.0.0.0 /8", None), ("not-a-network", None), ("10.0.0.0/\uff18", None),
+        ("10.0.0.0/255.0.0.0", "D-8"), ("10.0.0.0/0.255.255.255", "D-8"),
+    )
+    for cidr, cidr_divergence in cidr_values:
+        cidr_extra = {"rust_error": "OPSGATE_ALLOWED_CIDRS contains an invalid network"}
+        if cidr_divergence is not None:
+            cidr_extra["divergence"] = cidr_divergence
+        add(_case(f"api OPSGATE_ALLOWED_CIDRS={cidr!r}", "api", {"OPSGATE_ALLOWED_CIDRS": cidr}, **cidr_extra))
+    # Check order: the first failing rule decides (PLAN.md 4.2).
+    add(_case("api order: username before secret", "api",
+              {"OPSGATE_UI_USERNAME": None, "OPSGATE_SESSION_SECRET": "short"}))
+    add(_case("api order: port before username", "api", {"OPSGATE_BIND_PORT": "x", "OPSGATE_UI_USERNAME": None}))
+    add(_case("api order: boolean before runner token", "api",
+              {"OPSGATE_TRUST_PROXY_HEADERS": "treu", "OPSGATE_RUNNER_TOKEN": None}))
+    add(_case("api order: duration parse before floor", "api", {
+        "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "x", "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP": "treu"}))
+    add(_case("api order: openclaw token before nyxmon token", "api",
+              {"OPSGATE_SUBMIT_TOKEN_OPENCLAW": "short", "OPSGATE_SUBMIT_TOKEN_NYXMON": None}))
+    add(_case("api order: operator token before openclaw policy", "api", {
+        "OPSGATE_SUBMIT_TOKEN_OPERATOR": "short", "OPSGATE_SUBMIT_POLICY_OPENCLAW_REQUIRE_REVIEWER_STEP": "x"}))
+    add(_case("api order: operator policy before tailscale", "api", {
+        "OPSGATE_SUBMIT_POLICY_OPERATOR_REQUIRE_REVIEWER_STEP": "x", "OPSGATE_REQUIRE_TAILSCALE_CONTEXT": "x"}))
+    add(_case("api order: empty CIDR list before duration bounds", "api",
+              {"OPSGATE_ALLOWED_CIDRS": "", "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "0"}))
+    add(_case("api order: invalid CIDR before duration bounds", "api",
+              {"OPSGATE_ALLOWED_CIDRS": "10.0.0.0/33", "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "0"},
+              rust_error="OPSGATE_ALLOWED_CIDRS contains an invalid network"))
+    add(_case("api order: session timeout parse before runner token", "api",
+              {"OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "x", "OPSGATE_RUNNER_TOKEN": None}))
+    # Runner settings.
+    add(_case("runner host from the system", "runner", {"OPSGATE_RUNNER_HOST": None}))
+    add(_case("runner blank host from the system", "runner", {"OPSGATE_RUNNER_HOST": "  "}))
+    add(_case("runner host stripped", "runner", {"OPSGATE_RUNNER_HOST": " studio\u00a0"}))
+    add(_case("runner base URL from the port", "runner", {"OPSGATE_BIND_PORT": "+09000"}))
+    for value, divergence in (
+        ("http://127.0.0.1:8711", None), (" http://api.local:1/ ", None), ("http://a///", None),
+        ("HTTP://127.0.0.1:8711", None), ("", None), ("  ", None),
+        ("/", "D-10"), ("https://127.0.0.1:8711", "D-10"), ("ftp://x", "D-10"), ("127.0.0.1:8711", "D-10"),
+    ):
+        extra = {}
+        if divergence is not None:
+            extra = {"divergence": divergence,
+                     "rust_error": "OPSGATE_RUNNER_API_BASE_URL must be an http:// URL"}
+        add(_case(f"runner OPSGATE_RUNNER_API_BASE_URL={value!r}", "runner",
+                  {"OPSGATE_RUNNER_API_BASE_URL": value}, **extra))
+    for name in ("OPSGATE_EXECUTION_DATA_DIR", "OPSGATE_TICKETS_DIR", "OPSGATE_SESSION_ARTIFACTS_DIR",
+                 "OPSGATE_TMUX_SOCKET_LABEL"):
+        add(_case(f"runner empty {name}", "runner", {name: ""}))
+        add(_case(f"runner blank {name}", "runner", {name: " \u3000"}))
+    add(_case("runner strings stripped", "runner", {
+        "OPSGATE_SERVICE_NAME": " svc ", "OPSGATE_EXECUTION_DATA_DIR": " /e ", "OPSGATE_TMUX_SOCKET_LABEL": " lab ",
+        "TMUX_TMPDIR": " /t ", "OPSGATE_DISABLE_FILE_PATH": " /e/off ",
+    }))
+    add(_case("runner directories default under the execution dir", "runner", {"OPSGATE_EXECUTION_DATA_DIR": "/e"}))
+    add(_case("runner explicit directories", "runner", {
+        "OPSGATE_TICKETS_DIR": "/j", "OPSGATE_SESSION_ARTIFACTS_DIR": "/s", "TMUX_TMPDIR": ""}))
+    add(_case("runner ignores API-only and unknown variables", "runner", {
+        "OPSGATE_RUNNER_STALE_AFTER_SECONDS": "garbage", "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP": "treu",
+        "OPSGATE_ALLOWED_CIDRS": "", "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "x",
+    }))
+    add(_case("runner order: token before port", "runner", {"OPSGATE_RUNNER_TOKEN": None, "OPSGATE_BIND_PORT": "x"}))
+    add(_case("runner order: all integers parse before the positive checks", "runner", {
+        "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS": "0", "OPSGATE_MAX_PARALLEL_JOBS": "x"}))
+    add(_case("runner order: poll before heartbeat", "runner", {
+        "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS": "0", "OPSGATE_RUNNER_HEARTBEAT_INTERVAL_SECONDS": "0"}))
+    add(_case("runner order: positive checks before the execution dir", "runner", {
+        "OPSGATE_MAX_PARALLEL_JOBS": "-3", "OPSGATE_EXECUTION_DATA_DIR": ""}))
+    add(_case("runner order: socket label before duration bounds", "runner", {
+        "OPSGATE_TMUX_SOCKET_LABEL": "", "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "0"}))
+    add(_case("runner order: base URL before poll interval", "runner", {
+        "OPSGATE_RUNNER_API_BASE_URL": "", "OPSGATE_RUNNER_POLL_INTERVAL_SECONDS": "x"}))
+    # The env file (OPSGATE_ENV_FILE): file values overwrite the process environment.
+    add(_case("api env file overrides the process environment", "api", {
+        "OPSGATE_ENV_FILE": "{env_file}", "OPSGATE_BIND_HOST": "10.9.9.9", "OPSGATE_SESSION_SECRET": "short",
+    }, env_file="OPSGATE_BIND_HOST=127.0.0.1\nOPSGATE_SESSION_SECRET='session-secret-from-file-0'\n"))
+    add(_case("api env file provides everything", "api", {
+        **{name: None for name in API_BASE_ENV}, "OPSGATE_ENV_FILE": " {env_file} ",
+    }, env_file="".join(f"{key}=\"{value}\"\n" for key, value in API_BASE_ENV.items())
+        + "# comment\nOPSGATE_TRUST_PROXY_HEADERS = true\nOPSGATE_ALLOWED_CIDRS=100.64.0.0/10\r\n"))
+    add(_case("api env file missing", "api", {"OPSGATE_ENV_FILE": "{missing}"}))
+    add(_case("api env file blank name is ignored", "api", {"OPSGATE_ENV_FILE": "  "}))
+    add(_case("api env file is a directory", "api", {"OPSGATE_ENV_FILE": "{directory}"},
+              rust_error="Env file could not be read: {directory}"))
+    add(_case("api env file not UTF-8", "api", {"OPSGATE_ENV_FILE": "{env_file}"}, env_file_hex="413d31ff0a",
+              rust_error="Env file is not valid UTF-8: {env_file}"))
+    add(_case("api env file breaks a rule", "api", {"OPSGATE_ENV_FILE": "{env_file}"},
+              env_file="OPSGATE_REQUIRE_TAILSCALE_CONTEXT=maybe\n"))
+    add(_case("runner env file overrides the process environment", "runner", {
+        "OPSGATE_ENV_FILE": "{env_file}", "OPSGATE_RUNNER_TOKEN": "short", "OPSGATE_MAX_PARALLEL_JOBS": "9",
+    }, env_file="OPSGATE_RUNNER_TOKEN=runner-token-from-file-00\nOPSGATE_MAX_PARALLEL_JOBS=2\n"
+        "OPSGATE_RUNNER_STALE_AFTER_SECONDS=300\n"))
+    add(_case("runner env file missing", "runner", {"OPSGATE_ENV_FILE": "{missing}"}))
+    return cases
+
+
+ENV_FILE_CASES: tuple[tuple[str, str | bytes, dict[str, str], str | None], ...] = (
+    # (name, content, initial environment, Rust error message when Python raises something else)
+    ("wrapping quotes", 'A="opsgate-admin"\nB=\'bcrypt-hash\'\nC=127.0.0.1', {}, None),
+    ("quote corner cases", 'A="\nB=""\nC=\'"\nD="a\'\nE="a"b"\nF=\'\'\'\nG=" spaced "\nH="x\n', {}, None),
+    ("whitespace around key and value", "  KEY  =  value  \n\tTAB\t=\tv\t\n\u00a0NB\u00a0=\u00a0v\u00a0\n", {}, None),
+    ("python whitespace set", "\x1fA\x1f=\x1fv\u3000\n\u2003B=\u205fv\n", {}, None),
+    ("comments and lines without equals", "# A=1\n   # B=2\nC=1 # not a comment\nnoequals\n\n   \n", {}, None),
+    ("first equals splits", "A==b\nB=c=d\nC=\n", {}, None),
+    ("export prefix is part of the key", "export A=1\n", {}, None),
+    ("CRLF and lone CR", "A=1\r\nB=2\rC=3\r\n", {}, None),
+    ("unicode line boundaries", "A=1\x0bB=2\x0cC=3\x1cD=4\x1dE=5\x1eF=6\x85G=7\u2028H=8\u2029I=9", {}, None),
+    ("byte order mark stays in the first key", "\ufeffA=1\nB=2\n", {}, None),
+    ("later lines win", "A=1\nA=2\n", {}, None),
+    ("file overrides the process environment", "A=from-file\n", {"A": "from-process", "B": "kept"}, None),
+    ("non-ASCII values", "A=\u00e9t\u00e9\nB=\U0001f600\n", {}, None),
+    ("empty file", "", {"A": "kept"}, None),
+    ("empty key", "=value\n", {}, "Env file line has an invalid variable name: {env_file}"),
+    ("blank key", "   =value\n", {}, "Env file line has an invalid variable name: {env_file}"),
+    ("NUL in value", "A=x\x00y\n", {}, "Env file line contains a NUL character: {env_file}"),
+    ("NUL in key", "A\x00B=1\n", {}, "Env file line has an invalid variable name: {env_file}"),
+    ("invalid UTF-8", b"A=1\n\xc3\x28=2\n", {}, "Env file is not valid UTF-8: {env_file}"),
+    ("encoded surrogate is invalid UTF-8", b"A=\xed\xa0\x80\n", {}, "Env file is not valid UTF-8: {env_file}"),
+)
+
+
+@contextmanager
+def _isolated_environ(env: dict[str, str]) -> Iterator[None]:
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def _python_error(exc: BaseException, substitutions: dict[str, str]) -> dict[str, Any]:
+    """A raised error as the fixture records it. Only ``SettingsError`` texts
+    are contract (they name the setting, never its value); other exceptions
+    (ValueError from ipaddress or os.environ, UnicodeDecodeError, OSError) end
+    the Python process with a traceback whose text differs between Python
+    versions and platforms, so only the fact is recorded."""
+    if isinstance(exc, SettingsError):
+        message = str(exc)
+        for real, placeholder in substitutions.items():
+            message = message.replace(real, placeholder)
+        return {"python": "SettingsError", "message": message}
+    return {"python": "other"}
+
+
+def _settings_value(loader: str, settings: Any) -> dict[str, Any]:
+    value = dataclasses.asdict(settings)
+    if loader == "api":
+        value["submitter_policies"] = [dict(policy) for policy in value["submitter_policies"]]
+        value["allowed_cidrs"] = list(value["allowed_cidrs"])
+        # What the network gate builds from them (app.py: ip_network(cidr, strict=False)).
+        value["allowed_networks"] = [str(ipaddress.ip_network(c, strict=False)) for c in settings.allowed_cidrs]
+    elif not os.environ.get("OPSGATE_RUNNER_HOST", "").strip():
+        assert value["runner_host"] == socket.gethostname()
+        value["runner_host"] = "{hostname}"
+    return value
+
+
+def build_settings() -> str:
+    """``settings.json``: environment sets → API/runner settings or the error
+    (``config.load_settings``, ``load_runner_settings``, ``load_env_file``;
+    PLAN.md 4.2). Placeholders: ``{env_file}`` (a file with ``env_file`` or
+    ``env_file_hex`` as content), ``{missing}`` (a path that does not exist),
+    ``{directory}`` (an existing directory), ``{hostname}`` (the system host
+    name, ``socket.gethostname()``)."""
+    settings_cases = []
+    for case in _settings_corpus():
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / "opsgate.env"
+            if "env_file_hex" in case:
+                env_path.write_bytes(bytes.fromhex(case["env_file_hex"]))
+            elif "env_file" in case:
+                env_path.write_bytes(case["env_file"].encode("utf-8"))
+            substitutions = {
+                str(env_path): "{env_file}",
+                str(Path(directory) / "missing.env"): "{missing}",
+                str(Path(directory) / "envdir"): "{directory}",
+            }
+            (Path(directory) / "envdir").mkdir()
+            env = {}
+            for key, value in case["env"].items():
+                for real, placeholder in substitutions.items():
+                    value = value.replace(placeholder, real)
+                env[key] = value
+            loader = load_settings if case["loader"] == "api" else load_runner_settings
+            with _isolated_environ(env):
+                try:
+                    result = {"settings": _settings_value(case["loader"], loader())}
+                except Exception as exc:  # noqa: BLE001 - the oracle records every outcome
+                    result = {"error": _python_error(exc, substitutions)}
+        python_other = "error" in result and result["error"]["python"] != "SettingsError"
+        if python_other:
+            assert "rust_error" in case, f"case {case['name']!r} needs the Rust error message"
+        elif "divergence" not in case:
+            # The Rust expectation is Python's outcome; a Rust message is only
+            # needed where Python raised something other than SettingsError.
+            case.pop("rust_error", None)
+        settings_cases.append({**case, **result})
+
+    env_file_cases = []
+    for name, content, initial, rust_error in ENV_FILE_CASES:
+        with tempfile.TemporaryDirectory() as directory:
+            env_path = Path(directory) / "opsgate.env"
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            env_path.write_bytes(data)
+            entry: dict[str, Any] = {"name": name, "content_hex": data.hex(), "initial_env": initial}
+            with _isolated_environ(initial):
+                try:
+                    load_env_file(str(env_path))
+                    entry["result_env"] = dict(os.environ)
+                except Exception as exc:  # noqa: BLE001
+                    entry["error"] = _python_error(exc, {str(env_path): "{env_file}"})
+        if "error" in entry and entry["error"]["python"] != "SettingsError":
+            assert rust_error is not None, f"env file case {name!r} needs the Rust error message"
+            entry["rust_error"] = rust_error
+        env_file_cases.append(entry)
+
+    with tempfile.TemporaryDirectory() as directory:
+        missing = Path(directory) / "missing.env"
+        try:
+            load_env_file(str(missing))
+        except SettingsError as exc:
+            missing_message = str(exc).replace(str(missing), "{env_file}")
+    env_file_cases.append({"name": "missing file", "missing": True, "initial_env": {},
+                           "error": {"python": "SettingsError", "message": missing_message}})
+
+    return render_json({
+        "generated_by": GENERATED_BY,
+        "source": "opsgate.config.load_settings, load_runner_settings, load_env_file",
+        "settings_cases": settings_cases,
+        "env_file_cases": env_file_cases,
+    })
+
+
+# --- log_preview.json (PLAN.md 4.12; slice S2b) -------------------------------
+
+def _content(recipe: list[dict[str, Any]]) -> bytes:
+    """Bytes of a content recipe: segments ``{"text"|"hex": ..., "repeat": n}``."""
+    out = bytearray()
+    for segment in recipe:
+        piece = segment["text"].encode("utf-8") if "text" in segment else bytes.fromhex(segment["hex"])
+        out += piece * segment.get("repeat", 1)
+    return bytes(out)
+
+
+def _text(value: str, repeat: int = 1) -> dict[str, Any]:
+    return {"text": value, "repeat": repeat}
+
+
+def _hex(value: str, repeat: int = 1) -> dict[str, Any]:
+    return {"hex": value, "repeat": repeat}
+
+
+TAIL = log_preview.TAIL_BYTE_LIMIT
+LINE = log_preview.LINE_BYTE_LIMIT
+STEP = log_preview.STEP_LOG_BYTE_LIMIT
+
+LOG_CASES: tuple[tuple[str, list[dict[str, Any]], dict[str, int]], ...] = (
+    # (name, content recipe, limits overriding the module constants)
+    ("empty", [], {}),
+    ("CRLF and CR", [_hex("610d0a620d630a")], {}),
+    ("trailing empty line kept once", [_text("a\n\n")], {}),
+    ("no final newline", [_text("a\nb")], {}),
+    ("only newlines", [_text("\n", 3)], {}),
+    ("only a CR", [_text("\r")], {}),
+    ("CR CR LF", [_text("a\r\r\nb\n")], {}),
+    ("40 lines", [_text("line\n", 40)], {}),
+    ("41 lines", [_text("line\n", 41)], {}),
+    ("45 numbered lines", [_text("".join(f"line {i}\n" for i in range(45)))], {}),
+    ("line of 2048 bytes", [_text("x", LINE), _text("\n")], {}),
+    ("line of 2049 bytes", [_text("y"), _text("x", LINE), _text("\n")], {}),
+    ("line cut splits a character", [_text("\u20ac", 700), _text("\n")], {}),
+    ("euro signs fill the window", [_text("\u20ac", TAIL)], {}),
+    ("exactly the tail window", [_text("x", TAIL - 1), _text("\n")], {}),
+    ("one byte over the tail window", [_text("x", TAIL), _text("\n")], {}),
+    ("large log, bounded tail", [_text("x", STEP * 3), _text("\nlast line\n")], {}),
+    ("window starts between CR and LF", [_text("a\r\nb\n")], {"tail": 5}),
+    ("window splits a character", [_text("xx\u20ac\nend!\n")], {"tail": 8}),
+    ("invalid UTF-8 sequences", [_hex("c0af0aeda0800ae2820af888808080800af49080800a8080410a"),
+                                 _hex("f09f98"), _text("\n"), _hex("e2"), _text("x\n")], {}),
+    ("mixed valid and invalid", [_text("ok \u00e9\U0001f600 "), _hex("ff"), _text(" end\n")], {}),
+    ("small step limit, fits", [_text("12345678")], {"step": 8}),
+    ("small step limit, truncated", [_text("012345678")], {"step": 8}),
+    ("small step limit, split character", [_text("xx\u20acabcdef")], {"step": 8}),
+    ("small step limit, CRLF", [_text("a\r\nb\rc")], {"step": 8}),
+    ("small step limit, CR LF across the boundary", [_text("abc\r\n1234567")], {"step": 8}),
+    ("small line limit", [_text("abcdef\n\u00e9\u00e9\u00e9\n")], {"line": 3}),
+    ("max lines 1", [_text("a\nb\n")], {"max_lines": 1}),
+    ("max lines 0", [_text("a\nb\n")], {"max_lines": 0}),
+    ("step log exactly at the limit", [_text("s", STEP - 6), _text("\r\nend\n")], {}),
+    ("step log one byte over the limit", [_text("s", STEP - 5), _text("\r\nend\n")], {}),
+)
+
+
+def _step_log_record(text: str) -> dict[str, Any]:
+    if len(text) <= 2000:
+        return {"text": text}
+    return {
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "chars": len(text),
+        "head": text[:80],
+        "tail": text[-80:],
+    }
+
+
+def build_log_preview() -> str:
+    """``log_preview.json``: log contents → ``read_tail_lines`` (UI preview,
+    runner ``summary_markdown``) and ``read_step_log`` (step log page)
+    (PLAN.md 4.12). ``limits`` override the module constants (``tail``
+    ``TAIL_BYTE_LIMIT``, ``line`` ``LINE_BYTE_LIMIT``, ``step``
+    ``STEP_LOG_BYTE_LIMIT``) as the Python tests do, ``max_lines`` the
+    argument (default 40). Step logs longer than 2000 characters are recorded
+    by SHA-256 of their UTF-8 text, length in characters, head and tail."""
+    names = {"tail": "TAIL_BYTE_LIMIT", "line": "LINE_BYTE_LIMIT", "step": "STEP_LOG_BYTE_LIMIT"}
+    cases = []
+    for name, recipe, limits in LOG_CASES:
+        saved = {attr: getattr(log_preview, attr) for attr in names.values()}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "session.log"
+            path.write_bytes(_content(recipe))
+            try:
+                for key, attr in names.items():
+                    if key in limits:
+                        setattr(log_preview, attr, limits[key])
+                preview = log_preview.read_tail_lines(path, max_lines=limits.get("max_lines", 40))
+                step_log = log_preview.read_step_log(path)
+            finally:
+                for attr, value in saved.items():
+                    setattr(log_preview, attr, value)
+        cases.append({
+            "name": name,
+            "content": recipe,
+            "limits": limits,
+            "preview": preview,
+            "step_log": _step_log_record(step_log),
+        })
+    with tempfile.TemporaryDirectory() as directory:
+        missing_preview = log_preview.read_tail_lines(Path(directory) / "missing.log")
+    return render_json({
+        "generated_by": GENERATED_BY,
+        "source": "opsgate.log_preview.read_tail_lines, read_step_log",
+        "constants": {
+            "TAIL_BYTE_LIMIT": TAIL,
+            "LINE_BYTE_LIMIT": LINE,
+            "STEP_LOG_BYTE_LIMIT": STEP,
+            "TRUNCATION_MARKER": log_preview.TRUNCATION_MARKER,
+            "STEP_LOG_TRUNCATION_MARKER": log_preview.STEP_LOG_TRUNCATION_MARKER,
+        },
+        "missing_file_preview": missing_preview,
+        "cases": cases,
+    })
+
+
+# --- proxy_fix.json (PLAN.md 4.4 step 1; slice S2b) ---------------------------
+
+#: (name, header lines as (name, value) with value characters standing for
+#: latin-1 bytes, socket peer address, scheme)
+PROXY_CASES: tuple[tuple[str, list[tuple[str, str]], str, str], ...] = (
+    ("no forwarded headers", [("Host", "opsgate.local")], "100.64.0.5", "http"),
+    ("no host header", [], "127.0.0.1", "http"),
+    ("single proxy", [("Host", "studio:8711"), ("X-Forwarded-For", "100.64.0.9"),
+                      ("X-Forwarded-Proto", "https"), ("X-Forwarded-Host", "opsgate.example")], "100.64.0.1", "http"),
+    ("last value wins", [("X-Forwarded-For", "203.0.113.7, 100.64.0.9"),
+                         ("X-Forwarded-Proto", "http,https"), ("X-Forwarded-Host", "a.example , b.example")],
+     "127.0.0.1", "http"),
+    ("repeated header lines are joined", [("X-Forwarded-For", "203.0.113.7"), ("X-Forwarded-For", " 100.64.0.9 ")],
+     "127.0.0.1", "http"),
+    ("header name case", [("x-forwarded-for", "100.64.0.9"), ("X-FORWARDED-PROTO", "https")], "127.0.0.1", "http"),
+    ("underscore header names are dropped", [("X_Forwarded_For", "100.64.0.9")], "127.0.0.1", "http"),
+    ("empty header", [("X-Forwarded-For", ""), ("X-Forwarded-Proto", ""), ("X-Forwarded-Host", "")],
+     "127.0.0.1", "http"),
+    ("only commas", [("X-Forwarded-For", " , ,"), ("X-Forwarded-Proto", ",")], "127.0.0.1", "http"),
+    ("trailing comma is ignored", [("X-Forwarded-For", "100.64.0.9,"), ("X-Forwarded-Proto", "https, ")],
+     "127.0.0.1", "http"),
+    ("items stripped of spaces and tabs only", [("X-Forwarded-For", "1.1.1.1,\t100.64.0.9  ")],
+     "127.0.0.1", "http"),
+    ("quoted value", [("X-Forwarded-For", '"100.64.0.9"'), ("X-Forwarded-Host", '"a,b.example"')],
+     "127.0.0.1", "http"),
+    ("quoted value with escapes", [("X-Forwarded-Host", '"a\\"b\\\\c"')], "127.0.0.1", "http"),
+    ("partially quoted item keeps its quotes", [("X-Forwarded-For", 'x"1,2"y')], "127.0.0.1", "http"),
+    ("unclosed quote ignores the header", [("X-Forwarded-For", '1.1.1.1, "100.64.0.9'),
+                                           ("X-Forwarded-Proto", "https")], "127.0.0.1", "http"),
+    ("empty quoted string", [("X-Forwarded-For", '1.1.1.1, ""'), ("X-Forwarded-Proto", '""')],
+     "127.0.0.1", "http"),
+    ("escape outside quotes", [("X-Forwarded-For", "1.1.1.1\\,2.2.2.2")], "127.0.0.1", "http"),
+    ("IPv6 client", [("X-Forwarded-For", "fd7a:115c:a1e0::1")], "127.0.0.1", "http"),
+    ("scheme is not normalised", [("X-Forwarded-Proto", "HTTPS")], "127.0.0.1", "http"),
+    ("forwarded host with port", [("Host", "studio"), ("X-Forwarded-Host", "opsgate.example:8443")],
+     "127.0.0.1", "http"),
+    ("forwarded IPv6 host", [("X-Forwarded-Host", "[fd7a::1]")], "127.0.0.1", "http"),
+    ("garbage client value is passed on", [("X-Forwarded-For", "not-an-ip")], "127.0.0.1", "http"),
+    ("latin-1 bytes", [("X-Forwarded-For", "100.64.0.9\u00e9"), ("X-Forwarded-Host", "h\u00f6st")],
+     "127.0.0.1", "http"),
+    ("Forwarded header is not used", [("Forwarded", "for=100.64.0.9;proto=https")], "127.0.0.1", "http"),
+    ("X-Forwarded-Port and Prefix are not used", [("Host", "studio"), ("X-Forwarded-Port", "8443"),
+                                                  ("X-Forwarded-Prefix", "/x")], "127.0.0.1", "http"),
+    ("repeated host headers", [("Host", "a"), ("Host", "b")], "127.0.0.1", "http"),
+)
+
+
+def _waitress_environ(headers: list[tuple[str, str]], remote_addr: str, scheme: str) -> dict[str, Any]:
+    """The WSGI environ waitress builds for these header lines (header
+    parsing by waitress itself: latin-1 values, repeated lines joined with
+    ", ", names with "_" dropped)."""
+    raw = b"GET / HTTP/1.1\r\n" + b"".join(
+        name.encode("latin-1") + b": " + value.encode("latin-1") + b"\r\n" for name, value in headers
+    ) + b"\r\n"
+    parser = HTTPRequestParser(Adjustments())
+    assert parser.received(raw) == len(raw) and parser.completed and parser.error is None
+    environ: dict[str, Any] = {"REMOTE_ADDR": remote_addr, "wsgi.url_scheme": scheme,
+                               "SERVER_NAME": "opsgate", "SERVER_PORT": "8711"}
+    for key, value in parser.headers.items():
+        if key not in ("CONTENT_LENGTH", "CONTENT_TYPE"):
+            environ.setdefault("HTTP_" + key, value)
+    return environ
+
+
+def _behind_proxy_fix(environ: dict[str, Any]) -> dict[str, Any]:
+    """The environ the application receives from ``ProxyFix``."""
+    seen: dict[str, Any] = {}
+
+    def app(environ: dict[str, Any], start_response: Any) -> list[bytes]:
+        seen.update(environ)
+        return []
+
+    ProxyFix(app, x_for=1, x_proto=1, x_host=1)(environ, None)  # type: ignore[arg-type]
+    return seen
+
+
+def build_proxy_fix() -> str:
+    """``proxy_fix.json``: request headers → client address, scheme and Host
+    the application sees behind Werkzeug ``ProxyFix(x_for=1, x_proto=1,
+    x_host=1)`` (``app.py:create_app`` with ``OPSGATE_TRUST_PROXY_HEADERS``;
+    PLAN.md 4.4 step 1)."""
+    cases = []
+    for name, headers, remote_addr, scheme in PROXY_CASES:
+        seen = _behind_proxy_fix(_waitress_environ(headers, remote_addr, scheme))
+        cases.append({
+            "name": name,
+            "headers": [list(header) for header in headers],
+            "remote_addr": remote_addr,
+            "scheme": scheme,
+            "result": {
+                "remote_addr": seen["REMOTE_ADDR"],
+                "scheme": seen["wsgi.url_scheme"],
+                "host": seen.get("HTTP_HOST"),
+            },
+        })
+    return render_json({
+        "generated_by": GENERATED_BY,
+        "source": "werkzeug.middleware.proxy_fix.ProxyFix(x_for=1, x_proto=1, x_host=1) behind waitress",
+        "cases": cases,
+    })
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
+    "log_preview.json": build_log_preview,
+    "proxy_fix.json": build_proxy_fix,
     "schema.sql": build_schema,
+    "settings.json": build_settings,
 }
 
 

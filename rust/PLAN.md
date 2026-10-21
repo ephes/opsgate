@@ -1,6 +1,7 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
-Status: plan; implementation in progress (S1 foundations landed); owner
+Status: plan; implementation in progress (S1 foundations and S2b core
+settings/files landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -336,12 +337,19 @@ Env-file semantics (`load_env_file`): `OPSGATE_ENV_FILE` is read first if set;
 missing file → `SettingsError("Env file does not exist: <path>")`. Lines are
 `.strip()`ped; empty and `#` lines skipped; lines without `=` skipped;
 `key, value = split("=", 1)`, both stripped; a value wrapped in matching
-single or double quotes loses one pair. **File values overwrite the process
-environment** (`os.environ[key] = value`), so the env file wins over launchd
-variables, and every key of the file becomes part of the process environment
-that child processes inherit (runner: 4.13.8). Rust loads the file the same
-way before starting any thread and applies it to its own process environment
-(or passes the identical set to children explicitly).
+single or double quotes loses one pair. Lines are split as Python's text mode
+plus `str.splitlines()` does (`\n`, `\r`, `\r\n` and also `\v`, `\f`,
+`\x1c`–`\x1e`, `\x85`, U+2028, U+2029); a file that is not UTF-8, a
+directory, an empty name or a NUL character make Python fail with a
+traceback (Rust: a `SettingsError` naming the file). **File values overwrite
+the process environment** (`os.environ[key] = value`), so the env file wins
+over launchd variables, and every key of the file becomes part of the process
+environment that child processes inherit (runner: 4.13.8). Rust loads the file
+the same way before starting any thread and passes the identical set to
+children explicitly: changing its own process environment needs `unsafe`
+(`std::env::set_var`, edition 2024), which the workspace forbids, so
+`opsgate_core::settings::Environment` holds the process snapshot plus the file
+and the runner spawns tmux with `env_clear().envs(environment.vars())` (S6a).
 
 Parsing rules (P1, fixture `settings.json`): `parse_bool` (blank/missing →
 default; `1/true/yes/on`, `0/false/no/off`, case-insensitive after strip;
@@ -428,11 +436,15 @@ every `GET` route.
 
 1. **Proxy fix** (`trust_proxy_headers`): Werkzeug `ProxyFix(x_for=1,
    x_proto=1, x_host=1)` — the client address is the **last** value of
-   `X-Forwarded-For` (comma-split, stripped), the scheme the last
-   `X-Forwarded-Proto`, the host the last `X-Forwarded-Host`; a header with
-   fewer values than trusted is ignored. P1, fixture-tested against Werkzeug.
-   Without the setting, the socket peer address is used and headers are
-   ignored.
+   `X-Forwarded-For`, the scheme the last `X-Forwarded-Proto` (not
+   lower-cased), the host the last `X-Forwarded-Host`; a header without
+   values is ignored. Values are split by Werkzeug 3.1's `parse_list_header`
+   (commas inside a quoted string do not split, items are stripped of spaces
+   and tabs only, empty items are dropped, a fully quoted item is unquoted, an
+   unclosed quoted string makes the header empty) after waitress joined
+   repeated header lines with `", "` and decoded the bytes as latin-1. P1,
+   fixture-tested against waitress + Werkzeug (`proxy_fix.json`). Without the
+   setting, the socket peer address is used and headers are ignored.
 2. **Network gate** (`enforce_tailscale_context`, before every request except
    `/api/v1/health`): if `require_tailscale_context` and the client address
    (scope id `%…` removed) is in none of the CIDRs → 403. Empty address →
@@ -786,11 +798,19 @@ rendered (section 6.3).
   or lines were omitted; missing file → no lines.
 - Step log page: final 2 MiB, decoded with replacement, newlines normalised,
   `[step log truncated]\n` prepended when earlier bytes were omitted.
-- Containment: `log_path` from the ticket's `tmux_sessions` entry; blank →
-  404 `log_not_found`; `Path(raw).resolve()` (symlinks resolved, non-strict)
-  must lie under `(<execution_data_dir>/sessions/<ticket_id>).resolve()` → else
-  400 `invalid_log_path`; then must exist and be a regular file → else 404.
-  The order (containment before existence) is P1. Step lookup: entries whose
+- Containment: `log_path` from the ticket's `tmux_sessions` entry (`str()`,
+  stripped); blank → 404 `log_not_found`; `Path(raw).resolve()` (symlinks
+  resolved, non-strict) must lie under
+  `(<execution_data_dir>/sessions/<ticket_id>).resolve()` (component-wise
+  prefix) → else 400 `invalid_log_path`; then must exist and be a regular file
+  (following symlinks, errors count as missing) → else 404. The order
+  (containment before existence) is P1. A path Python cannot resolve at all
+  (NUL character) raises an unhandled exception → 500. Rust ports CPython
+  3.14's `posixpath.realpath(strict=False)` step by step (`..` removes the last
+  resolved component; each other component is `lstat`ed; a symlink is replaced
+  by its resolved target; a component that cannot be looked up is kept and the
+  walk continues; a symlink loop stays unresolved), because "canonicalise the
+  longest existing prefix" would miss a symlink after `missing/..`. Step lookup: entries whose
   `int(step_index)` equals `n - 1`; `n <= 0` → 404. Session views skip
   non-object entries; `step_number = step_index + 1` if ≥ 0.
 
@@ -1016,8 +1036,11 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   hour-only offsets and other rarities → Rust 400 `invalid_expires_at`.
   Producers send `isoformat()` output.
 - **D-8 Settings parsing.** Non-ASCII digits in integers, netmask/hostmask
-  CIDR notation, integers outside `i64` → `SettingsError` at startup (Python
-  accepted or failed later). Production values are plain.
+  CIDR notation, integers outside `i64` (except for
+  `OPSGATE_MAX_DURATION_SECONDS_DEFAULT`, whose bounds check fails in both),
+  and a setting whose process-environment value is not UTF-8 →
+  `SettingsError` at startup (Python accepted or failed later). Production
+  values are plain.
 - **D-9 Framework responses** (unknown route 404, 405, `OPTIONS`, 500 pages)
   differ in body and `Allow` details.
 - **D-10 Runner base URL** must be `http://` (production
@@ -1071,6 +1094,7 @@ and filesystem work in `spawn_blocking`).
 | ids | `uuid` (v4) | |
 | time | `chrono` | UTC now, microsecond formatting; the narrow ISO parser of 4.9 is ~100 lines on top |
 | CIDR | `ipnet` | |
+| host name | `gethostname` | runner default `OPSGATE_RUNNER_HOST` (`socket.gethostname()`) |
 | form bodies | `form_urlencoded` | ordered pairs, first-value semantics (Werkzeug `MultiDict.get`) |
 | runner HTTP client | `reqwest` (default features off, no TLS) | async, timeouts; D-10 |
 | atomic files | `tempfile` | `NamedTempFile::new_in` (0600) + `persist` = Python's publish |
@@ -1082,9 +1106,9 @@ and filesystem work in `spawn_blocking`).
 
 No hand-rolled protocols. The only Python-compatibility code is small and
 fixture-pinned: the checksum formatter (4.8), Python `str.strip` whitespace,
-Python `int()` for ASCII, the ISO subset parser, Werkzeug ProxyFix selection,
-and the non-strict path resolution of 4.12 (canonicalise the longest existing
-prefix, then normalise the rest lexically).
+Python `int()` for ASCII, the ISO subset parser, Werkzeug ProxyFix selection
+(with `parse_list_header`), and the non-strict path resolution of 4.12 (a port
+of CPython 3.14 `posixpath.realpath(strict=False)`).
 
 ### 6.3 Templates
 

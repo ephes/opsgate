@@ -1,0 +1,493 @@
+{
+ "cases": [
+  {
+   "headers": [
+    [
+     "Host",
+     "opsgate.local"
+    ]
+   ],
+   "name": "no forwarded headers",
+   "remote_addr": "100.64.0.5",
+   "result": {
+    "host": "opsgate.local",
+    "remote_addr": "100.64.0.5",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [],
+   "name": "no host header",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "Host",
+     "studio:8711"
+    ],
+    [
+     "X-Forwarded-For",
+     "100.64.0.9"
+    ],
+    [
+     "X-Forwarded-Proto",
+     "https"
+    ],
+    [
+     "X-Forwarded-Host",
+     "opsgate.example"
+    ]
+   ],
+   "name": "single proxy",
+   "remote_addr": "100.64.0.1",
+   "result": {
+    "host": "opsgate.example",
+    "remote_addr": "100.64.0.9",
+    "scheme": "https"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "203.0.113.7, 100.64.0.9"
+    ],
+    [
+     "X-Forwarded-Proto",
+     "http,https"
+    ],
+    [
+     "X-Forwarded-Host",
+     "a.example , b.example"
+    ]
+   ],
+   "name": "last value wins",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "b.example",
+    "remote_addr": "100.64.0.9",
+    "scheme": "https"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "203.0.113.7"
+    ],
+    [
+     "X-Forwarded-For",
+     " 100.64.0.9 "
+    ]
+   ],
+   "name": "repeated header lines are joined",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "100.64.0.9",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "x-forwarded-for",
+     "100.64.0.9"
+    ],
+    [
+     "X-FORWARDED-PROTO",
+     "https"
+    ]
+   ],
+   "name": "header name case",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "100.64.0.9",
+    "scheme": "https"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X_Forwarded_For",
+     "100.64.0.9"
+    ]
+   ],
+   "name": "underscore header names are dropped",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     ""
+    ],
+    [
+     "X-Forwarded-Proto",
+     ""
+    ],
+    [
+     "X-Forwarded-Host",
+     ""
+    ]
+   ],
+   "name": "empty header",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     " , ,"
+    ],
+    [
+     "X-Forwarded-Proto",
+     ","
+    ]
+   ],
+   "name": "only commas",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "100.64.0.9,"
+    ],
+    [
+     "X-Forwarded-Proto",
+     "https, "
+    ]
+   ],
+   "name": "trailing comma is ignored",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "100.64.0.9",
+    "scheme": "https"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "1.1.1.1,\t100.64.0.9 \u00a0"
+    ]
+   ],
+   "name": "items stripped of spaces and tabs only",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "100.64.0.9 \u00a0",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "\"100.64.0.9\""
+    ],
+    [
+     "X-Forwarded-Host",
+     "\"a,b.example\""
+    ]
+   ],
+   "name": "quoted value",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "a,b.example",
+    "remote_addr": "100.64.0.9",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-Host",
+     "\"a\\\"b\\\\c\""
+    ]
+   ],
+   "name": "quoted value with escapes",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "a\"b\\c",
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "x\"1,2\"y"
+    ]
+   ],
+   "name": "partially quoted item keeps its quotes",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "x\"1,2\"y",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "1.1.1.1, \"100.64.0.9"
+    ],
+    [
+     "X-Forwarded-Proto",
+     "https"
+    ]
+   ],
+   "name": "unclosed quote ignores the header",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "https"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "1.1.1.1, \"\""
+    ],
+    [
+     "X-Forwarded-Proto",
+     "\"\""
+    ]
+   ],
+   "name": "empty quoted string",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "1.1.1.1\\,2.2.2.2"
+    ]
+   ],
+   "name": "escape outside quotes",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "2.2.2.2",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "fd7a:115c:a1e0::1"
+    ]
+   ],
+   "name": "IPv6 client",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "fd7a:115c:a1e0::1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-Proto",
+     "HTTPS"
+    ]
+   ],
+   "name": "scheme is not normalised",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "HTTPS"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "Host",
+     "studio"
+    ],
+    [
+     "X-Forwarded-Host",
+     "opsgate.example:8443"
+    ]
+   ],
+   "name": "forwarded host with port",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "opsgate.example:8443",
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-Host",
+     "[fd7a::1]"
+    ]
+   ],
+   "name": "forwarded IPv6 host",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "[fd7a::1]",
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "not-an-ip"
+    ]
+   ],
+   "name": "garbage client value is passed on",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "not-an-ip",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "X-Forwarded-For",
+     "100.64.0.9\u00e9"
+    ],
+    [
+     "X-Forwarded-Host",
+     "h\u00f6st"
+    ]
+   ],
+   "name": "latin-1 bytes",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "h\u00f6st",
+    "remote_addr": "100.64.0.9\u00e9",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "Forwarded",
+     "for=100.64.0.9;proto=https"
+    ]
+   ],
+   "name": "Forwarded header is not used",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": null,
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "Host",
+     "studio"
+    ],
+    [
+     "X-Forwarded-Port",
+     "8443"
+    ],
+    [
+     "X-Forwarded-Prefix",
+     "/x"
+    ]
+   ],
+   "name": "X-Forwarded-Port and Prefix are not used",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "studio",
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  },
+  {
+   "headers": [
+    [
+     "Host",
+     "a"
+    ],
+    [
+     "Host",
+     "b"
+    ]
+   ],
+   "name": "repeated host headers",
+   "remote_addr": "127.0.0.1",
+   "result": {
+    "host": "a, b",
+    "remote_addr": "127.0.0.1",
+    "scheme": "http"
+   },
+   "scheme": "http"
+  }
+ ],
+ "generated_by": "rust/fixtures/generate.py",
+ "source": "werkzeug.middleware.proxy_fix.ProxyFix(x_for=1, x_proto=1, x_host=1) behind waitress"
+}

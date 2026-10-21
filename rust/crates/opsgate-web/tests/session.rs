@@ -1,10 +1,12 @@
 //! The session cookie and the approver check (`web::session`, PLAN.md
-//! 4.5.2, D-1), observed through `GET /api/v1/tickets/{id}`.
+//! 4.5.2, D-1), observed through `GET /api/v1/tickets/{id}` (the Python
+//! tests use `GET /tickets`, slice S5's page); logout and the server-side
+//! revocation (4.5.3, S4b).
 
 mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{APPROVER, Call, NYXMON_TOKEN, TestApp, ticket_payload};
+use common::{APPROVER, Call, NEW_PASSWORD_HASH, NYXMON_TOKEN, TestApp, ticket_payload};
 use opsgate_core::time::{isoformat_z, utc_now};
 use opsgate_web::session::SessionData;
 use opsgate_web::testing::session_cookie;
@@ -178,4 +180,178 @@ async fn session_timeout_beyond_timedelta_is_500() {
     let path = ticket(&app).await;
     app.sign_in();
     assert_eq!(app.get(&path).await.status, StatusCode::OK);
+}
+
+// ------------------------------------------- logout and revocation (S4b)
+
+async fn pending_ticket(app: &TestApp, task_ref: &str) -> String {
+    app.create_ticket(NYXMON_TOKEN, ticket_payload("Hardening", Some(task_ref)))
+        .await
+}
+
+fn generation(app: &TestApp) -> i64 {
+    app.state
+        .store()
+        .ui_session_generation(APPROVER)
+        .unwrap()
+        .unwrap()
+}
+
+/// `POST /logout` with the session's form token.
+async fn logout(app: &TestApp) -> common::TestResponse {
+    let token = app.csrf_token();
+    app.send(Call::post("/logout").form(&[("csrf_token", &token)]))
+        .await
+}
+
+#[tokio::test]
+async fn test_cookie_replayed_after_logout_is_rejected() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "logout-replay").await;
+    app.login("/login").await;
+    let stolen_cookie = app.cookie();
+    let stolen_csrf = app.csrf_token();
+
+    let response = logout(&app).await;
+    assert_eq!(response.status, StatusCode::FOUND);
+    assert!(response.location().unwrap().ends_with("/login"));
+    response.assert_security_headers();
+
+    app.set_cookie(stolen_cookie.clone());
+    assert!(!app.authenticated(&ticket_id).await);
+
+    app.set_cookie(stolen_cookie);
+    let api_replay = app
+        .send(
+            Call::post(&format!("/api/v1/tickets/{ticket_id}/approve"))
+                .header("x-csrf-token", &stolen_csrf),
+        )
+        .await;
+    assert_eq!(api_replay.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.ticket_state(&ticket_id).await, "pending_approval");
+}
+
+#[tokio::test]
+async fn test_logout_revokes_other_sessions_and_fresh_login_works() {
+    let first = TestApp::new();
+    let ticket_id = pending_ticket(&first, "logout-other").await;
+    let second = first.sharing(&[]);
+    first.login("/login").await;
+    second.login("/login").await;
+
+    logout(&first).await;
+
+    assert!(!second.authenticated(&ticket_id).await);
+    second.login("/login").await;
+    assert!(second.authenticated(&ticket_id).await);
+}
+
+#[tokio::test]
+async fn test_anonymous_logout_does_not_revoke_sessions() {
+    let approver = TestApp::new();
+    let ticket_id = pending_ticket(&approver, "logout-anon").await;
+    let anonymous = approver.sharing(&[]);
+    approver.login("/login").await;
+    let before = generation(&approver);
+
+    anonymous.get("/login").await;
+    let response = logout(&anonymous).await;
+    assert_eq!(response.status, StatusCode::FOUND);
+    assert_eq!(response.location(), Some("/login"));
+
+    assert_eq!(generation(&approver), before);
+    assert!(approver.authenticated(&ticket_id).await);
+}
+
+#[tokio::test]
+async fn test_password_change_revokes_existing_sessions() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "password-change").await;
+    app.login("/login").await;
+    let old_cookie = app.cookie();
+
+    let rotated = app.sharing(&[("OPSGATE_UI_PASSWORD_BCRYPT", NEW_PASSWORD_HASH)]);
+    rotated.set_cookie(old_cookie);
+    assert!(!rotated.authenticated(&ticket_id).await);
+}
+
+#[tokio::test]
+async fn test_restart_with_same_password_keeps_sessions() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "restart").await;
+    app.login("/login").await;
+    let cookie = app.cookie();
+
+    let restarted = app.sharing(&[]);
+    restarted.set_cookie(cookie);
+    assert!(restarted.authenticated(&ticket_id).await);
+}
+
+#[tokio::test]
+async fn test_session_without_generation_is_treated_as_logged_out() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "no-generation").await;
+    app.login("/login").await;
+    let mut data = app.session();
+    data.session_generation = None;
+    app.set_cookie(Some(session_cookie(&app.state, &data)));
+
+    assert!(!app.authenticated(&ticket_id).await);
+    // The failing session was cleared.
+    assert_eq!(app.cookie(), None);
+}
+
+/// Logout bumps the generation once per authenticated session, clears the
+/// session (the cookie is deleted) and needs the form token; a session that
+/// no longer authenticates revokes nothing.
+#[tokio::test]
+async fn logout_clears_the_session_and_bumps_once() {
+    let app = TestApp::new();
+    let start = generation(&app);
+    app.login("/login").await;
+    let response = logout(&app).await;
+    let cookie = response.set_cookie().unwrap();
+    assert!(
+        cookie.starts_with("session=;") && cookie.contains("Max-Age=0"),
+        "{cookie}"
+    );
+    assert_eq!(app.cookie(), None);
+    assert_eq!(generation(&app), start + 1);
+
+    // A stale session (the old generation) signs nobody out.
+    let stale = SessionData {
+        username: Some(APPROVER.to_owned()),
+        auth_at: Some(isoformat_z(&utc_now())),
+        session_generation: Some(start),
+        csrf_token: Some("stale".to_owned()),
+        flashes: Vec::new(),
+    };
+    app.set_cookie(Some(session_cookie(&app.state, &stale)));
+    let response = logout(&app).await;
+    assert_eq!(response.location(), Some("/login"));
+    assert_eq!(generation(&app), start + 1);
+
+    // Without the form token logout is the UI-CSRF redirect and nothing else.
+    app.login("/login").await;
+    let response = app
+        .send(Call::post("/logout").form(&[("csrf_token", "wrong")]))
+        .await;
+    assert_eq!(response.location(), Some("/tickets"));
+    assert_eq!(generation(&app), start + 1);
+    assert_eq!(app.session().username.as_deref(), Some(APPROVER));
+}
+
+/// Logout after the approver's row is gone: the session no longer
+/// authenticates (no stored generation), so nothing is revoked; the session
+/// is cleared.
+#[tokio::test]
+async fn logout_without_the_approver_row() {
+    let app = TestApp::new();
+    app.login("/login").await;
+    app.connection()
+        .execute("UPDATE ui_session_state SET username = 'other'", [])
+        .unwrap();
+    let response = logout(&app).await;
+    assert_eq!(response.location(), Some("/login"));
+    assert_eq!(app.cookie(), None);
 }

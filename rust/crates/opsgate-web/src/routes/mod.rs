@@ -1,5 +1,6 @@
 //! The routes of PLAN.md 4.3. Slice S4a: the bearer routes and health
-//! ([`api`]) and the login page ([`login`]); slices S4b and S5 add theirs
+//! ([`api`]) and the login page ([`login`]); slice S4b: `POST /login`,
+//! `POST /logout` and the approver's API actions; slice S5 adds its routes
 //! here. Every route sits behind the layers of [`crate::app`].
 //!
 //! Routing follows Werkzeug's rules: `{ticket_id}` is one path segment, no
@@ -39,6 +40,8 @@ use crate::state::AppState;
 const GET_ALLOW: &str = "GET, HEAD, OPTIONS";
 /// The `Allow` value of a `POST` route.
 const POST_ALLOW: &str = "OPTIONS, POST";
+/// The `Allow` value of a `GET` and `POST` route.
+const GET_POST_ALLOW: &str = "GET, HEAD, OPTIONS, POST";
 
 /// The routes with their state.
 pub fn router(state: AppState) -> Router {
@@ -53,6 +56,26 @@ pub fn router(state: AppState) -> Router {
             allow(get(api::get_ticket), GET_ALLOW),
         )
         .route(
+            "/api/v1/tickets/{ticket_id}/approve",
+            allow(post(api::approve_ticket), POST_ALLOW),
+        )
+        .route(
+            "/api/v1/tickets/{ticket_id}/reject",
+            allow(post(api::reject_ticket), POST_ALLOW),
+        )
+        .route(
+            "/api/v1/tickets/{ticket_id}/cancel",
+            allow(post(api::cancel_ticket), POST_ALLOW),
+        )
+        .route(
+            "/api/v1/tickets/{ticket_id}/archive",
+            allow(post(api::archive_ticket), POST_ALLOW),
+        )
+        .route(
+            "/api/v1/tickets/{ticket_id}/unarchive",
+            allow(post(api::unarchive_ticket), POST_ALLOW),
+        )
+        .route(
             "/api/v1/runner/claim",
             allow(post(api::runner_claim), POST_ALLOW),
         )
@@ -60,7 +83,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/runner/{ticket_id}/status",
             allow(post(api::runner_status), POST_ALLOW),
         )
-        .route("/login", allow(get(login::login_page), GET_ALLOW));
+        .route(
+            "/login",
+            allow(
+                get(login::login_page).post(login::login_submit),
+                GET_POST_ALLOW,
+            ),
+        )
+        .route("/logout", allow(post(login::logout), POST_ALLOW));
     let probe = routes.clone().with_state(state.clone());
     routes
         .fallback(move |request: Request| not_found(probe.clone(), request))

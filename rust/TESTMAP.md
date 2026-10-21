@@ -27,8 +27,8 @@ section ("Rust-only tests") with their paths.
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_ui_ticket_detail_redirects_to_login_with_next` | `web::login` | S4b | A |
-| `test_login_redirects_to_requested_next_path` | `web::login` | S4b | A |
+| `test_ui_ticket_detail_redirects_to_login_with_next` | `web::ui` (the redirect is S5's `GET /tickets/<id>`; the login side is `crates/opsgate-web/tests/login.rs::test_login_redirects_to_requested_next_path`) | S5 | A |
+| `test_login_redirects_to_requested_next_path` | `crates/opsgate-web/tests/login.rs::test_login_redirects_to_requested_next_path` (signs in on `/login?next=/tickets/<id>` directly; the detail page that redirects there is S5's) | S4b ✓ | A |
 | `test_manual_ticket_creation_from_ui` | `web::ui::manual_form` | S5 | A |
 | `test_manual_ticket_form_defaults_investigator_to_codex` | `web::ui::manual_form` | S5 | A |
 | `test_manual_ticket_form_renders_role_scaffolding` | `web::ui::manual_form` | S5 | A |
@@ -73,12 +73,12 @@ section ("Rust-only tests") with their paths.
 | `test_runner_claim_accepts_stored_json_at_depth_limit` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_accepts_stored_json_at_depth_limit` | S3b ✓ | A |
 | `test_ui_post_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `crates/opsgate-web/tests/gate.rs::test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` (production expectation: forwarded headers ignored behind waitress, PLAN.md 4.4 step 1; the Python test bypasses waitress) | S4a ✓ | A |
-| `test_login_ignores_external_next_path` | `web::login` | S4b | A |
-| `test_login_form_uses_autofill_friendly_fields` | `web::login` | S4b | A |
-| `test_login_head_is_side_effect_free` | `web::login` | S4b | A |
-| `test_login_ignores_protocol_relative_next_path` | `web::login` | S4b | A |
-| `test_login_ignores_javascript_next_path` | `web::login` | S4b | A |
-| `test_login_ignores_control_chars_in_next_path` | `web::login` | S4b | A |
+| `test_login_ignores_external_next_path` | `crates/opsgate-web/tests/login.rs::test_login_ignores_external_next_path` | S4b ✓ | A |
+| `test_login_form_uses_autofill_friendly_fields` | `crates/opsgate-web/tests/login.rs::test_login_form_uses_autofill_friendly_fields` | S4b ✓ | A |
+| `test_login_head_is_side_effect_free` | `crates/opsgate-web/tests/login.rs::test_login_head_is_side_effect_free` | S4b ✓ | A |
+| `test_login_ignores_protocol_relative_next_path` | `crates/opsgate-web/tests/login.rs::test_login_ignores_protocol_relative_next_path` | S4b ✓ | A |
+| `test_login_ignores_javascript_next_path` | `crates/opsgate-web/tests/login.rs::test_login_ignores_javascript_next_path` | S4b ✓ | A |
+| `test_login_ignores_control_chars_in_next_path` | `crates/opsgate-web/tests/login.rs::test_login_ignores_control_chars_in_next_path` | S4b ✓ | A |
 | `test_create_and_get_ticket_submit_token` | `crates/opsgate-web/tests/api.rs::test_create_and_get_ticket_submit_token` | S4a ✓ | A |
 | `test_dedupe_enforced_for_open_task_ref` | `crates/opsgate-store/tests/create.rs::test_dedupe_enforced_for_open_task_ref` (also scenario `dedupe` of fixture `store.json`) | S3a ✓ | A |
 | `test_dedupe_ignores_archived_pending_ticket` | `crates/opsgate-store/tests/transitions.rs::test_dedupe_ignores_archived_pending_ticket` | S3b ✓ | A |
@@ -104,25 +104,25 @@ section ("Rust-only tests") with their paths.
 | `test_idle_runner_claim_poll_records_heartbeat` | `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat` | S3b ✓ | A |
 | `test_runner_claim_without_token_records_no_heartbeat` | `crates/opsgate-web/tests/api.rs::test_runner_claim_without_token_records_no_heartbeat` (the 401 is the web layer's; the store records a heartbeat only when a claim reaches it, `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat`) | S4a ✓ | A |
 | `test_api_rejects_non_tailscale_source_ip` | `crates/opsgate-web/tests/gate.rs::test_api_rejects_non_tailscale_source_ip` | S4a ✓ | A |
-| `test_cookie_api_action_without_csrf_header_is_rejected` | `web::csrf` | S4b | A |
-| `test_cookie_approve_with_wrong_csrf_header_is_rejected` | `web::csrf` | S4b | A |
-| `test_cookie_approve_with_csrf_header_succeeds` | `web::csrf` | S4b | A |
-| `test_cookie_approve_same_origin_fallback` | `web::csrf` | S4b | A |
-| `test_bearer_callers_are_unaffected_by_api_csrf` | `web::csrf` | S4b | A |
-| `test_unauthenticated_api_action_reports_auth_before_csrf` | `web::csrf` | S4b | A |
-| `test_cookie_replayed_after_logout_is_rejected` | `web::session` | S4b | A |
-| `test_logout_revokes_other_sessions_and_fresh_login_works` | `web::session` | S4b | A |
-| `test_anonymous_logout_does_not_revoke_sessions` | `web::session` | S4b | A |
-| `test_password_change_revokes_existing_sessions` | `web::session` | S4b | A |
-| `test_restart_with_same_password_keeps_sessions` | `web::session` | S4b | A |
-| `test_session_without_generation_is_treated_as_logged_out` | `web::session` | S4b | - |
-| `test_login_locks_after_repeated_failures` | `web::login::throttle` | S4b | A |
-| `test_unknown_username_counts_toward_throttle` | `web::login::throttle` | S4b | A |
-| `test_successful_login_resets_failure_count` | `web::login::throttle` | S4b | A |
-| `test_login_throttle_is_per_client_ip` | `web::login::throttle` | S4b | A |
-| `test_login_throttle_bounds_tracked_clients` | `web::login::throttle` | S4b | - |
+| `test_cookie_api_action_without_csrf_header_is_rejected` | `crates/opsgate-web/tests/csrf.rs::test_cookie_api_action_without_csrf_header_is_rejected` | S4b ✓ | A |
+| `test_cookie_approve_with_wrong_csrf_header_is_rejected` | `crates/opsgate-web/tests/csrf.rs::test_cookie_approve_with_wrong_csrf_header_is_rejected` | S4b ✓ | A |
+| `test_cookie_approve_with_csrf_header_succeeds` | `crates/opsgate-web/tests/csrf.rs::test_cookie_approve_with_csrf_header_succeeds` | S4b ✓ | A |
+| `test_cookie_approve_same_origin_fallback` | `crates/opsgate-web/tests/csrf.rs::test_cookie_approve_same_origin_fallback` | S4b ✓ | A |
+| `test_bearer_callers_are_unaffected_by_api_csrf` | `crates/opsgate-web/tests/csrf.rs::test_bearer_callers_are_unaffected_by_api_csrf` | S4b ✓ | A |
+| `test_unauthenticated_api_action_reports_auth_before_csrf` | `crates/opsgate-web/tests/csrf.rs::test_unauthenticated_api_action_reports_auth_before_csrf` | S4b ✓ | A |
+| `test_cookie_replayed_after_logout_is_rejected` | `crates/opsgate-web/tests/session.rs::test_cookie_replayed_after_logout_is_rejected` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | A |
+| `test_logout_revokes_other_sessions_and_fresh_login_works` | `crates/opsgate-web/tests/session.rs::test_logout_revokes_other_sessions_and_fresh_login_works` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | A |
+| `test_anonymous_logout_does_not_revoke_sessions` | `crates/opsgate-web/tests/session.rs::test_anonymous_logout_does_not_revoke_sessions` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | A |
+| `test_password_change_revokes_existing_sessions` | `crates/opsgate-web/tests/session.rs::test_password_change_revokes_existing_sessions` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | A |
+| `test_restart_with_same_password_keeps_sessions` | `crates/opsgate-web/tests/session.rs::test_restart_with_same_password_keeps_sessions` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | A |
+| `test_session_without_generation_is_treated_as_logged_out` | `crates/opsgate-web/tests/session.rs::test_session_without_generation_is_treated_as_logged_out` (authentication observed through `GET /api/v1/tickets/<id>`; `GET /tickets` is S5's) | S4b ✓ | - |
+| `test_login_locks_after_repeated_failures` | `crates/opsgate-web/tests/throttle.rs::test_login_locks_after_repeated_failures` | S4b ✓ | A |
+| `test_unknown_username_counts_toward_throttle` | `crates/opsgate-web/tests/throttle.rs::test_unknown_username_counts_toward_throttle` | S4b ✓ | A |
+| `test_successful_login_resets_failure_count` | `crates/opsgate-web/tests/throttle.rs::test_successful_login_resets_failure_count` | S4b ✓ | A |
+| `test_login_throttle_is_per_client_ip` | `crates/opsgate-web/tests/throttle.rs::test_login_throttle_is_per_client_ip` | S4b ✓ | A |
+| `test_login_throttle_bounds_tracked_clients` | `crates/opsgate-web/tests/throttle.rs::test_login_throttle_bounds_tracked_clients` | S4b ✓ | - |
 | `test_api_bearer_endpoints_reject_non_ascii_token` | `crates/opsgate-web/tests/auth.rs::test_api_bearer_endpoints_reject_non_ascii_token` | S4a ✓ | A |
-| `test_api_session_actions_reject_non_ascii_csrf_header` | `web::csrf` | S4b | A |
+| `test_api_session_actions_reject_non_ascii_csrf_header` | `crates/opsgate-web/tests/csrf.rs::test_api_session_actions_reject_non_ascii_csrf_header` | S4b ✓ | A |
 | `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_api_rejects_non_text_plan_fields` | `crates/opsgate-core/tests/validation.rs::test_api_rejects_non_text_plan_fields` (cases also in fixture `validation.json`) | S2c ✓ | A |
@@ -133,9 +133,9 @@ section ("Rust-only tests") with their paths.
 | `test_ui_pages_cannot_be_framed` | `crates/opsgate-web/tests/headers.rs::test_ui_pages_cannot_be_framed` (the S4a pages: login and forbidden; S5 adds the ticket list and detail pages to it) | S4a ✓ + S5 | A |
 | `test_api_error_and_redirect_responses_carry_security_headers` | `crates/opsgate-web/tests/headers.rs::test_api_error_and_redirect_responses_carry_security_headers` (the redirect is the UI-CSRF one; `GET /tickets` is S5's route) | S4a ✓ | A |
 | `test_forbidden_network_response_carries_security_headers` | `crates/opsgate-web/tests/headers.rs::test_forbidden_network_response_carries_security_headers` | S4a ✓ | A |
-| `test_wrong_username_still_runs_the_password_check` | `web::login` | S4b | A |
-| `test_non_ascii_username_is_rejected_without_error` | `web::login` | S4b | A |
-| `test_json_decode_errors_are_domain_responses` | `crates/opsgate-web/tests/api.rs::test_json_decode_errors_are_domain_responses` (the bearer endpoints; the reject and cancel cases need S4b's routes) | S4a ✓ + S4b | A |
+| `test_wrong_username_still_runs_the_password_check` | `crates/opsgate-web/tests/login.rs::test_wrong_username_still_runs_the_password_check` + `crates/opsgate-web/src/password.rs::tests::the_password_check_always_runs` (counts the password checks, Python's monkeypatch) | S4b ✓ | A |
+| `test_non_ascii_username_is_rejected_without_error` | `crates/opsgate-web/tests/login.rs::test_non_ascii_username_is_rejected_without_error` | S4b ✓ | A |
+| `test_json_decode_errors_are_domain_responses` | `crates/opsgate-web/tests/api.rs::test_json_decode_errors_are_domain_responses` (the bearer endpoints, S4a; reject and cancel with a session, S4b) | S4a ✓ + S4b ✓ | A |
 | `test_manual_context_rejects_excessive_nesting` | `web::ui::manual_form` | S5 | A |
 | `test_real_json_nesting_limit` | `crates/opsgate-web/tests/api.rs::test_real_json_nesting_limit` (also depth 129, beyond `serde_json`'s recursion limit) | S4a ✓ | A |
 | `test_real_manual_context_nesting_limit` | `web::ui::manual_form` | S5 | A |
@@ -309,3 +309,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-web/tests/templates.rs` | every template renders through the S4a environment with the context of `app.py` for each ticket state with and without the archived flag (action forms by state, escaping, `tojson(indent=2)`, `url_for`) | S4a |
 | `crates/opsgate/tests/binary.rs` (serve cases) | `opsgate serve`: configuration errors (one stderr line naming the setting, exit 1), the overrides `--db`/`--bind-host`/`--bind-port`, HTTP on the bound port, SIGTERM/SIGINT → exit 0, startup line without secrets, an address in use → exit 1, exit within the grace period while a store operation waits on a locked database | S4a |
 | `crates/opsgate-core/src/json.rs::tests::depth_counts_containers_from_the_root` (S4a part) | `ParseError::exceeds_recursion_limit`: 127 levels decode, 128 hit the limit, malformed shallower text does not | S4a |
+| `crates/opsgate-web/tests/login_fixtures.rs` | `bcrypt.json`: 59 password/hash pairs through `password::checkpw` give pyca bcrypt 4.3's `checkpw` result (`$2a$`/`$2b$`/`$2x$`/`$2y$`, 72-byte truncation, embedded and trailing NUL bytes, UTF-8 and latin-1 passwords, every malformed-hash kind: version, cost, salt alphabet and trailing bits, digest length, separators); `throttle.json`: 51 `LoginThrottle` event sequences with a fake clock (hand cases: window boundary, last stamps kept, reset, per key, overflow with expired clients and insertion-order ties; 40 random sequences) give the same results and tracked failures after every step (4.5.3) | S4b |
+| `crates/opsgate-web/src/{password,csrf,urls}.rs` unit tests (S4b parts) | the password check runs for every username; Werkzeug's `get_host` (default port, validation) and the same-origin headers (`Sec-Fetch-Site` before `Origin`, Python's strip and lower); `iri_to_uri` of local targets (4.5.3, 4.5.4) | S4b |
+| `crates/opsgate-web/tests/{login,csrf,session,throttle,api}.rs` (other S4b tests) | over HTTP in-process: `POST /login` replaces the session (stripped username, generation, new token, flashes gone), failed sign-ins keep a sanitised `next` and flash once, the form's `next` wins, success redirects through `iri_to_uri`, missing fields, a malformed configured hash, `session_state_missing` as a UI error, the UI-CSRF check before the sign-in; API-CSRF header rules (stripped values, repeated lines, a session without a token), `Origin` against Werkzeug's host (ports, IPv6, no `Host`: D-19), the check before the body; logout bumps once, clears the session, needs the form token, a stale session revokes nothing; the 429 page (`next`, flash not kept, no new failure), the throttle key is the socket peer (forwarded headers ignored, `unknown` without an address); the approver's API actions (transitions, `reason` rules incl. D-3/D-4, audit actor/address/user agent, archive errors, 404s, routing with 405 and `OPTIONS`) | S4b |
+| `parity/api/` (S4b) | the S4b scenarios (`test_auth.py`, `test_lifecycle.py`, `test_runner_api.py`, `test_cross.py`, `test_gate.py` marked `S4a, S4b`) run against Rust: 454 scenarios compared locally, 0 unexplained differences (29 explained by D-2/D-3/D-4); `test_login_throttle_is_per_client_ip` (needs `127.0.0.2`) runs on Linux in CI | S4b |

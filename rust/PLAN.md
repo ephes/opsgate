@@ -4,7 +4,9 @@ Status: plan; implementation in progress (S1 foundations, S2a core
 JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S3b
 store II, S4a web I (`opsgate serve` with the bearer routes, health and the
 login page; the API parity harness runs its S4a scenarios against Rust in CI),
-S6a runner I, S6b runner II (`opsgate runner` works; the runner
+S4b web II (`POST /login`, logout, the throttle, API-CSRF and the approver's
+API actions; the S4b scenarios of both parity harnesses run against Rust), S6a
+runner I, S6b runner II (`opsgate runner` works; the runner
 parity harness is green against it locally) and the S7b runner parity harness
 landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
@@ -550,18 +552,30 @@ see D-1).
   stripped username **and always** `bcrypt.checkpw(password, hash)` (bcrypt
   `ValueError` → false). Failure → record failure, flash "Invalid username or
   password", 302 `/login` (with `?next=` if any). Success → generation must
-  exist (else 500 `session_state_missing`), reset throttle, clear session, set
-  `username`, `auth_at=now`, generation, new `csrf_token`
-  (`secrets.token_urlsafe(32)`), 302 to `next` or `/tickets`.
-- bcrypt parity (fixture): `$2a$`, `$2b$`, `$2y$` hashes; passwords longer
-  than 72 bytes are truncated (pyca bcrypt 4.3, pinned `<5.0`); passwords
-  with embedded NUL bytes are passed unchanged and **verify against a matching
-  hash** (pyca 4.3 accepts them; the fixture includes matching and
-  non-matching NUL passwords); malformed hashes → false.
-- Throttle: per key, failures within 15 min; locked when ≥ 5 recent failures;
-  a failure keeps the last 5 stamps; success resets; at most 10 000 tracked
-  keys — on overflow first expired entries are dropped, then the keys whose
-  newest failure is oldest. In memory, monotonic clock, lost on restart.
+  exist (else `ServiceError` 500 `session_state_missing`, which on this UI
+  path is the error mapping's flash and 302 to `/tickets`, 4.4), reset
+  throttle, clear session, set `username`, `auth_at=now`, generation, new
+  `csrf_token` (`secrets.token_urlsafe(32)`), 302 to `next` or `/tickets`.
+  Every `Location` goes through Werkzeug's `iri_to_uri` (Flask's response
+  headers): a `next` of `/tickets/a b` redirects to `/tickets/a%20b`, a
+  backslash becomes `%5C` (S4b: `urls::local_iri_to_uri` in `error::redirect`).
+- bcrypt parity (fixture `bcrypt.json`): `$2a$`, `$2b$`, `$2y$` (and `$2x$`)
+  hashes; passwords longer than 72 bytes are truncated (pyca bcrypt 4.3,
+  pinned `<5.0`); passwords with embedded NUL bytes are passed unchanged and
+  **verify against a matching hash** (pyca 4.3 accepts them; the fixture
+  includes matching and non-matching NUL passwords); malformed hashes → false.
+  pyca 4.3's `checkpw` is a small wrapper (parse `$`-separated version, cost
+  and 22 salt characters, `hash_with_salt` of the `bcrypt` crate, format for
+  the parsed version, constant-time compare with the stored bytes); Rust
+  reproduces that wrapper over the same crate (`password::checkpw`, S4b), so
+  malformed hashes (`$2b$4$…` without the leading zero, a salt with non-zero
+  trailing bits, an extra character) are refused exactly as in Python.
+- Throttle (fixture `throttle.json`): per key, failures within 15 min; locked
+  when ≥ 5 recent failures; a failure keeps the last 5 stamps; success
+  resets; at most 10 000 tracked keys — on overflow first expired entries are
+  dropped, then the keys whose newest failure is oldest (ties in the order
+  the keys entered Python's dictionary). In memory, monotonic clock, lost on
+  restart.
 - `POST /logout`: revoke only if `get_session_user()` is authenticated; clear
   session; 302 `/login`.
 
@@ -575,9 +589,13 @@ see D-1).
   non-`GET/HEAD/OPTIONS`): if the session has a token and `X-CSRF-Token` is
   non-empty → equal (constant-time bytes) passes, else 403 `invalid_csrf`; if
   no header: `Sec-Fetch-Site` present → passes iff stripped/lowercased equals
-  `same-origin`; else `Origin` present → passes iff lowercased equals
-  `<scheme>://<host>` of the request (`http` and the `Host` header, 4.4); else 403
-  `csrf_required`.
+  `same-origin`; else `Origin` present → passes iff stripped/lowercased
+  equals `<scheme>://<host>` of the request, lowercased (`http`, 4.4, and
+  Werkzeug's `request.host`: the `Host` header in its WSGI form without a
+  trailing `:80`, empty when it is no valid `host[:port]`; without a `Host`
+  header D-19); else 403 `csrf_required`. Header values are the stripped
+  WSGI values of 4.4 (waitress drops surrounding spaces and tabs, joins
+  repeated lines with `", "`).
 
 ### 4.6 JSON contract
 
@@ -1207,6 +1225,13 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   500; Rust treats the value as no `next` (the page or the redirect without
   it). Every such value has a network location, which the sanitising refuses
   anyway (S4a).
+- **D-19 Cookie-authenticated API calls without a `Host` header.** Without
+  `Host` (HTTP/1.0), Werkzeug's `request.host` falls back to waitress's
+  `SERVER_NAME` and `SERVER_PORT` (default adjustments:
+  `waitress.invalid:<port>`), so `Origin: http://waitress.invalid:8711`
+  passes Python's API-CSRF check; Rust uses the empty host there, so only
+  `X-CSRF-Token` or `Sec-Fetch-Site` pass (403 `csrf_required` otherwise).
+  Browsers always send `Host` (S4b).
 - **D-16 Faster shutdown observation**: the Rust runner's sleeps (the
   executor's 1 s poll, the post-status retry wait, the supervisor's poll
   interval) end at SIGTERM, so it is observed sooner than after Python's
@@ -1242,7 +1267,7 @@ and filesystem work in `spawn_blocking`).
 | templates | `minijinja` 2 (own `tojson` filter, so no `json` feature; 3.0 was a week old at S4a) | Jinja2-compatible: renders the **same template files** as Flask (`with`, `set`, `loop.index0`, `tojson(indent=2)`, `in` lists, conditional expressions); no second template dialect to keep in sync. `askama` rejected: compile-time checks, but a rewrite of five templates into another dialect and two copies during the parallel period |
 | SQLite | `rusqlite` (`bundled`) | synchronous API fits the read-check-CAS-write closures in `BEGIN IMMEDIATE`; bundled pins the SQLite version on macOS; `sqlx` rejected (async driver and compile-time DB add nothing here) |
 | JSON | `serde`, `serde_json` (`arbitrary_precision`), `ryu` | custom `Formatter` for the checksum (4.8); tokens preserved for integer/float classification |
-| password hashes | `bcrypt` | maintained; `$2a/$2b/$2y`, verify with 72-byte truncation (fixture) |
+| password hashes | `bcrypt` (`alloc` only) | maintained; the crate pyca bcrypt 4.3 itself wraps: `hash_with_salt` and `format_for_version` under pyca's `checkpw` wrapper (4.5.3, fixture `bcrypt.json`) |
 | constant-time compare | `subtle` | |
 | ids | `uuid` (v4) | |
 | time | `chrono` | UTC now, microsecond formatting; the narrow ISO parser of 4.9 is ~100 lines on top |
@@ -1264,7 +1289,9 @@ Python `int()` for ASCII, the ISO subset parser, waitress's header joining
 `posixpath.realpath(strict=False)`); in the web layer (S4a, unit-tested
 against Werkzeug's results) Werkzeug's decoding of `request.path`,
 `parse_qsl` with the `werkzeug.url_quote` error handler, `url_for`'s quoting
-and MarkupSafe's escaping.
+and MarkupSafe's escaping; in S4b pyca bcrypt's `checkpw` wrapper over the
+same `bcrypt` crate (fixture-pinned), Werkzeug's `iri_to_uri` for local
+redirect targets and `get_host`'s `Host` validation.
 
 ### 6.3 Templates
 
@@ -1411,7 +1438,9 @@ a scenario against its all-Python baseline). The cross-implementation and
 mixed-stack scenarios are parametrised over the stacks; `--impl python` runs
 the all-Python ones, `--impl rust` every stack with Rust, and Rust stacks run
 only once `RUST_SLICES_LANDED` (`runner_harness.py`) lists S6b (runner) or
-S4a + S4b (API: bearer routes, login, cookie-authenticated approve). The
+S4a + S4b + S5 (API: bearer routes, login, cookie-authenticated approve and
+the step log pages the mixed stacks read; corrected in S4b, the plan named
+S4a + S4b only). The
 runner environment is isolated so a real agent can never run: built from an
 allowlist (locale, user, `TMPDIR`), private `HOME`
 whose `.tmux.conf` is production's (incl. `remain-on-exit on`, 4.13.6),

@@ -69,6 +69,9 @@ http-body-util = "0.1"
 minijinja = { version = "2", default-features = false, features = ["builtins", "serde", "std_collections"] }
 percent-encoding = "2"
 tower = { version = "0.5", default-features = false }
+# Login (PLAN.md 4.5.3, 6.2; slice S4b): the bcrypt core pyca bcrypt 4.3 wraps
+# (`hash_with_salt`, `format_for_version`); `alloc` only, no random salts.
+bcrypt = { version = "0.19", default-features = false, features = ["alloc"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

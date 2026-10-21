@@ -1,5 +1,5 @@
 //! The application state: the store (with the API settings), the session
-//! cookie key and the template environment.
+//! cookie key, the template environment and the login throttle.
 
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ use opsgate_store::{Store, StoreError};
 use crate::error::AppError;
 use crate::session::session_key;
 use crate::templates::Templates;
+use crate::throttle::LoginThrottle;
 
 /// Shared by every request.
 #[derive(Clone)]
@@ -19,6 +20,7 @@ struct Inner {
     store: Store,
     session_key: Key,
     templates: Templates,
+    login_throttle: LoginThrottle,
 }
 
 impl std::fmt::Debug for AppState {
@@ -33,11 +35,22 @@ impl AppState {
     /// The state of an API process around an opened store. Fails when an
     /// embedded template does not compile.
     pub fn new(store: Store) -> Result<Self, minijinja::Error> {
+        Self::with_login_throttle(store, LoginThrottle::default())
+    }
+
+    /// As [`AppState::new`] with another login throttle
+    /// (`create_app(settings, login_throttle=…)`; tests use a fake clock and
+    /// small limits).
+    pub fn with_login_throttle(
+        store: Store,
+        login_throttle: LoginThrottle,
+    ) -> Result<Self, minijinja::Error> {
         let session_key = session_key(&store.settings().session_secret);
         Ok(Self(Arc::new(Inner {
             store,
             session_key,
             templates: Templates::new()?,
+            login_throttle,
         })))
     }
 
@@ -59,6 +72,11 @@ impl AppState {
     /// The template environment.
     pub fn templates(&self) -> &Templates {
         &self.0.templates
+    }
+
+    /// The login throttle (4.5.3).
+    pub fn login_throttle(&self) -> &LoginThrottle {
+        &self.0.login_throttle
     }
 
     /// Runs a store operation on the blocking pool (SQLite, PLAN.md 6.1).

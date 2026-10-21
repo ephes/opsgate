@@ -7,8 +7,12 @@
 //! session cookie, error mapping, the network gate, the UI-CSRF check), the
 //! JSON body rules (4.6), the approver session ([`session`]), the template
 //! environment ([`templates`]), `GET`/`HEAD /login` and the bearer routes
-//! (ticket create and get, runner claim and status, health). Slices S4b and
-//! S5 add their routes to [`routes::router`] and get every layer for free.
+//! (ticket create and get, runner claim and status, health). Slice S4b adds
+//! `POST /login` with the bcrypt check and the login throttle ([`password`],
+//! [`throttle`]), `POST /logout` with the revocation, the API-CSRF check
+//! ([`csrf::enforce_api_session_csrf`]) and the cookie-authenticated API
+//! actions; slice S5 adds its routes to [`routes::router`] and gets every
+//! layer for free.
 
 pub mod body;
 pub mod client;
@@ -17,12 +21,14 @@ pub mod error;
 pub mod form;
 pub mod gate;
 pub mod headers;
+pub mod password;
 pub mod path;
 pub mod routes;
 pub mod session;
 pub mod state;
 pub mod templates;
 pub mod testing;
+pub mod throttle;
 pub mod urls;
 
 use std::future::Future;

@@ -246,6 +246,33 @@ pub fn quote_path(value: &str) -> String {
     utf8_percent_encode(value, PATH_SAFE).to_string()
 }
 
+/// `iri_to_uri`'s safe set of the path (`%!$&'()*+,/:;=@`).
+const IRI_PATH_SAFE: &AsciiSet = &PATH_SAFE.remove(b'%');
+/// `iri_to_uri`'s safe set of the query (the path's plus `?`).
+const IRI_QUERY_SAFE: &AsciiSet = &IRI_PATH_SAFE.remove(b'?');
+/// `iri_to_uri`'s safe set of the fragment (the query's plus `#`).
+const IRI_FRAGMENT_SAFE: &AsciiSet = &IRI_QUERY_SAFE.remove(b'#');
+
+/// Werkzeug's `iri_to_uri` for a local target (a path with an optional
+/// query and fragment, no scheme and no network location), which every
+/// `Location` header goes through: characters outside each part's safe set
+/// are percent-encoded as UTF-8, existing escapes are kept, and an empty
+/// query or fragment is dropped with its separator (`urlunsplit`).
+pub fn local_iri_to_uri(location: &str) -> String {
+    let (rest, fragment) = location.split_once('#').unwrap_or((location, ""));
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let mut uri = utf8_percent_encode(path, IRI_PATH_SAFE).to_string();
+    if !query.is_empty() {
+        uri.push('?');
+        uri.extend(utf8_percent_encode(query, IRI_QUERY_SAFE));
+    }
+    if !fragment.is_empty() {
+        uri.push('#');
+        uri.extend(utf8_percent_encode(fragment, IRI_FRAGMENT_SAFE));
+    }
+    uri
+}
+
 fn quote_query(value: &str) -> String {
     utf8_percent_encode(value, QUERY_SAFE)
         .to_string()
@@ -292,6 +319,30 @@ mod tests {
             url_for("api_runner_status", &[("ticket_id", "t".into())]).unwrap(),
             "/api/v1/runner/t/status"
         );
+    }
+
+    #[test]
+    fn local_iri_to_uri_follows_werkzeug() {
+        for (location, expected) in [
+            ("/tickets", "/tickets"),
+            ("/tickets/a b", "/tickets/a%20b"),
+            ("/tickets/é?x=ü#ä", "/tickets/%C3%A9?x=%C3%BC#%C3%A4"),
+            ("/tickets/%2F?a=%20", "/tickets/%2F?a=%20"),
+            ("/t\\\"<>^`{|}[]", "/t%5C%22%3C%3E%5E%60%7B%7C%7D%5B%5D"),
+            ("/a?b?c=d&e=f+g", "/a?b?c=d&e=f+g"),
+            ("/a#b#c?d", "/a#b#c?d"),
+            ("/a?#b", "/a#b"),
+            ("/a?", "/a"),
+            ("/a#", "/a"),
+            ("/!$&'()*+,/:;=@~._-", "/!$&'()*+,/:;=@~._-"),
+            ("/a\u{1}\u{7f}", "/a%01%7F"),
+            (
+                "/login?next=/tickets/x+y?view%3Dall",
+                "/login?next=/tickets/x+y?view%3Dall",
+            ),
+        ] {
+            assert_eq!(local_iri_to_uri(location), expected, "{location:?}");
+        }
     }
 
     #[test]

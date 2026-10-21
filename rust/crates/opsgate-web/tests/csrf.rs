@@ -1,11 +1,17 @@
-//! The UI-CSRF layer (`web::csrf`, PLAN.md 4.4 step 3, 4.5.4): every `POST`
-//! outside `/api/`, before routing and authentication; failures flash
-//! "Invalid form token" and redirect (4.4 error mapping).
+//! Both CSRF checks (`web::csrf`, PLAN.md 4.5.4). The UI-CSRF layer (4.4
+//! step 3, S4a): every `POST` outside `/api/`, before routing and
+//! authentication; failures flash "Invalid form token" and redirect (4.4
+//! error mapping). The API-CSRF check of cookie-authenticated API actions
+//! (S4b): after the approver check, before the body.
 
 mod common;
 
 use axum::http::{Method, StatusCode};
-use common::{Call, NYXMON_TOKEN, TestApp, ticket_payload};
+use common::{APPROVER, Call, NYXMON_TOKEN, RUNNER_TOKEN, TestApp, ticket_payload};
+use opsgate_core::time::{isoformat_z, utc_now};
+use opsgate_web::session::SessionData;
+use opsgate_web::testing::session_cookie;
+use serde_json::json;
 
 fn flashes(app: &TestApp) -> Vec<(String, String)> {
     app.session().flashes
@@ -41,13 +47,20 @@ async fn posts_without_the_token_flash_and_redirect() {
 async fn the_session_token_passes() {
     let app = TestApp::new();
     let token = app.sign_in();
-    // The routes are later slices'; the layer lets the request through to
-    // the router (405 for the login page's POST before slice S4b, 404 for
-    // an unknown path).
+    // The layer lets the request through to the router (a failed sign-in
+    // for the login form, 404 for an unknown path).
     let login = app
         .send(Call::post("/login").form(&[("csrf_token", &token), ("username", "x")]))
         .await;
-    assert_eq!(login.status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        (login.status, login.location()),
+        (StatusCode::FOUND, Some("/login"))
+    );
+    app.set_cookie(Some(session_cookie(&app.state, &{
+        let mut data = app.session();
+        data.flashes.clear();
+        data
+    })));
     let unknown = app
         .send(Call::post("/no-such-page").form(&[("csrf_token", &token)]))
         .await;
@@ -137,4 +150,360 @@ async fn oversized_forms_are_413() {
         .await;
     assert_eq!(response.status, StatusCode::PAYLOAD_TOO_LARGE);
     response.assert_security_headers();
+}
+
+// ------------------------------------------------- API-CSRF (S4b, 4.5.4)
+
+const ACTIONS: [&str; 5] = ["approve", "reject", "cancel", "archive", "unarchive"];
+
+/// `_pending_ticket`.
+async fn pending_ticket(app: &TestApp, task_ref: &str) -> String {
+    app.create_ticket(NYXMON_TOKEN, ticket_payload("Hardening", Some(task_ref)))
+        .await
+}
+
+/// A ticket in the state an action needs (`unarchive` needs an archived one).
+async fn ticket_for(app: &TestApp, action: &str) -> String {
+    let id = pending_ticket(app, &format!("csrf-{action}")).await;
+    if action == "unarchive" {
+        app.state
+            .store()
+            .archive_ticket(&id, APPROVER, None, None)
+            .unwrap();
+    }
+    id
+}
+
+#[tokio::test]
+async fn test_cookie_api_action_without_csrf_header_is_rejected() {
+    for action in ACTIONS {
+        let app = TestApp::new();
+        let ticket_id = ticket_for(&app, action).await;
+        app.login("/login").await;
+        let before = app.snapshot();
+        let response = app
+            .send(Call::post(&format!("/api/v1/tickets/{ticket_id}/{action}")))
+            .await;
+        assert_eq!(response.status, StatusCode::FORBIDDEN, "{action}");
+        assert_eq!(response.error(), "csrf_required", "{action}");
+        response.assert_security_headers();
+        assert_eq!(app.snapshot(), before, "{action}");
+    }
+}
+
+#[tokio::test]
+async fn test_cookie_approve_with_wrong_csrf_header_is_rejected() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "csrf-wrong").await;
+    app.login("/login").await;
+    let response = app
+        .send(
+            Call::post(&format!("/api/v1/tickets/{ticket_id}/approve"))
+                .header("x-csrf-token", "not-the-token")
+                .header("sec-fetch-site", "same-origin"),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::FORBIDDEN);
+    assert_eq!(response.error(), "invalid_csrf");
+    assert_eq!(app.ticket_state(&ticket_id).await, "pending_approval");
+}
+
+#[tokio::test]
+async fn test_cookie_approve_with_csrf_header_succeeds() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "csrf-ok").await;
+    app.login("/login").await;
+    let response = app
+        .send(app.csrf_header(Call::post(&format!("/api/v1/tickets/{ticket_id}/approve"))))
+        .await;
+    assert_eq!(response.status, StatusCode::OK, "{}", response.text());
+    assert_eq!(response.json()["state"], "approved");
+    assert_eq!(response.json()["approved_by"], APPROVER);
+    // The approval is audited with the approver and the caller.
+    let actor: String = app
+        .connection()
+        .query_row(
+            "SELECT actor FROM audit_events WHERE ticket_id = ? AND event_type = 'ticket_approved'",
+            [&ticket_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(actor, format!("approver:{APPROVER}"));
+}
+
+#[tokio::test]
+async fn test_cookie_approve_same_origin_fallback() {
+    for (headers, expected) in [
+        (vec![("sec-fetch-site", "same-origin")], StatusCode::OK),
+        (vec![("sec-fetch-site", "same-site")], StatusCode::FORBIDDEN),
+        (
+            vec![("sec-fetch-site", "cross-site")],
+            StatusCode::FORBIDDEN,
+        ),
+        (vec![("sec-fetch-site", "none")], StatusCode::FORBIDDEN),
+        // Sec-Fetch-Site wins over a matching Origin when both are present.
+        (
+            vec![
+                ("sec-fetch-site", "same-site"),
+                ("origin", "http://localhost"),
+            ],
+            StatusCode::FORBIDDEN,
+        ),
+        (vec![("origin", "http://localhost")], StatusCode::OK),
+        (vec![("origin", "https://localhost")], StatusCode::FORBIDDEN),
+        (
+            vec![("origin", "http://other.localhost")],
+            StatusCode::FORBIDDEN,
+        ),
+        (vec![("origin", "null")], StatusCode::FORBIDDEN),
+    ] {
+        let app = TestApp::new();
+        let ticket_id = pending_ticket(&app, "csrf-origin").await;
+        app.login("/login").await;
+        // The Flask test client's host.
+        let mut call =
+            Call::post(&format!("/api/v1/tickets/{ticket_id}/approve")).header("host", "localhost");
+        for (name, value) in &headers {
+            call = call.header(name, value);
+        }
+        let response = app.send(call).await;
+        assert_eq!(response.status, expected, "{headers:?}");
+        let state = if expected == StatusCode::OK {
+            "approved"
+        } else {
+            "pending_approval"
+        };
+        assert_eq!(app.ticket_state(&ticket_id).await, state, "{headers:?}");
+    }
+}
+
+#[tokio::test]
+async fn test_bearer_callers_are_unaffected_by_api_csrf() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "csrf-bearer").await;
+    let path = format!("/api/v1/tickets/{ticket_id}");
+    let runner = app
+        .send(Call::new(Method::GET, &path).bearer(RUNNER_TOKEN))
+        .await;
+    assert_eq!(runner.status, StatusCode::OK);
+
+    // A submit token never authorizes approval, with or without a CSRF header.
+    let approve = format!("{path}/approve");
+    let submitter = app.send(Call::post(&approve).bearer(NYXMON_TOKEN)).await;
+    assert_eq!(submitter.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(submitter.error(), "auth_required");
+
+    app.login("/login").await;
+    let approved = app.send(app.csrf_header(Call::post(&approve))).await;
+    assert_eq!(approved.status, StatusCode::OK);
+
+    let claim = app
+        .send(
+            Call::post("/api/v1/runner/claim")
+                .bearer(RUNNER_TOKEN)
+                .json(&json!({"runner_host": "runner-a"})),
+        )
+        .await;
+    assert_eq!(claim.status, StatusCode::OK);
+    assert_eq!(claim.json()["ticket"]["id"], ticket_id.as_str());
+}
+
+#[tokio::test]
+async fn test_unauthenticated_api_action_reports_auth_before_csrf() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "csrf-anon").await;
+    for action in ACTIONS {
+        let response = app
+            .send(Call::post(&format!("/api/v1/tickets/{ticket_id}/{action}")))
+            .await;
+        assert_eq!(response.status, StatusCode::UNAUTHORIZED, "{action}");
+        assert_eq!(response.error(), "auth_required", "{action}");
+    }
+    // Also for a ticket that does not exist (no lookup before the checks).
+    let missing = app
+        .send(Call::post("/api/v1/tickets/missing/approve"))
+        .await;
+    assert_eq!(missing.error(), "auth_required");
+}
+
+#[tokio::test]
+async fn test_api_session_actions_reject_non_ascii_csrf_header() {
+    for action in ACTIONS {
+        let app = TestApp::new();
+        let ticket_id = ticket_for(&app, action).await;
+        app.login("/login").await;
+        let response = app
+            .send(
+                Call::post(&format!("/api/v1/tickets/{ticket_id}/{action}"))
+                    .header("x-csrf-token", "té-über".as_bytes())
+                    .json(&json!({"reason": "nope"})),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::FORBIDDEN, "{action}");
+        assert_eq!(response.error(), "invalid_csrf", "{action}");
+    }
+}
+
+/// The header token decides when present (also against a same-origin
+/// report, as the stripped header value of 4.4); an empty header falls back to the same-origin check; repeated
+/// header lines are joined (", ") and never match; a session without a
+/// token is checked for the same origin only.
+#[tokio::test]
+async fn header_token_rules() {
+    let app = TestApp::new();
+    app.login("/login").await;
+    let token = app.csrf_token();
+    for (headers, expected) in [
+        (vec![("x-csrf-token", token.clone())], "ok"),
+        (
+            vec![
+                ("x-csrf-token", token.clone()),
+                ("sec-fetch-site", "cross-site".to_owned()),
+            ],
+            "ok",
+        ),
+        (
+            vec![
+                ("x-csrf-token", format!("{token}x")),
+                ("sec-fetch-site", "same-origin".to_owned()),
+            ],
+            "invalid_csrf",
+        ),
+        // Spaces and tabs around a header value are not part of it (waitress).
+        (vec![("x-csrf-token", format!(" {token}\t"))], "ok"),
+        (
+            vec![
+                ("x-csrf-token", String::new()),
+                ("sec-fetch-site", "same-origin".to_owned()),
+            ],
+            "ok",
+        ),
+        (vec![("x-csrf-token", String::new())], "csrf_required"),
+        (
+            vec![
+                ("x-csrf-token", token.clone()),
+                ("x-csrf-token", token.clone()),
+            ],
+            "invalid_csrf",
+        ),
+    ] {
+        let ticket_id = pending_ticket(&app, &format!("rules-{}", app.snapshot()[0].len())).await;
+        let mut call = Call::post(&format!("/api/v1/tickets/{ticket_id}/archive"));
+        for (name, value) in &headers {
+            call = call.header(name, value);
+        }
+        let response = app.send(call).await;
+        let outcome = if response.status == StatusCode::OK {
+            "ok".to_owned()
+        } else {
+            assert_eq!(response.status, StatusCode::FORBIDDEN, "{headers:?}");
+            response.error()
+        };
+        assert_eq!(outcome, expected, "{headers:?}");
+    }
+
+    // A signed-in session without a CSRF token: the header is ignored.
+    let generation = app.state.store().ui_session_generation(APPROVER).unwrap();
+    app.set_cookie(Some(session_cookie(
+        &app.state,
+        &SessionData {
+            username: Some(APPROVER.to_owned()),
+            auth_at: Some(isoformat_z(&utc_now())),
+            session_generation: generation,
+            ..SessionData::default()
+        },
+    )));
+    let ticket_id = pending_ticket(&app, "no-session-token").await;
+    let path = format!("/api/v1/tickets/{ticket_id}/approve");
+    let refused = app
+        .send(Call::post(&path).header("x-csrf-token", "anything"))
+        .await;
+    assert_eq!(refused.error(), "csrf_required");
+    let passed = app
+        .send(
+            Call::post(&path)
+                .header("x-csrf-token", "anything")
+                .header("sec-fetch-site", "same-origin"),
+        )
+        .await;
+    assert_eq!(passed.status, StatusCode::OK);
+}
+
+/// `expected_request_origin` is `http://` and Werkzeug's `request.host`:
+/// the `Host` header without the default port, empty when it is no valid
+/// host. Without a `Host` header Rust expects the empty host (D-19).
+#[tokio::test]
+async fn origin_uses_the_request_host() {
+    for (host, origin, expected) in [
+        (
+            Some("opsgate.test:8711"),
+            "http://opsgate.test:8711",
+            StatusCode::OK,
+        ),
+        (
+            Some("OpsGate.Test:8711"),
+            "http://opsgate.test:8711",
+            StatusCode::OK,
+        ),
+        (
+            Some("opsgate.test:80"),
+            "http://opsgate.test",
+            StatusCode::OK,
+        ),
+        (
+            Some("opsgate.test:80"),
+            "http://opsgate.test:80",
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            Some("100.64.0.1:8711"),
+            "http://100.64.0.1:8711",
+            StatusCode::OK,
+        ),
+        (Some("[::1]:8711"), "http://[::1]:8711", StatusCode::OK),
+        (
+            Some("opsgate.test:8711"),
+            "http://opsgate.test",
+            StatusCode::FORBIDDEN,
+        ),
+        (Some("bad host"), "http://bad host", StatusCode::FORBIDDEN),
+        (Some("bad host"), "http://", StatusCode::OK),
+        (None, "http://", StatusCode::OK),
+        (None, "http://localhost", StatusCode::FORBIDDEN),
+    ] {
+        let app = TestApp::new();
+        let ticket_id = pending_ticket(&app, "origin").await;
+        app.login("/login").await;
+        let mut call =
+            Call::post(&format!("/api/v1/tickets/{ticket_id}/approve")).header("origin", origin);
+        if let Some(host) = host {
+            call = call.header("host", host);
+        }
+        let response = app.send(call).await;
+        assert_eq!(response.status, expected, "{host:?} {origin}");
+    }
+}
+
+/// The API-CSRF check runs before the body is read: a refused request with
+/// an oversized or too deep body is still the 403.
+#[tokio::test]
+async fn api_csrf_comes_before_the_body() {
+    let app = TestApp::new();
+    let ticket_id = pending_ticket(&app, "body-order").await;
+    app.login("/login").await;
+    let deep = format!("{}{}", "[".repeat(2000), "]".repeat(2000));
+    for action in ["reject", "cancel"] {
+        let path = format!("/api/v1/tickets/{ticket_id}/{action}");
+        let response = app.send(Call::post(&path).raw_json(deep.clone())).await;
+        assert_eq!(response.error(), "csrf_required", "{action}");
+        let response = app
+            .send(
+                Call::post(&path)
+                    .header("content-type", "application/json")
+                    .body(vec![b' '; opsgate_web::BODY_LIMIT + 1]),
+            )
+            .await;
+        assert_eq!(response.status, StatusCode::FORBIDDEN, "{action}");
+    }
+    assert_eq!(app.ticket_state(&ticket_id).await, "pending_approval");
 }

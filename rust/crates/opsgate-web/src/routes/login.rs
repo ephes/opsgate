@@ -1,8 +1,25 @@
-//! The login page (`ui_login` for `GET`/`HEAD`, PLAN.md 4.5.3): the form
-//! with the sanitised `next` of the query string. It never counts as an
-//! attempt and never flashes; its only side effect is the session's CSRF
-//! token (created by the render when the session has none). `POST /login`
-//! is slice S4b's.
+//! Login and logout (`ui_login`, `ui_logout`, PLAN.md 4.5.3).
+//!
+//! `GET`/`HEAD /login` renders the form with the sanitised `next` of the
+//! query string; it never counts as an attempt and never flashes; its only
+//! side effect is the session's CSRF token (created by the render when the
+//! session has none).
+//!
+//! `POST /login` (after the UI-CSRF layer): the client (its address or
+//! `unknown`) locked by the [`crate::throttle`] → 429 with the login page
+//! and the flash "Too many failed login attempts. Try again later.", even
+//! for correct credentials. Otherwise the stripped username and **always**
+//! the bcrypt check ([`crate::password`]); a failure is counted, flashed
+//! ("Invalid username or password") and redirected to `/login` (with
+//! `?next=` if any); a success needs the stored session generation (else
+//! 500 `session_state_missing`, a UI error), resets the throttle, replaces
+//! the session (`username`, `auth_at`, the generation, a new CSRF token) and
+//! redirects to `next` or `/tickets`. The form's `next` wins over the
+//! query's.
+//!
+//! `POST /logout` (after the UI-CSRF layer): an authenticated session bumps
+//! the stored generation (every session of the approver is revoked, also
+//! copies of the cookie); the session is cleared either way; 302 `/login`.
 
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -10,11 +27,14 @@ use axum::response::Response;
 use minijinja::value::Value as JinjaValue;
 use opsgate_core::pytext::strip;
 
-use crate::error::AppError;
+use crate::client;
+use crate::error::{AppError, redirect};
 use crate::form::FormData;
-use crate::session::SessionHandle;
+use crate::password::{checkpw, credentials_match};
+use crate::session::{SessionHandle, session_user, signed_in};
 use crate::state::AppState;
 use crate::templates::Context;
+use crate::urls::{UrlArg, url_for};
 
 /// `sanitize_next_path`: a local path to go to after signing in, or
 /// `None`. Stripped; empty, not starting with exactly one `/`, or containing
@@ -71,6 +91,94 @@ pub async fn login_page(
         next_path,
         StatusCode::OK,
     )
+}
+
+/// `POST /login`.
+pub async fn login_submit(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response, AppError> {
+    let session = SessionHandle::of(&request);
+    let query_next = query_next_path(&request);
+    // The UI-CSRF layer parsed the form and passed it on.
+    let form = request
+        .extensions()
+        .get::<FormData>()
+        .cloned()
+        .unwrap_or_default();
+    let username = strip(form.get("username").unwrap_or_default()).to_owned();
+    let password = form.get("password").unwrap_or_default().to_owned();
+    let next_path = sanitize_next_path(form.get("next")).or(query_next);
+    let (parts, _body) = request.into_parts();
+    let client_ip = client::view(&parts, state.settings()).remote_addr;
+    let throttle_key = if client_ip.is_empty() {
+        "unknown".to_owned()
+    } else {
+        client_ip
+    };
+
+    if state.login_throttle().is_locked(&throttle_key) {
+        session.flash("Too many failed login attempts. Try again later.", "error");
+        return login_page_response(&state, &session, next_path, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    let configured_username = state.settings().ui_username.clone();
+    let password_bcrypt = state.settings().ui_password_bcrypt.clone();
+    let checked_username = username.clone();
+    // bcrypt is CPU work: off the async workers, as the store's calls.
+    let matches = tokio::task::spawn_blocking(move || {
+        credentials_match(
+            &checked_username,
+            &password,
+            &configured_username,
+            &password_bcrypt,
+            checkpw,
+        )
+    })
+    .await
+    .map_err(|error| AppError::Internal(format!("password check task: {error}")))?;
+
+    if !matches {
+        state.login_throttle().record_failure(&throttle_key);
+        session.flash("Invalid username or password", "error");
+        let next = next_path.map_or(UrlArg::None, UrlArg::Text);
+        let target = url_for("ui_login", &[("next", next)])
+            .map_err(|error| AppError::Internal(format!("url_for: {error}")))?;
+        return Ok(redirect(&target));
+    }
+
+    let lookup = username.clone();
+    let Some(generation) = state
+        .blocking(move |store| store.ui_session_generation(&lookup))
+        .await?
+    else {
+        return Err(AppError::service(
+            "Approver session state is missing",
+            500,
+            "session_state_missing",
+        ));
+    };
+    state.login_throttle().reset(&throttle_key);
+    let fresh = signed_in(&username, generation)?;
+    session.update(|data| *data = fresh);
+    Ok(redirect(
+        &next_path.unwrap_or_else(|| "/tickets".to_owned()),
+    ))
+}
+
+/// `POST /logout`.
+pub async fn logout(State(state): State<AppState>, request: Request) -> Result<Response, AppError> {
+    let session = SessionHandle::of(&request);
+    if let Some(user) = session_user(&state, &session).await? {
+        // Revoke server-side so a copied cookie stops working too; only an
+        // authenticated session may do this, so an anonymous caller cannot
+        // sign the approver out.
+        state
+            .blocking(move |store| store.revoke_ui_sessions(&user))
+            .await?;
+    }
+    session.clear();
+    Ok(redirect("/login"))
 }
 
 #[cfg(test)]

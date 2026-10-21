@@ -1,10 +1,13 @@
-//! The bearer routes and health (PLAN.md 4.3): `GET /api/v1/health`,
-//! `POST /api/v1/tickets`, `GET /api/v1/tickets/{id}`,
-//! `POST /api/v1/runner/claim`, `POST /api/v1/runner/{id}/status`.
+//! The API routes (PLAN.md 4.3). Bearer routes and health (S4a):
+//! `GET /api/v1/health`, `POST /api/v1/tickets`, `GET /api/v1/tickets/{id}`,
+//! `POST /api/v1/runner/claim`, `POST /api/v1/runner/{id}/status`. The
+//! approver's cookie-authenticated actions (S4b):
+//! `POST /api/v1/tickets/{id}/{approve,reject,cancel,archive,unarchive}`.
 //!
-//! Each route makes its checks in Python's order: the token (401) before
-//! the body is read, then the body (400 `invalid_json`), then the store.
-//! The client address of the audit rows is the socket peer's (4.4 step 1).
+//! Each route makes its checks in Python's order: the token or the approver
+//! session (401) and, for the approver, the API-CSRF check (403) before the
+//! body is read, then the body (400 `invalid_json`), then the store. The
+//! client address of the audit rows is the socket peer's (4.4 step 1).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -12,10 +15,12 @@ use axum::http::request::Parts;
 use axum::response::Response;
 use serde_json::{Map, Value, json};
 
-use crate::body::{object_or_empty, parse_request_json, read_body, require_object, runner_host};
+use crate::body::{
+    object_or_empty, parse_request_json, read_body, require_object, runner_host, text_field,
+};
 use crate::client::{self, authenticate_submitter, bearer_token, is_runner_token, user_agent};
 use crate::error::{AppError, json_response};
-use crate::session::{SessionHandle, session_user};
+use crate::session::{Approver, SessionHandle, session_user};
 use crate::state::AppState;
 
 /// `api_health`: the health JSON (4.6); exempt from the gate.
@@ -158,6 +163,130 @@ pub async fn runner_status(
                 &ticket_id,
                 &host,
                 &payload,
+                Some(&caller.client_ip),
+                caller.user_agent.as_deref(),
+            )
+        })
+        .await?;
+    Ok(json_response(StatusCode::OK, &Value::Object(ticket)))
+}
+
+/// The `reason` of a reject or cancel body: `parse_request_json() or {}`
+/// (falsy is `{}`, D-4), then `str(payload.get("reason", "")).strip()`
+/// (D-2, D-3).
+async fn reason(parts: &Parts, body: axum::body::Body) -> Result<String, AppError> {
+    let payload = object_or_empty(request_json(parts, body).await?)?;
+    text_field(&payload, "reason")
+}
+
+/// `api_approve_ticket`: 401 `auth_required`, 403 `csrf_required` or
+/// `invalid_csrf`, then the approval (4.7.2); 200 with the ticket. The body
+/// is never read.
+pub async fn approve_ticket(
+    State(state): State<AppState>,
+    Path(ticket_id): Path<String>,
+    Approver(approver): Approver,
+    request: Request,
+) -> Result<Response, AppError> {
+    let (parts, _body) = request.into_parts();
+    let caller = Caller::of(&parts, &state);
+    let ticket = state
+        .blocking(move |store| {
+            store.approve_ticket(
+                &ticket_id,
+                &approver,
+                Some(&caller.client_ip),
+                caller.user_agent.as_deref(),
+            )
+        })
+        .await?;
+    Ok(json_response(StatusCode::OK, &Value::Object(ticket)))
+}
+
+/// `api_reject_ticket`: as approve, with the optional `reason` of the body.
+pub async fn reject_ticket(
+    State(state): State<AppState>,
+    Path(ticket_id): Path<String>,
+    Approver(approver): Approver,
+    request: Request,
+) -> Result<Response, AppError> {
+    let (parts, body) = request.into_parts();
+    let reason = reason(&parts, body).await?;
+    let caller = Caller::of(&parts, &state);
+    let ticket = state
+        .blocking(move |store| {
+            store.reject_ticket(
+                &ticket_id,
+                &approver,
+                &reason,
+                Some(&caller.client_ip),
+                caller.user_agent.as_deref(),
+            )
+        })
+        .await?;
+    Ok(json_response(StatusCode::OK, &Value::Object(ticket)))
+}
+
+/// `api_cancel_ticket`: as reject.
+pub async fn cancel_ticket(
+    State(state): State<AppState>,
+    Path(ticket_id): Path<String>,
+    Approver(approver): Approver,
+    request: Request,
+) -> Result<Response, AppError> {
+    let (parts, body) = request.into_parts();
+    let reason = reason(&parts, body).await?;
+    let caller = Caller::of(&parts, &state);
+    let ticket = state
+        .blocking(move |store| {
+            store.cancel_ticket(
+                &ticket_id,
+                &approver,
+                &reason,
+                Some(&caller.client_ip),
+                caller.user_agent.as_deref(),
+            )
+        })
+        .await?;
+    Ok(json_response(StatusCode::OK, &Value::Object(ticket)))
+}
+
+/// `api_archive_ticket`: as approve.
+pub async fn archive_ticket(
+    State(state): State<AppState>,
+    Path(ticket_id): Path<String>,
+    Approver(approver): Approver,
+    request: Request,
+) -> Result<Response, AppError> {
+    let (parts, _body) = request.into_parts();
+    let caller = Caller::of(&parts, &state);
+    let ticket = state
+        .blocking(move |store| {
+            store.archive_ticket(
+                &ticket_id,
+                &approver,
+                Some(&caller.client_ip),
+                caller.user_agent.as_deref(),
+            )
+        })
+        .await?;
+    Ok(json_response(StatusCode::OK, &Value::Object(ticket)))
+}
+
+/// `api_unarchive_ticket`: as approve.
+pub async fn unarchive_ticket(
+    State(state): State<AppState>,
+    Path(ticket_id): Path<String>,
+    Approver(approver): Approver,
+    request: Request,
+) -> Result<Response, AppError> {
+    let (parts, _body) = request.into_parts();
+    let caller = Caller::of(&parts, &state);
+    let ticket = state
+        .blocking(move |store| {
+            store.unarchive_ticket(
+                &ticket_id,
+                &approver,
                 Some(&caller.client_ip),
                 caller.user_agent.as_deref(),
             )

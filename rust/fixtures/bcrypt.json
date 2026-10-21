@@ -1,0 +1,419 @@
+{
+ "cases": [
+  {
+   "hash": "$2a$04$uPe2A/Bd0I394vF7Seg1HeEE1gILkrSm9Os99grYDTJwCvnX0iTmu",
+   "matches": true,
+   "name": "$2a$ right password",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2a$04$uPe2A/Bd0I394vF7Seg1HeEE1gILkrSm9Os99grYDTJwCvnX0iTmu",
+   "matches": false,
+   "name": "$2a$ wrong password",
+   "password_hex": "7365637265742d70617373776f7265",
+   "raises": false
+  },
+  {
+   "hash": "$2a$04$uPe2A/Bd0I394vF7Seg1HeEE1gILkrSm9Os99grYDTJwCvnX0iTmu",
+   "matches": false,
+   "name": "$2a$ empty password",
+   "password_hex": "",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$X4L1ojKolNX3DV4g5ud.uuCm2XK77QJftWmAcbMYKBf3Ww8jRJDGG",
+   "matches": true,
+   "name": "$2b$ right password",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$X4L1ojKolNX3DV4g5ud.uuCm2XK77QJftWmAcbMYKBf3Ww8jRJDGG",
+   "matches": false,
+   "name": "$2b$ wrong password",
+   "password_hex": "7365637265742d70617373776f7265",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$X4L1ojKolNX3DV4g5ud.uuCm2XK77QJftWmAcbMYKBf3Ww8jRJDGG",
+   "matches": false,
+   "name": "$2b$ empty password",
+   "password_hex": "",
+   "raises": false
+  },
+  {
+   "hash": "$2y$04$IfYh1ouGdzfrRiyftrebw.ECh7jzP8z6qNx.xmWyeQTdRtJAJXhrO",
+   "matches": true,
+   "name": "$2y$ right password",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2y$04$IfYh1ouGdzfrRiyftrebw.ECh7jzP8z6qNx.xmWyeQTdRtJAJXhrO",
+   "matches": false,
+   "name": "$2y$ wrong password",
+   "password_hex": "7365637265742d70617373776f7265",
+   "raises": false
+  },
+  {
+   "hash": "$2y$04$IfYh1ouGdzfrRiyftrebw.ECh7jzP8z6qNx.xmWyeQTdRtJAJXhrO",
+   "matches": false,
+   "name": "$2y$ empty password",
+   "password_hex": "",
+   "raises": false
+  },
+  {
+   "hash": "$2x$04$.5FqHoZ2s9qhYyo8ZJy0Ke7PdqkI66kGopwGCMmBzUQDHW7m.5fQu",
+   "matches": true,
+   "name": "$2x$ right password",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2x$04$.5FqHoZ2s9qhYyo8ZJy0Ke7PdqkI66kGopwGCMmBzUQDHW7m.5fQu",
+   "matches": false,
+   "name": "$2x$ wrong password",
+   "password_hex": "7365637265742d70617373776f7265",
+   "raises": false
+  },
+  {
+   "hash": "$2x$04$.5FqHoZ2s9qhYyo8ZJy0Ke7PdqkI66kGopwGCMmBzUQDHW7m.5fQu",
+   "matches": false,
+   "name": "$2x$ empty password",
+   "password_hex": "",
+   "raises": false
+  },
+  {
+   "hash": "$2b$05$SMK1hlWQ1CUKHzN9qXGqCeBXKoz7ijjLB0tYR8YP9IuJ2mePBTnSS",
+   "matches": true,
+   "name": "cost 5",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$05$SMK1hlWQ1CUKHzN9qXGqCeBXKoz7ijjLB0tYR8YP9IuJ2mePBTnSS",
+   "matches": false,
+   "name": "cost 5, prefix of the password",
+   "password_hex": "7365637265742d70617373776f72",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$WePO8BjgeTjRSsA.0WYWmeYjl21c2erM9cBhoFjZvYhSvteTZJkJW",
+   "matches": true,
+   "name": "empty password, its hash",
+   "password_hex": "",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$WePO8BjgeTjRSsA.0WYWmeYjl21c2erM9cBhoFjZvYhSvteTZJkJW",
+   "matches": true,
+   "name": "NUL against the empty password's hash",
+   "password_hex": "00",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$DlAJdUuOW3qh9XxuXDswluSmZS/w.Saf5.A.mNFvXBCFjp9/hBfTS",
+   "matches": true,
+   "name": "72 bytes",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$DlAJdUuOW3qh9XxuXDswluSmZS/w.Saf5.A.mNFvXBCFjp9/hBfTS",
+   "matches": true,
+   "name": "73 bytes: truncated to 72",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f60616263646566676878",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$DlAJdUuOW3qh9XxuXDswluSmZS/w.Saf5.A.mNFvXBCFjp9/hBfTS",
+   "matches": true,
+   "name": "500 bytes: truncated to 72",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061626364656667687979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979797979",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$DlAJdUuOW3qh9XxuXDswluSmZS/w.Saf5.A.mNFvXBCFjp9/hBfTS",
+   "matches": false,
+   "name": "71 bytes",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061626364656667",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$pQomCe0h0m6lnvVXug.1Qu5zqSfXglW561Wj.Bcw0LoCFZ5RZQxjq",
+   "matches": true,
+   "name": "71 bytes, their hash",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f6061626364656667",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$pQomCe0h0m6lnvVXug.1Qu5zqSfXglW561Wj.Bcw0LoCFZ5RZQxjq",
+   "matches": false,
+   "name": "72 bytes against the 71-byte hash",
+   "password_hex": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$Dvo2K2nx3LwHsvV7HrwDVegcJ0evXxhNVIDWzApFxE2w4eNu3ULdC",
+   "matches": true,
+   "name": "embedded NUL, matching",
+   "password_hex": "61626300646566",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$Dvo2K2nx3LwHsvV7HrwDVegcJ0evXxhNVIDWzApFxE2w4eNu3ULdC",
+   "matches": false,
+   "name": "embedded NUL, prefix before the NUL",
+   "password_hex": "616263",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$Dvo2K2nx3LwHsvV7HrwDVegcJ0evXxhNVIDWzApFxE2w4eNu3ULdC",
+   "matches": false,
+   "name": "embedded NUL, other bytes after the NUL",
+   "password_hex": "6162630078797a",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$Dvo2K2nx3LwHsvV7HrwDVegcJ0evXxhNVIDWzApFxE2w4eNu3ULdC",
+   "matches": false,
+   "name": "embedded NUL, trailing NUL added",
+   "password_hex": "6162630064656600",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$05k7BunJxlTFC2JzRrZlYer0XkHa4oLZNr1tWLgLYTJK4xvfBTWxW",
+   "matches": true,
+   "name": "trailing NUL, matching",
+   "password_hex": "61626300",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$05k7BunJxlTFC2JzRrZlYer0XkHa4oLZNr1tWLgLYTJK4xvfBTWxW",
+   "matches": false,
+   "name": "trailing NUL, without it",
+   "password_hex": "616263",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$l0AXk6QHAXM3I91ZIzfEw.d4J.hxqdFdPtFnx4biyFBy3Hm4rTMiG",
+   "matches": true,
+   "name": "UTF-8 password",
+   "password_hex": "70c3a4737377c3b672642de282ac",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$l0AXk6QHAXM3I91ZIzfEw.d4J.hxqdFdPtFnx4biyFBy3Hm4rTMiG",
+   "matches": false,
+   "name": "the same text in latin-1",
+   "password_hex": "70e4737377f67264",
+   "raises": false
+  },
+  {
+   "hash": "",
+   "matches": false,
+   "name": "empty hash",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "not-a-bcrypt-hash",
+   "matches": false,
+   "name": "no hash",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$",
+   "matches": false,
+   "name": "prefix and cost only",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId",
+   "matches": false,
+   "name": "short remainder",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.",
+   "matches": false,
+   "name": "salt only (gensalt form)",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2c$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "unknown version 2c",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "unknown version 2",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2B$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "uppercase version",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$03$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost 3",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$32$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost 32",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$4$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost without leading zero",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$+4$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost with plus sign",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$004$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost with leading zeros",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$x4$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost not a number",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$99999999999$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost beyond u32",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "cost empty",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$!.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "salt with an invalid character",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId/wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "salt with non-zero trailing bits",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$\u00e9N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "non-ASCII salt",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6",
+   "matches": false,
+   "name": "digest cut short",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6qa",
+   "matches": false,
+   "name": "digest with an extra character",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6a",
+   "matches": false,
+   "name": "digest changed",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "no leading dollar",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$$2b$$04$$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "doubled dollars",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q$",
+   "matches": false,
+   "name": "trailing dollar",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.$wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "four parts",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": " $2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": false,
+   "name": "leading space",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": true
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q\n",
+   "matches": false,
+   "name": "trailing newline",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  },
+  {
+   "hash": "$2b$04$D.N8v6Z7ZZTiikU.GmqId.wic.muyA/ogbpZ5LWAH4eWLHuXTiu6q",
+   "matches": true,
+   "name": "the valid hash",
+   "password_hex": "7365637265742d70617373776f7264",
+   "raises": false
+  }
+ ],
+ "generated_by": "rust/fixtures/generate.py",
+ "library": "pyca bcrypt 4.3.0"
+}

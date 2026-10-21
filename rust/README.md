@@ -16,13 +16,14 @@ agent commands and the ticket executor; S6b: the supervisor and the `opsgate
 runner [--once]` command), the web layer's shared foundations (S4a: `opsgate
 serve` with the request processing order of PLAN.md 4.4, the session cookie,
 the UI-CSRF check, the template environment, the login page and the bearer
-routes), the black-box API parity harness (S7a, green against Python and, for
+routes; S4b: `POST /login` with the bcrypt check and the login throttle,
+logout with the server-side revocation, the API-CSRF check and the approver's
+API actions), the black-box API parity harness (S7a, green against Python and, for
 the scenarios of the landed web slices, against Rust) and the black-box runner
 parity harness (S7b, green against the Python runner and, run locally, against
 the Rust runner). `check-db`, `runner` and `serve` work (`serve` answers the
-routes of S4a; `POST /login`, logout, the approver's API actions and the
-ticket pages follow with S4b and S5); `check-config` is still a stub that
-exits 2. The Python
+routes of S4a and S4b; the ticket pages and the UI actions follow with S5);
+`check-config` is still a stub that exits 2. The Python
 package in `src/opsgate` is the production implementation and the oracle for
 the contract. Nothing deploys or runs this code yet.
 
@@ -37,7 +38,7 @@ rust/
   crates/
     opsgate-core/       pure logic: settings, JSON canon/checksum, time, validation, log preview, path containment (S2a-S2c)
     opsgate-store/      SQLite store: schema, tickets, health, session generation, check-db (S3a, S3b)
-    opsgate-web/        HTTP API and web UI: layers, session, templates, routes (S4a; S4b, S5 add routes)
+    opsgate-web/        HTTP API and web UI: layers, session, templates, routes (S4a, S4b; S5 adds routes)
     opsgate-runner/     runner (S6a, S6b)
     opsgate/            the binary: command line, build.rs (embeds the git commit)
   fixtures/
@@ -53,6 +54,8 @@ rust/
     pystr.json          str() of JSON scalars, strip, lower (4.6)
     validation.json     new-ticket validation and normalisation (4.7.1)
     store.json          store scenarios: creation, dedupe, expiry, reading, health, sessions, transitions, claim, runner status (4.5.2, 4.6, 4.7)
+    bcrypt.json         pyca bcrypt 4.3 checkpw results: versions, truncation, NUL bytes, malformed hashes (4.5.3)
+    throttle.json       LoginThrottle event sequences with a fake clock (4.5.3)
   parity/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
     runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
@@ -96,8 +99,7 @@ recomputed → `prompt_tampered`, heartbeat on every poll, the disable file)
 and `update_runner_status` (4.7.4), and `dump` (`check-db --dump`). A read
 hook (`Store::with_read_hook`, hidden, never set by the server) lets the race
 tests pause a transition between its read and its write or hand it a stale
-row. The web crate is empty until its slices land. Every crate forbids `unsafe` code (workspace
-lint).
+row. Every crate forbids `unsafe` code (workspace lint).
 
 ## check-db
 
@@ -228,13 +230,38 @@ add their routes in `routes::router`, each wrapped in `routes::allow`
 redirect: a path like `/api//v1/health` is a 308 to `/api/v1/health`), and
 get every layer.
 
+Slice S4b adds the sign-in and the approver's API (PLAN.md 4.5.3, 4.5.4):
+
+- `POST /login` and `POST /logout` (`routes::login`). The password check is
+  `password::checkpw`, pyca bcrypt 4.3's `checkpw` wrapper reproduced over
+  the same `bcrypt` crate (hash parsing, 72-byte truncation, `$2a$`/`$2b$`/
+  `$2x$`/`$2y$`, embedded NUL bytes, `ValueError` as a mismatch; pinned by
+  `fixtures/bcrypt.json`), always run, also for a wrong username, on the
+  blocking pool. `throttle::LoginThrottle` is `LoginThrottle` (5 failures in
+  15 minutes per client address, at most 10 000 clients, monotonic clock,
+  pinned by `fixtures/throttle.json`); `AppState::with_login_throttle` takes
+  another one (tests: a fake clock and small limits). Logout of an
+  authenticated session bumps the stored generation.
+- `session::Approver` is now `require_approver_session`: 401
+  `auth_required`, then `csrf::enforce_api_session_csrf` (`X-CSRF-Token`, else
+  `Sec-Fetch-Site`, else `Origin` against `http://` and Werkzeug's
+  `request.host`), both before the body is read; the routes
+  `POST /api/v1/tickets/{id}/{approve,reject,cancel,archive,unarchive}`
+  (`routes::api`) use it.
+- `error::redirect` passes local targets through Werkzeug's `iri_to_uri`
+  (`urls::local_iri_to_uri`), as Flask does with every `Location`: a `next`
+  of `/tickets/a b` redirects to `/tickets/a%20b`.
+
 Tests (`crates/opsgate-web/tests/`) call the application in-process with
 `tower::ServiceExt::oneshot` from a chosen peer address and keep the session
 cookie in a jar (`tests/common`). `opsgate_web::testing::approver_session`
 mints a signed-in approver session (cookie and CSRF token) without
 `POST /login`, so slice S5 does not depend on S4b; `testing::session_cookie`
 writes any session content and `testing::session_from_response` reads the one
-a response set.
+a response set. The S4b tests sign in through the form (`TestApp::login`),
+run two application processes on one database (`TestApp::sharing`: a second
+browser, a restart, a password change) and drive the throttle with a fake
+clock (`TestApp::with_throttle`).
 
 ## CI
 
@@ -290,8 +317,9 @@ the other on the same artifacts, state files and tmux server) and the mixed
 stacks are parametrised over the stacks: `--impl python` runs the all-Python
 stacks, `--impl rust` every stack that contains Rust. A Rust runner runs once
 `RUST_SLICES_LANDED` in `runner_harness.py` contains S6b (it does since S6b
-merged), a Rust API once it contains S4a and S4b; until then those stacks are
-skipped. Each record holds
+merged), a Rust API once it contains S4a, S4b and S5 (the mixed stacks read
+the API's step log pages, S5's routes; S4a and S4b are listed); until then
+those stacks are skipped. Each record holds
 the runner's API calls (consecutive identical heartbeats collapsed), the
 artifact tree (names, modes, JSON values, text; timestamps masked, paths
 relative to the execution data directory, shell words instead of quoting),
@@ -391,7 +419,10 @@ Rust switch-on: every scenario carries `@pytest.mark.rust(<slices>)` naming the
 web slices it needs; against Rust it runs only when all of them are listed in
 `harness.RUST_SLICES_LANDED`, otherwise it is skipped with the missing slices
 as the reason. S4a, S4b and S5 each add their id there when they merge; S4a
-is listed (bearer routes, health, gate, headers, routing, the login page). `test_cross.py` runs every scenario with the
+(bearer routes, health, gate, headers, routing, the login page) and S4b
+(sign-in, logout and revocation, the throttle, both CSRF mechanisms, the
+approver's API actions, the ticket lifecycle, claims of approved tickets,
+cross-implementation databases and races) are listed. `test_cross.py` runs every scenario with the
 peer implementation `python` and `rust`, so a Python run covers python→python
 and python→rust.
 

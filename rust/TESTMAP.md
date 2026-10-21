@@ -45,7 +45,7 @@ the plan's acceptance criteria.
 | `test_archived_pending_ticket_blocks_lifecycle_actions` | `store::archive` | S3b | A |
 | `test_runner_does_not_claim_archived_approved_ticket` | `store::claim` | S3b | A |
 | `test_ticket_list_archive_redirect_sanitizes_invalid_targets` | `web::ui` | S5 | A |
-| `test_ui_archive_routes_require_csrf_token` | `web::csrf` | S4b | A |
+| `test_ui_archive_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_ticket_detail_renders_log_preview_and_full_log_link` | `web::ui` | S5 | A |
 | `test_ticket_step_log_view_renders_bounded_log` | `web::ui` | S5 | A |
 | `test_ticket_step_log_view_rejects_paths_outside_ticket_artifacts` | `web::ui` | S5 | A |
@@ -69,7 +69,7 @@ the plan's acceptance criteria.
 | `test_runner_claim_fails_invalid_stored_agent_and_moves_on` | `store::claim` | S3b | A |
 | `test_runner_claim_isolates_corrupt_stored_json` | `store::claim` | S3b | A |
 | `test_runner_claim_accepts_stored_json_at_depth_limit` | `store::claim` | S3b | A |
-| `test_ui_post_routes_require_csrf_token` | `web::csrf` | S4b | A |
+| `test_ui_post_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `web::gate` | S4a | A |
 | `test_login_ignores_external_next_path` | `web::login` | S4b | A |
 | `test_login_form_uses_autofill_friendly_fields` | `web::login` | S4b | A |
@@ -121,8 +121,8 @@ the plan's acceptance criteria.
 | `test_login_throttle_bounds_tracked_clients` | `web::login::throttle` | S4b | A |
 | `test_api_bearer_endpoints_reject_non_ascii_token` | `web::auth` | S4a | A |
 | `test_api_session_actions_reject_non_ascii_csrf_header` | `web::csrf` | S4b | A |
-| `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf` | S4b | A |
-| `test_ui_forms_reject_non_ascii_form_token` | `web::csrf` | S4b | A |
+| `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
+| `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_api_rejects_non_text_plan_fields` | `core::validate` | S2c | A |
 | `test_claim_rejects_non_text_stored_plan` | `store::claim` | S3b | A |
 | `test_api_rejects_utc_expiry_overflow` | `core::time + core::validate` | S2a | A |

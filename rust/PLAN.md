@@ -1336,8 +1336,11 @@ Root SSH session in tmux, no production unit touched:
    `approved_payload_checksum` that matched in Python matches in Rust.
 2. **Shadow API**: `opsgate serve --db <copy> --bind-host 127.0.0.1
    --bind-port 8712` as `control_service_user` with **shadow env files** (API
-   and runner, root-owned 0640 with the service group, in the shadow
-   directory) containing fresh random tokens, a fresh bcrypt hash and session
+   and runner, root-owned 0640 with the respective service group: the API
+   file next to the DB copy in `/usr/local/var/opsgate/shadow/`
+   (`control_service_user` 0700), the runner file in
+   `/Users/ops/remediation-shadow/` (`ops` 0750), which the `ops` user can
+   traverse; the DB copy stays unreadable for `ops`) containing fresh random tokens, a fresh bcrypt hash and session
    secret (never the production secrets), production values for the CIDRs and
    policy floors, and deliberately for this isolated plain-HTTP loopback test:
    `OPSGATE_TRUST_PROXY_HEADERS=false`, `OPSGATE_SESSION_COOKIE_SECURE=false`
@@ -1466,8 +1469,8 @@ coordinator/owner.
 | S2c | Core validation: ticket normalisation of 4.7.1 steps 1–10, plan/policy/merge/enforce, duration, D-2/D-3 rules; fixture `validation` | opsgate | S2a | yes (S2b, S6a) | 3 | no |
 | S3a | Store I: DDL verbatim, connection setup, `init_db`, session-state sync/generation/revoke, create (lazy expiry + dedupe + unique mapping), get/list/serialise, health, `check-db`; schema contract test | opsgate | S2a, S2b, S2c | yes (S6a/S6b) | 3 | no |
 | S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests | opsgate | S3a | yes (S6b) | 4 | no |
-| S4a | Web I (shared foundations): `serve`, router, proxy fix, gate, security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
-| S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, UI-CSRF layer, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
+| S4a | Web I (shared foundations): `serve`, router, proxy fix, gate, security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the UI-CSRF layer with `ensure_csrf_token` (4.5.4, applies to every non-API `POST` incl. routes added later), the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
+| S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
 | S5 | Web III: remaining UI pages and UI action routes, manual form, log views (rendered through the S4a environment; authenticated in tests through the S4a session helper with the session's CSRF token in forms) | opsgate | S4a | yes (S4b) | 4 | no |
 | S6a | Runner I: API client, tmux adapter, artifacts/atomic writes, commands/script, executor (fresh path, heartbeats, cancel, timeout, post-status retry) | opsgate | S2a, S2b | yes (S2c, S3-, S4-, S5) | 4 | no |
 | S6b | Runner II: resume rules, shutdown, supervisor loop, recovery, worker failure + verified cleanup, state files, `--once`, log lines, `runner` wiring | opsgate | S6a | yes (S3-, S4-, S5) | 4 | no |
@@ -1520,8 +1523,12 @@ Acceptance criteria (beyond green checks and a clean review):
   schema contract test; Python→Rust and Rust→Python database round trip
   (create in one, approve in the other, claim in the first).
 - **S4a/S4b/S5:** every web row of TESTMAP owned by the slice passes
-  in-process (S5 authenticates through the S4a session helper, so it does not
-  need S4b's login to merge). Black-box parity per slice only where the
+  in-process (S5 authenticates through the S4a session helper and gets the
+  UI-CSRF layer from S4a, so it does not need S4b to merge; S4b's tests use
+  only S4a pages). TESTMAP rows that need routes of both S4b and S5
+  (`test_ui_archive_routes_require_csrf_token`,
+  `test_ui_post_routes_require_csrf_token`,
+  `test_ui_forms_reject_non_ascii_form_token`) belong to S8. Black-box parity per slice only where the
   scenario needs no other open slice: S4a the bearer/gate/header/health
   scenarios, S4b the login/logout/throttle/CSRF scenarios; the authenticated
   UI scenarios run against Rust from S8, which needs both S4b and S5.

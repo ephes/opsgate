@@ -1398,8 +1398,9 @@ session cookie attributes, normalised DB snapshot: ids mapped, timestamps
 masked, temp paths masked, JSON columns parsed, error `message` texts masked as
 P2). `just rs-parity-api` runs the suite against both and diffs the records
 (`compare.py`; scenarios that name a P3 divergence are reported as explained);
-CI runs it on every push (job `parity-api`: Python, then since S4a the Rust
-release binary and the record diff). Every scenario names the Rust slices it needs
+CI runs it on every push (job `parity-api`: the Rust release binary is built
+first, since the Python run's cross-implementation scenarios use it as their
+peer from S4b on; then Python, since S4a Rust, and the record diff). Every scenario names the Rust slices it needs
 (`@pytest.mark.rust(...)`); it runs against Rust once all of them are in
 `harness.RUST_SLICES_LANDED`, which each web slice extends when it merges.
 Cross-implementation DB scenarios: tickets created/approved by

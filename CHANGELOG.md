@@ -15,7 +15,8 @@
   without a `Host` header). The S4b scenarios of the API parity harness (login, throttle,
   revocation, both CSRF mechanisms, the ticket lifecycle, claims, cross-implementation databases
   and races) now run against Rust in CI; the runner parity harness's mixed stacks with a Rust API
-  also need S5's step log pages and stay skipped until S5 lands. Nothing deploys or runs the Rust API yet; the Python implementation is unchanged.
+  also need S5's step log pages and stay skipped until S5 lands. The `parity-api` CI job builds the
+  Rust binary before its Python run, whose cross-implementation scenarios now use it. Nothing deploys or runs the Rust API yet; the Python implementation is unchanged.
 - Rust port slice S4a (`rust/crates/opsgate-web`, `rust/crates/opsgate`): `opsgate serve` works
   with the web layer's shared foundations — the request processing order of `app.py` (decoded
   request path, security headers on every response, the session cookie, error mapping to JSON or

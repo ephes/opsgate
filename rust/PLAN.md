@@ -11,7 +11,7 @@ actions; with S4b the UI scenarios of the API parity harness and the runner
 harness's mixed stacks with a Rust API run against Rust), S6a
 runner I, S6b runner II (`opsgate runner` works; the runner
 parity harness is green against it locally) and the S7b runner parity harness
-landed); owner
+landed; the ops-library role switch S10 landed in `opsgate_deploy`); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -1590,10 +1590,14 @@ opsgate_rust_install_root: /usr/local/libexec/opsgate-rs
 opsgate_rust_keep_versions: 3     # never prunes the active or the previous version
 ```
 
+(S10 also added `opsgate_launchd_python_plist_dir` for the copies of 10.3 and
+`opsgate_launchd_verify_retries`/`_delay`, 10 × 3 s, for step 5.)
+
 New `tasks/rust_binary.yml` after `service_env.yml`, before `launchd.yml`:
 
 1. Assert impl values; any `rust` needs a version with a 64-hex sha256 (or a
-   local archive plus version).
+   local archive plus version). (S10: in `validate.yml`, so a wrong value
+   fails before the source sync changes anything.)
 2. With a version set (independent of the impls, so the binary can be
    installed ahead of a switch): download with `get_url` + checksum (or copy),
    unpack into `<root>/<version>/` (root:wheel, 0755); an existing version
@@ -1603,12 +1607,23 @@ New `tasks/rust_binary.yml` after `service_env.yml`, before `launchd.yml`:
    `--version` reports the version; as `control_service_user`
    (`sudo -u … env OPSGATE_ENV_FILE=/etc/opsgate/opsgate-api.env <bin>
    check-config api`), as `ops` (`… check-config runner` with the runner env
-   file), and `check-db --db <db_path>` as `control_service_user` (read-only).
+   file), and `check-db --db <db_path>` as `control_service_user` (read-only;
+   skipped while the database does not exist yet, the API creates it on its
+   first start).
    Only the env-file **path** is passed, never secret values (guard tests).
-   Failure stops the play; plists and running units are untouched.
+   Failure removes a version this run installed and leaves plists and running
+   units untouched; it stops the play when any unit's impl is `rust`. With
+   both impls `python` it is an ignored, visible failure and the deploy goes
+   on with Python without pruning (as mailgun-relay's role), so a release
+   that rejects a configuration or a database Python accepts never blocks the
+   rollback of 10.3 (S10; the plan said the play always stops).
 4. Plist rendering per unit: `python` → today's `ProgramArguments`; `rust` →
    `/usr/bin/env bash -lc "cd <working dir> && exec <root>/<version>/opsgate serve"`
-   (resp. `runner`), keeping the login-shell environment of 4.13.8 and all
+   (resp. `runner`; `<working dir>` is the directory the Python command
+   enters, `opsgate_app_dir` resp. `opsgate_runner_app_dir`, so the process
+   working directory the tmux server inherits stays the same; the runner
+   plist's `WorkingDirectory` is `execution_data_dir`), keeping the
+   login-shell environment of 4.13.8 and all
    `EnvironmentVariables`, `UserName`, `GroupName`, `WorkingDirectory`, logs,
    labels. A version change or impl flip changes only that plist, so the
    existing `manage_launchd_unit.yml` boots out/in and kickstarts only that
@@ -1622,7 +1637,11 @@ New `tasks/rust_binary.yml` after `service_env.yml`, before `launchd.yml`:
    opsgate serve|runner`; API → `GET http://127.0.0.1:<port>/api/v1/health`
    answers `status == "ok"`.
 6. After verification: prune old versions beyond `keep_versions`, never the
-   active or previous one.
+   active or previous one. (S10: "active" is the pinned version and every
+   version a unit's live process runs; "previous" is per unit,
+   `<root>/.previous-api` and `.previous-runner`, written when a unit's plist
+   moves away from a Rust version. Nothing is pruned when a unit's live state
+   cannot be read or names an unversioned executable below the root.)
 
 README section "Implementation: Python or Rust", CHANGELOG under
 "Unreleased" (galaxy.yml is not bumped by this stream), unit tests in

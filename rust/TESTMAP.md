@@ -204,6 +204,15 @@ section ("Rust-only tests") with their paths.
 
 ### `tests/test_runner.py`
 
+`R` rows are covered by the runner parity harness (S7b, `rust/parity/runner`):
+executor rows by `test_runner_execution.py`, API error and outage rows by
+`test_runner_api_faults.py`, recovery and cleanup rows by
+`test_runner_supervisor.py`, resume and shutdown rows by
+`test_runner_restart.py`. Not reproducible as a black box and left to the unit
+port: `test_resume_adopts_exit_code_written_during_session_probe` (a race
+between two probes) and the `cleanup_fails=True` case of
+`test_worker_cleans_session_before_terminal_failure`.
+
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
 | `test_ticket_executor_runs_steps_sequentially` | `runner::executor` | S6a | R |
@@ -264,3 +273,9 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-core/tests/formatter_properties.rs` | property test: canonical and stored texts are ASCII, parse back to the same value and are fixed points (7.1) | S2a |
 | `crates/opsgate-core/src/{json,pytext,time}.rs::tests` (S2a parts) | unit tests: escapes, separators, number classification, 4300-digit limit, BOM and UTF-8 handling of bodies, depth limit at 64 (and serde_json's 128), float `repr` examples, ISO parsing corners | S2a |
 | `tests/test_rust_fixtures.py::test_python_gated_fixtures_follow_the_interpreter` | fixtures gated to another CPython version (`PYTHON_GATED`) are neither written nor checked, and are checked on their own version (7.2) | S2a |
+| `rust/parity/runner/test_runner_execution.py` | runner black box over a fake API (7.4): one/three steps, names and slugs, context and previous summary, agent command lines, env-file keys in the agents' environment (4.13.8), file modes, request shapes, exit-code failure, unsupported agent, invalid plan, timeout, cancel/terminal state during a step, session killed externally, heartbeat cadence, `max_parallel_jobs`, state files | S7b |
+| `rust/parity/runner/test_runner_api_faults.py` | status retry (503, dropped connection), status and heartbeat outages (state kept, live session re-attached), permanent 4xx, 409 conflicts, claim errors and their P1 log lines (4.13.1, 4.15) | S7b |
+| `rust/parity/runner/test_runner_supervisor.py` | disable file, `--once`, recovery housekeeping (state files, tmux discovery, terminal/not-running/unknown tickets, no tmux server, no tmux binary, GET outage) | S7b |
+| `rust/parity/runner/test_runner_restart.py` | SIGTERM (interrupted), SIGKILL + restart (adopt exit code, re-attach, interrupted, skip finished steps) for every Python/Rust runner pair (cross-implementation recovery), unreadable metadata | S7b |
+| `rust/parity/runner/test_runner_mixed_stacks.py` | real API × real runner, Python/Rust × Python/Rust, one two-step ticket end to end incl. the step log pages | S7b |
+| `tests/test_runner_parity_compare.py` | `rust/parity/runner/compare.py`: equal records pass, differences reported with their path, types compared, failed stacks and missing baselines fail, `--require-rust` | S7b |

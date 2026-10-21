@@ -1,7 +1,8 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
 Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str and S2b core settings/files landed); owner
+JSON/time/str, S2b core settings/files and the S7b runner parity harness
+landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -894,7 +895,10 @@ Plain HTTP only (D-10).
 
 #### 4.13.4 Executor (`TicketExecutor.run`, `_run_step`)
 
-- Starts only for state `running`; `started_at` from the ticket (else now);
+- Starts only for state `running`; `started_at` from the ticket (else now;
+  the text is `str()` of the field, so a JSON `null` becomes `"None"`, fails
+  to parse and ends as `runner_unhandled_exception:ValueError`, 4.13.6 — the
+  real API always sends `started_at` for running tickets);
   `max_duration = int(max_duration_seconds or default)`, ≤ 0 → default;
   deadline = started_at + max_duration (ticket-wide).
 - Empty/non-list plan → status `invalid_plan`/`failed`/`failure`/
@@ -915,7 +919,12 @@ Plain HTTP only (D-10).
   outcome timeout `max_duration_seconds_exceeded`; `GET` ticket (API error →
   assume running): `canceled` → kill, metadata `canceled`, return;
   other terminal → kill, fail `ticket_entered_<state>`; exit code appeared →
-  break; session gone → fail `session_terminated_without_exit_code`;
+  break; session gone → fail `session_terminated_without_exit_code`
+  (without `remain-on-exit` this races: a step that writes its exit code and
+  exits between the exit-code check and `has-session` is failed although it
+  finished — seen with a plain tmux configuration; production's tmux.conf has
+  `remain-on-exit on`, so the dead pane keeps the session until it is killed,
+  and the harness runs with that configuration, 7.4);
   heartbeat every `max(1, interval)` s: `heartbeat` with
   `running_step_<n>_of_<total>`.
 - Finish: exit code `int(text.strip())` else 1; entry gets `finished_at`,
@@ -970,6 +979,11 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   `failed`/`failed`/`failure`/`runner_unhandled_exception:<Type>`; if cleanup
   or reporting fails → keep the state file. Finally, if not marked for
   cleanup: `GET` ticket; terminal → kill sessions, mark for cleanup.
+- Finished sessions: with production's `remain-on-exit on`
+  (`ops-library:roles/opsgate_deploy/templates/ops.tmux.conf.j2`) a step's
+  session stays after its script exited; nothing kills it on success, so it
+  stays until a later recovery pass finds it by name and kills the sessions of
+  the terminal ticket (`--once` exits before that pass and leaves it).
 - Session cleanup verification (`_tmux_sessions_for_ticket`): `tmux ls`
   missing binary → error; non-zero exit with "no server running", "No such
   file or directory" or "Connection refused" in stderr → no sessions; other
@@ -1259,6 +1273,26 @@ the reverse). **Mixed stacks**: real API + real runner for Python/Rust ×
 Python/Rust with one multi-step ticket each, proving the cutover order does
 not matter. CI runs it on Linux and macOS (`brew install tmux`).
 
+Implementation (S7b): pytest suite `rust/parity/runner` (`--impl
+python|rust`, `--records DIR`; `compare.py` diffs record sets, every stack of
+a scenario against its all-Python baseline). The cross-implementation and
+mixed-stack scenarios are parametrised over the stacks; `--impl python` runs
+the all-Python ones, `--impl rust` every stack with Rust, and Rust stacks run
+only once `RUST_SLICES_LANDED` (`runner_harness.py`) lists S6b (runner) or
+S4a + S4b (API: bearer routes, login, cookie-authenticated approve). The
+runner environment is isolated so a real agent can never run: built from an
+allowlist (locale, user, `TMPDIR`), private `HOME`
+whose `.tmux.conf` is production's (incl. `remain-on-exit on`, 4.13.6),
+`SHELL=/bin/sh` (tmux runs the step command through it), `PATH` = fake
+agents, tmux and the system directories. Recorded and compared: status calls
+(consecutive identical heartbeats collapsed), artifact tree (modes, JSON
+values, text; timestamps masked, paths relative, `attach_command` and
+`run_step.sh` reduced to shell words since quoting is P2), tmux session
+names, state files, P1 log lines (4.15), agent calls; in the mixed stacks
+also the final ticket and the audit events. Not reproducible as a black box
+(left to the unit port): the exit code written during the session probe
+(4.13.5) and a failing session cleanup inside the worker.
+
 ### 7.5 TESTMAP
 
 `rust/TESTMAP.md` maps all 187 Python tests to their Rust test and slice; a
@@ -1273,7 +1307,8 @@ harness column says whether a black-box scenario also covers it.
 the release binary for each runner OS; `deny.toml` checks the release target
 `aarch64-apple-darwin` only, so both legs check the same graph), release
 build, `opsgate --version` smoke test against the checked-out commit,
-binary-size report; and parity jobs running 7.3 (`parity-api`, S7a) and 7.4 (S7b). `justfile`:
+binary-size report; and parity jobs running 7.3 (`parity-api`, S7a) and 7.4
+(`parity-runner`, S7b; Linux and macOS, Python now, Rust from S8). `justfile`:
 `rs-check` (fmt, clippy, test), `rs-test`, `rs-deny`, `rs-fmt`,
 `rs-fixtures`, `rs-build` (S1), `rs-parity-api` (S7a), `rs-parity-runner`
 (S7b). The Python jobs stay unchanged apart from the fixture drift test,

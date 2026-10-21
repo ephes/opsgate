@@ -57,3 +57,11 @@ rs-parity-api *args: _sync
     uv run pytest rust/parity/api -rs --impl python --records rust/target/parity-api/python {{args}}
     uv run pytest rust/parity/api -rs --impl rust --records rust/target/parity-api/rust {{args}}
     uv run python rust/parity/api/compare.py rust/target/parity-api/python rust/target/parity-api/rust --report rust/target/parity-api/report.json
+
+# Runner parity harness (rust/PLAN.md 7.4; needs tmux): the Python runner, then the Rust runner
+# (its scenarios are skipped until slice S6b lands), then the diff of both record sets
+rs-parity-runner: _sync rs-build
+    rm -rf rust/target/parity-runner
+    uv run pytest rust/parity/runner --impl python --records rust/target/parity-runner/python
+    uv run pytest rust/parity/runner --impl rust --records rust/target/parity-runner/rust
+    uv run python rust/parity/runner/compare.py rust/target/parity-runner/python rust/target/parity-runner/rust

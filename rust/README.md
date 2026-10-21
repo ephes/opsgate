@@ -8,8 +8,9 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection) and the black-box API parity harness (S7a, green against
-Python). The workspace, CI, the fixture generator and the command-line
+header selection), the black-box API parity harness (S7a, green against
+Python) and the black-box runner parity harness (S7b, green against the
+Python runner). The workspace, CI, the fixture generator and the command-line
 skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
@@ -41,6 +42,7 @@ rust/
     pystr.json          str() of JSON scalars, strip, lower (4.6)
   parity/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
+    runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
 ```
 
 `opsgate-core` has the modules of S2a: `json` (parsing like `json.loads`,
@@ -74,9 +76,9 @@ Run from the repository root:
 | `just rs-fixtures` | regenerate `rust/fixtures` from the Python implementation |
 | `just rs-build` | release build for this host (`rust/target/release/opsgate`) |
 | `just rs-parity-api` | API parity harness against Python and Rust, then the record diff (see below) |
+| `just rs-parity-runner` | runner parity harness against Python, then Rust, then the diff of both (needs tmux) |
 
-The runner parity harness gets its recipe (`rs-parity-runner`) with slice
-S7b. `just check` stays the Python check.
+`just check` stays the Python check.
 
 ## CI
 
@@ -88,7 +90,57 @@ The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 verified cargo-deny release), `cargo test --locked`, a release build, a
 `--version` smoke test (version and the checked-out commit) and the release
 binary size in the job summary. The fixture drift test runs in the Python job
-as part of pytest.
+as part of pytest. The `parity-runner` job runs the runner parity harness
+against the Python runner on both systems (tmux from apt or Homebrew).
+
+## Runner parity harness
+
+`parity/runner/` (PLAN.md 7.4) runs a real runner process (`python -m opsgate
+runner` or `opsgate runner`, `--once` where a scenario needs it) as a black
+box: a generated env file, a temporary execution data directory, real tmux on
+a private socket label with its own `TMUX_TMPDIR`, and fake `codex`/`claude`
+(`fake_agent.py`) first on `PATH`. Its API is the scripted stand-in of
+`fake_api.py` (claim, status, get; scripted HTTP errors and dropped
+connections; every request recorded), or in the mixed stacks a real `serve`
+process.
+
+```bash
+uv run pytest rust/parity/runner                          # against the Python runner
+uv run pytest rust/parity/runner --impl rust              # against rust/target/release/opsgate ($OPSGATE_RUST_BIN)
+uv run pytest rust/parity/runner --records DIR            # also write one normalised record per scenario
+uv run python rust/parity/runner/compare.py DIR [DIR ...] # diff the records of different stacks
+just rs-parity-runner                                     # Python, Rust, diff
+```
+
+Scenarios assert the Python behaviour, which is the oracle:
+
+| File | Scenarios |
+| --- | --- |
+| `test_runner_execution.py` | one and three steps (names, slugs, context, previous summary, agent command lines, env-file keys reaching the agents, file modes, claim/status request shapes), exit-code failure, unsupported agent, invalid plan, ticket timeout, cancel and other terminal states during a step, session killed externally, heartbeat cadence, `max_parallel_jobs` and state files |
+| `test_runner_api_faults.py` | status retry after 503 and a dropped connection, a status outage that keeps the state file (the restarted runner fails the step as interrupted), a heartbeat outage that re-attaches the live session, permanent 4xx (session killed before the failure report), silent 409 `invalid_state`/`state_changed` and permanent other conflicts, claim errors (P1 log lines) |
+| `test_runner_supervisor.py` | disable file (`--once` and paused claims), `--once` without work, recovery housekeeping (invalid state files, terminal and not-running tickets, tmux discovery, unknown tickets) |
+| `test_runner_restart.py` | SIGTERM during a step (interrupted, then failed after a restart), SIGKILL and restart (adopt the exit code, re-attach the live session, interrupted) for every pair of Python/Rust runners, unreadable metadata |
+| `test_runner_mixed_stacks.py` | real API and real runner, Python/Rust × Python/Rust, one two-step ticket from submission through approval to success, the API's step log pages reading the runner's artifacts |
+
+The cross-implementation scenarios (SIGKILL one implementation, continue with
+the other on the same artifacts, state files and tmux server) and the mixed
+stacks are parametrised over the stacks: `--impl python` runs the all-Python
+stacks, `--impl rust` every stack that contains Rust. A Rust runner runs once
+`RUST_SLICES_LANDED` in `runner_harness.py` contains S6b, a Rust API once it
+contains S4a and S4b; until then those stacks are skipped. Each record holds
+the runner's API calls (consecutive identical heartbeats collapsed), the
+artifact tree (names, modes, JSON values, text; timestamps masked, paths
+relative to the execution data directory, shell words instead of quoting),
+tmux session names, state files, P1 log lines and agent calls. `compare.py`
+compares every stack of a scenario with its all-Python baseline.
+
+The runner environment is isolated so that a real agent can never run: it is
+built from an allowlist (locale, user, `TMPDIR`; no `BASH_ENV` or exported
+shell functions of the caller), with a private `HOME` (whose `.tmux.conf` is production's, from the
+`opsgate_deploy` role, including `remain-on-exit on`), `SHELL=/bin/sh`, and a
+`PATH` of the fake agents, tmux and the system directories only. Each scenario
+kills its tmux server at the end. CI runs the harness in the `parity-runner`
+job on Linux and macOS.
 
 ## Fixtures
 

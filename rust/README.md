@@ -8,14 +8,15 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection; S2c: ticket validation), the first half of the SQLite store
-(S3a: schema, ticket creation, get/list, health, session generation and
-`check-db`), the runner (S6a: API client, tmux adapter, artifacts, agent
-commands and the ticket executor; S6b: the supervisor and the `opsgate runner
-[--once]` command), the black-box API parity harness (S7a, green against
-Python) and the black-box runner parity harness (S7b, green against the
-Python runner and, run locally, against the Rust runner). The workspace, CI,
-the fixture generator and the command-line skeleton exist; `check-db` and
+header selection; S2c: ticket validation), the SQLite store (S3a: schema,
+ticket creation, get/list, health, session generation and `check-db`; S3b:
+approve, reject, cancel, archive, unarchive, claim, runner status, race tests
+and `check-db --dump`), the runner (S6a: API client, tmux adapter, artifacts,
+agent commands and the ticket executor; S6b: the supervisor and the `opsgate
+runner [--once]` command), the black-box API parity harness (S7a, green
+against Python) and the black-box runner parity harness (S7b, green against
+the Python runner and, run locally, against the Rust runner). The workspace,
+CI, the fixture generator and the command-line skeleton exist; `check-db` and
 `runner` work, every other command is still a stub that exits 2. The Python
 package in `src/opsgate` is the production implementation and the oracle for
 the contract. Nothing deploys or runs this code yet.
@@ -46,10 +47,11 @@ rust/
     datetime.json       timestamp parsing and formatting, Python 3.14 (4.9)
     pystr.json          str() of JSON scalars, strip, lower (4.6)
     validation.json     new-ticket validation and normalisation (4.7.1)
-    store.json          store scenarios: creation, dedupe, expiry, reading, health, sessions (4.5.2, 4.6, 4.7.1)
+    store.json          store scenarios: creation, dedupe, expiry, reading, health, sessions, transitions, claim, runner status (4.5.2, 4.6, 4.7)
   parity/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
     runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
+    shadow/             data-parity tools for a production database copy (S3b, PLAN.md 11.2)
 ```
 
 `opsgate-core` has the modules of S2a: `json` (parsing like `json.loads`,
@@ -80,8 +82,16 @@ every write: `schema` (the DDL of `init_db`, verbatim), `Store::open`
 (`ui_session_generation`, `revoke_ui_sessions`), ticket creation
 (`create_ticket`, `create_manual_ticket`: validation, lazy expiry, dedupe,
 audit), `get_ticket`, `list_tickets`, `health`, and `check` (`check-db`).
-Transitions, claim and runner status follow in S3b. The web crate is
-empty until its slices land. Every crate forbids `unsafe` code (workspace
+S3b adds the approver's transitions (`approve_ticket`, `reject_ticket`,
+`cancel_ticket`, `archive_ticket`, `unarchive_ticket`: state checks in
+Python's order, compare-and-set on the state read → 409 `state_changed`,
+audit events), the runner's `claim_ticket` (oldest approval first, lazy
+expiry, stored-JSON validation → `invalid_stored_plan`, payload checksum
+recomputed → `prompt_tampered`, heartbeat on every poll, the disable file)
+and `update_runner_status` (4.7.4), and `dump` (`check-db --dump`). A read
+hook (`Store::with_read_hook`, hidden, never set by the server) lets the race
+tests pause a transition between its read and its write or hand it a stale
+row. The web crate is empty until its slices land. Every crate forbids `unsafe` code (workspace
 lint).
 
 ## check-db
@@ -99,6 +109,26 @@ not a readable SQLite database. Problems name ticket ids, audit event ids and
 columns, never stored values. It opens the database read-only and never
 creates, migrates, checkpoints or writes it; for a WAL database SQLite may
 create the `-wal`/`-shm` side files, as for any reader.
+
+`--dump <file>` (S3b) also writes the data-parity records of PLAN.md 11.2
+step 1, one JSON line per ticket in `rowid` order: the serialisation as `GET
+/api/v1/tickets/<id>` returns it, the payload checksum approval recomputes
+from the stored fields (or the error code, `unhandled` for a 500), the stored
+`approved_payload_checksum` and whether both match. The file is created new
+with mode 0600 (it holds prompts and contexts; an existing file is never
+overwritten, a failed dump is removed) and only when the schema matches; a
+summary line follows the report. On the database copy of the shadow run:
+
+```bash
+opsgate check-db --db COPY.sqlite3 --dump rust.jsonl
+/Users/control_service_user/opsgate/.venv/bin/python rust/parity/shadow/serialize_python.py \
+    --db COPY.sqlite3 --out python.jsonl            # the deployed Python service, read-only
+python3 rust/parity/shadow/compare_dump.py python.jsonl rust.jsonl   # exit 0: no difference
+```
+
+`compare_dump.py` (standard library only) compares every key of every record
+by its canonical JSON text and prints counts and the differing rows and keys,
+never values.
 
 ## Toolchain
 
@@ -149,15 +179,32 @@ binary's own tests (`crates/opsgate/tests/binary.rs`) start `opsgate runner`
 as a process: configuration errors, `--once`, the P1 claim-failure log line,
 SIGTERM and SIGINT.
 
+## Store tests
+
+`opsgate-store`'s tests port the store half of the Python tests
+(`TESTMAP.md`) and replay `fixtures/store.json`. `tests/races.rs` ports
+`tests/test_ticket_transition_races.py` with two threads and the store's read
+hook; `OPSGATE_RACE_REPEAT=100 cargo test -p opsgate-store --test races`
+repeats every race 100 times (the S3b acceptance; about a minute).
+`tests/python_roundtrip.rs` runs the Python service on the same database
+(`python3 -I tests/python_peer.py`, standard library only; `$OPSGATE_PYTHON`
+picks the interpreter, 3.11 or newer): tickets created by one implementation,
+approved by the other and claimed by the first, both ways, then both dumps
+compared with `rust/parity/shadow/compare_dump.py`. Without a suitable
+`python3` it skips; with `OPSGATE_REQUIRE_PYTHON=1` (set in CI) it fails
+instead.
+
 ## CI
 
 The `parity-api` job runs the API parity harness against Python (lint,
-typecheck, scenarios); slice S4a adds the Rust leg.
+typecheck, scenarios; it also lints and typechecks `parity/shadow` and the
+store's Python peer); slice S4a adds the Rust leg.
 
 The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 `macos-15`: rustfmt, clippy, `cargo deny --locked check` (pinned, sha256
 verified cargo-deny release), `cargo test --locked` (with tmux installed and
-`OPSGATE_REQUIRE_TMUX=1`), a release build, a
+`OPSGATE_REQUIRE_TMUX=1`, Python for the round trip and
+`OPSGATE_REQUIRE_PYTHON=1`), a release build, a
 `--version` smoke test (version and the checked-out commit) and the release
 binary size in the job summary. The fixture drift test runs in the Python job
 as part of pytest. The `parity-runner` job runs the runner parity harness
@@ -252,7 +299,7 @@ UV_PYTHON=3.14 just rs-fixtures
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | `opsgate-store/tests/schema_contract.rs`, `check_db.rs` |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 | `storage_json.json` | JSON text → stored column text `json.dumps(value, sort_keys=True)` | `opsgate-core/tests/checksum_fixture.rs` |
-| `store.json` | store scenarios run by `OpsGateService` (creation with lazy expiry and dedupe, manual tickets and the operator floor, validation failures, get/list/serialisation of rows written by older code, health, session generation): every step's result and the final four tables, generated ids and timestamps masked after a format check | `opsgate-store/tests/store_fixture.rs` |
+| `store.json` | store scenarios run by `OpsGateService` (creation with lazy expiry and dedupe, manual tickets and the operator floor, validation failures, get/list/serialisation of rows written by older code, health, session generation; S3b: approve/reject/cancel/archive/unarchive with every error, approval of stored values Python reads differently (truthiness, `int()` of durations, unhandled errors), claim order, tamper, invalid stored JSON, expiry, archive, disable file, rollback, runner status with explicit `null`/`false`/`0` values, rows written by older code): every step's result and the final four tables, generated ids and timestamps masked after a format check | `opsgate-store/tests/store_fixture.rs` |
 | `validation.json` | request body text, source, reviewer floor and default duration → `_normalize_new_ticket`: canonical checksum text and `payload_checksum`, or error code, status and message (469 cases: the S2c Python tests, every check of 4.7.1 and their order, 240 random multi-field mutations; D-2/D-3 marked with the Rust result) | `opsgate-core/tests/validation_fixture.rs` |
 
 ## API parity harness
@@ -321,7 +368,7 @@ provides and macOS does not; it is skipped on macOS and runs in CI.
 opsgate serve [--db PATH] [--bind-host HOST] [--bind-port PORT]
 opsgate runner [--once]
 opsgate check-config api|runner
-opsgate check-db --db PATH
+opsgate check-db --db PATH [--dump FILE]
 opsgate --version
 ```
 

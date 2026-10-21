@@ -696,6 +696,7 @@ dependencies = [
  "opsgate-runner",
  "opsgate-store",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-util",

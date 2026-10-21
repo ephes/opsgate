@@ -6,6 +6,7 @@
 //! `list_tickets`.
 
 use opsgate_core::error::ServiceError;
+use opsgate_core::settings::{PyInt, py_int};
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::{Map, Number, Value};
@@ -148,7 +149,7 @@ impl TicketRow {
         })
     }
 
-    fn unreadable(&self, column: &str, reason: impl Into<String>) -> StoreError {
+    pub(crate) fn unreadable(&self, column: &str, reason: impl Into<String>) -> StoreError {
         Unreadable {
             table: "tickets",
             key: Some(self.id.clone()),
@@ -162,6 +163,43 @@ impl TicketRow {
     /// 4.6: D-2 texts are unreadable).
     pub fn json_column(&self, column: &str, text: &str) -> Result<Value, StoreError> {
         opsgate_core::json::parse(text).map_err(|error| self.unreadable(column, error.to_string()))
+    }
+
+    /// `int(row["max_duration_seconds"])`, as approval and claim compute it
+    /// for the checksum payload (4.7.2, 4.7.3): an integer as stored, a REAL
+    /// truncated toward zero, a text parsed as Python's `int()` parses it
+    /// ([`py_int`]: ASCII and Unicode whitespace around it, Unicode decimal
+    /// digits, single underscores between digits). Where
+    /// Python raises (`NULL`, an unparsable text, an infinite REAL) the value
+    /// is unreadable, a 500 as Python's `TypeError`/`ValueError`. A value
+    /// Python converts to an integer outside `i64` and a BLOB are unreadable
+    /// as well (D-2; SQLite's own integers are `i64`, and no OpsGate version
+    /// wrote either).
+    pub fn max_duration_int(&self) -> Result<i64, StoreError> {
+        let column = "max_duration_seconds";
+        match &self.max_duration_seconds {
+            SqlValue::Integer(value) => Ok(*value),
+            SqlValue::Real(value) => {
+                let truncated = value.trunc();
+                // `i64::MIN` is exact as a float; `i64::MAX` is not, so the
+                // upper bound is exclusive.
+                if truncated >= -(2_f64.powi(63)) && truncated < 2_f64.powi(63) {
+                    #[allow(clippy::cast_possible_truncation)]
+                    Ok(truncated as i64)
+                } else {
+                    Err(self.unreadable(column, "not an integer within 64 bits"))
+                }
+            }
+            SqlValue::Text(text) => match py_int(text) {
+                Some(PyInt::Value(value)) => Ok(value),
+                Some(PyInt::OutOfRange) => {
+                    Err(self.unreadable(column, "not an integer within 64 bits"))
+                }
+                None => Err(self.unreadable(column, "text that int() rejects")),
+            },
+            SqlValue::Null => Err(self.unreadable(column, "NULL")),
+            SqlValue::Blob(_) => Err(self.unreadable(column, "a BLOB value")),
+        }
     }
 
     /// `bool(row["archived_at"])`.

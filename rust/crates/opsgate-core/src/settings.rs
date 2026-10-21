@@ -232,7 +232,7 @@ pub fn parse_bool(
 
 /// The result of Python's `int(text)` for a decimal string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PyInt {
+pub enum PyInt {
     Value(i64),
     /// A valid Python integer outside `i64`.
     OutOfRange,
@@ -241,8 +241,8 @@ enum PyInt {
 /// Python `int(text)` for an already stripped text, restricted to ASCII
 /// digits (D-8): optional sign, digits with single underscores between
 /// digits, at most 4300 digits. `None` where Python raises `ValueError` (or,
-/// for non-ASCII digits, accepts: D-8).
-fn parse_py_int(text: &str) -> Option<PyInt> {
+/// for non-ASCII digits, accepts: D-8). [`py_int`] is the full `int(str)`.
+pub fn parse_py_int(text: &str) -> Option<PyInt> {
     let (negative, body) = match text.as_bytes().first() {
         Some(b'+') => (false, &text[1..]),
         Some(b'-') => (true, &text[1..]),
@@ -273,6 +273,49 @@ fn parse_py_int(text: &str) -> Option<PyInt> {
             .parse::<i64>()
             .map_or(PyInt::OutOfRange, PyInt::Value),
     )
+}
+
+/// The first code point of every run of ten non-ASCII decimal digits
+/// (`unicodedata.decimal(c) == 0`, Unicode 16.0 as in Python 3.14; each run
+/// holds the digits 0 to 9 in order).
+const DECIMAL_ZEROS: [u32; 75] = [
+    0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6, 0xD66, 0xDE6,
+    0xE50, 0xED0, 0xF20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90, 0x1B50,
+    0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10,
+    0x104A0, 0x10D30, 0x10D40, 0x11066, 0x110F0, 0x11136, 0x111D0, 0x112F0, 0x11450, 0x114D0,
+    0x11650, 0x116C0, 0x116D0, 0x116DA, 0x11730, 0x118E0, 0x11950, 0x11BF0, 0x11C50, 0x11D50,
+    0x11DA0, 0x11F50, 0x16130, 0x16A60, 0x16AC0, 0x16B50, 0x16D70, 0x1CCF0, 0x1D7CE, 0x1D7D8,
+    0x1D7E2, 0x1D7EC, 0x1D7F6, 0x1E140, 0x1E2F0, 0x1E4F0, 0x1E5F1, 0x1E950, 0x1FBF0,
+];
+
+/// The value of a non-ASCII decimal digit (`unicodedata.decimal`).
+fn decimal_digit(c: char) -> Option<u8> {
+    let code = u32::from(c);
+    let run = DECIMAL_ZEROS.partition_point(|&zero| zero <= code);
+    let zero = DECIMAL_ZEROS[run.checked_sub(1)?];
+    u8::try_from(code - zero).ok().filter(|digit| *digit < 10)
+}
+
+/// Python's `int(text)` for any `str`, as CPython parses it: every
+/// non-ASCII whitespace character becomes a space and every non-ASCII
+/// decimal digit its ASCII digit (`_PyUnicode_TransformDecimalAndSpaceToASCII`),
+/// any other non-ASCII character fails; then only ASCII whitespace (space,
+/// `\t`, `\n`, `\v`, `\f`, `\r`) is stripped, so U+001C..U+001F, which
+/// `str.strip()` removes, fail here, and the rest is [`parse_py_int`]. The
+/// store reads a stored `max_duration_seconds` text with it
+/// (`int(row[...])`, PLAN.md 4.7.2).
+pub fn py_int(text: &str) -> Option<PyInt> {
+    let mut ascii = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii() {
+            ascii.push(c);
+        } else if pytext::is_space(c) {
+            ascii.push(' ');
+        } else {
+            ascii.push(char::from(b'0' + decimal_digit(c)?));
+        }
+    }
+    parse_py_int(ascii.trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')))
 }
 
 /// `config.parse_int` keeping integers outside `i64` apart: blank or missing
@@ -869,6 +912,46 @@ mod tests {
             parse_py_int(&format!("{}1", "1_".repeat(2150))),
             Some(PyInt::OutOfRange)
         );
+    }
+
+    /// Every expectation is Python 3.14's `int(text)`.
+    #[test]
+    fn py_int_is_pythons_int_of_a_str() {
+        for (text, value) in [
+            ("\u{85} 9", 9),
+            ("\u{a0}9\u{a0}", 9),
+            ("\u{2003} 9", 9),
+            ("\u{3000} 7", 7),
+            ("1\u{a0}", 1),
+            ("\t9\n", 9),
+            ("\x0b9\x0c", 9),
+            (" 1_0 ", 10),
+            ("\u{666}\u{660}", 60),
+            ("\u{661}_0", 10),
+            ("\u{ff19}", 9),
+            ("\u{1d7d7}", 9),
+            ("\u{1fbf9}", 9),
+            ("-\u{663}", -3),
+            ("+\u{e55}_\u{e50}", 50),
+        ] {
+            assert_eq!(py_int(text), Some(PyInt::Value(value)), "{text:?}");
+        }
+        for text in [
+            "\x1c900",
+            "900\x1c",
+            "\x1f9",
+            "1\u{a0}2",
+            "\u{b2}",
+            "\u{bd}",
+            "\u{660}\u{66b}0",
+            "\u{1369}",
+            "\u{e5a}",
+            "",
+            "\u{3000}",
+        ] {
+            assert_eq!(py_int(text), None, "{text:?}");
+        }
+        assert_eq!(py_int(" 9223372036854775808 "), Some(PyInt::OutOfRange));
     }
 
     #[test]

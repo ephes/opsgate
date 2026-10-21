@@ -6,7 +6,7 @@
 //! `--bind-host`, `--bind-port` exist only in Rust (D-15). Usage errors exit 2,
 //! as with argparse.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -58,6 +58,11 @@ pub enum Command {
         /// Path to the SQLite database
         #[arg(long)]
         db: PathBuf,
+        /// Also write every ticket's serialisation and recomputed approval
+        /// checksum to this new file (JSON lines, mode 0600; never
+        /// overwritten), for the data-parity check against Python
+        #[arg(long)]
+        dump: Option<PathBuf>,
     },
 }
 
@@ -106,7 +111,7 @@ pub enum ConfigTarget {
 /// (PLAN.md 12) is a stub: it says so on stderr and exits 2.
 pub fn run(cli: Cli) -> ExitCode {
     match cli.into_command() {
-        Command::CheckDb { db } => check_db(&db),
+        Command::CheckDb { db, dump } => check_db(&db, dump.as_deref()),
         Command::Runner(args) => crate::runner::run(args.once),
         command => {
             eprintln!(
@@ -118,20 +123,47 @@ pub fn run(cli: Cli) -> ExitCode {
     }
 }
 
-/// `check-db --db <path>` (slice S3a): the report on stdout; exit 0 when the
-/// schema and every stored row are fine, 1 otherwise or when the file cannot
-/// be read as an OpsGate database (one line on stderr). Nothing is written.
-fn check_db(path: &std::path::Path) -> ExitCode {
-    match opsgate_store::check::check_db(path) {
-        Ok(report) => {
-            print!("{report}");
-            ExitCode::from(u8::from(!report.is_ok()))
-        }
+/// `check-db --db <path> [--dump <file>]` (slices S3a, S3b): the report on
+/// stdout; exit 0 when the schema and every stored row are fine, 1 otherwise
+/// or when the file cannot be read as an OpsGate database (one line on
+/// stderr). Nothing is written to the database. With `--dump`, the records
+/// of `opsgate_store::dump` go to a new file (only when the schema matches)
+/// and a summary line follows the report; a dump that cannot be written is
+/// one line on stderr and exit 1.
+fn check_db(path: &Path, dump: Option<&Path>) -> ExitCode {
+    let report = match opsgate_store::check::check_db(path) {
+        Ok(report) => report,
         Err(error) => {
             eprintln!("opsgate check-db: {}: {error}", path.display());
-            ExitCode::FAILURE
+            return ExitCode::FAILURE;
+        }
+    };
+    print!("{report}");
+    let mut failed = !report.is_ok();
+    if let Some(dump) = dump {
+        if !report.schema_problems.is_empty() {
+            eprintln!(
+                "opsgate check-db: {}: not dumped, the schema differs",
+                dump.display()
+            );
+            failed = true;
+        } else {
+            match opsgate_store::dump::dump_to_file(path, dump) {
+                Ok(summary) => println!(
+                    "dump: {} ({} tickets, {} with an approval checksum, {} matching)",
+                    dump.display(),
+                    summary.tickets,
+                    summary.approved,
+                    summary.matching
+                ),
+                Err(error) => {
+                    eprintln!("opsgate check-db: {}: {error}", dump.display());
+                    failed = true;
+                }
+            }
         }
     }
+    ExitCode::from(u8::from(failed))
 }
 
 #[cfg(test)]
@@ -204,13 +236,23 @@ mod tests {
         assert_eq!(
             parse(&["check-db", "--db", "opsgate.sqlite3"]).unwrap(),
             Command::CheckDb {
-                db: PathBuf::from("opsgate.sqlite3")
+                db: PathBuf::from("opsgate.sqlite3"),
+                dump: None,
+            }
+        );
+        assert_eq!(
+            parse(&["check-db", "--db", "x.sqlite3", "--dump", "x.jsonl"]).unwrap(),
+            Command::CheckDb {
+                db: PathBuf::from("x.sqlite3"),
+                dump: Some(PathBuf::from("x.jsonl")),
             }
         );
         for args in [
             &["check-config"][..],
             &["check-config", "web"],
             &["check-db"],
+            &["check-db", "--dump", "x.jsonl"],
+            &["check-db", "--db", "x", "--dump"],
             &["unknown"],
         ] {
             assert_eq!(parse(args).unwrap_err().exit_code(), 2, "{args:?}");

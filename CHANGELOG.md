@@ -34,6 +34,19 @@
   (schema, every stored row readable by Rust, counts; exit 0/1). New Python-generated fixture
   `store.json` pins results and written rows of 7 store scenarios. The plan now states that an
   unparsable stored `expires_at` fails ticket creation (Python's unhandled `ValueError`).
+- Rust port slice S3b (`rust/crates/opsgate-store`): the SQLite store's second half — approve,
+  reject, cancel, archive and unarchive (state checks in Python's order, compare-and-set on the
+  state read → `state_changed`, audit events), the runner's claim (oldest approval first, lazy
+  expiry, stored-JSON validation → `invalid_stored_plan`, recomputed payload checksum →
+  `prompt_tampered`, heartbeat on every poll, the disable file) and the runner status update.
+  Race tests port `tests/test_ticket_transition_races.py` (pass 100 runs); a round-trip test runs
+  the Python service on the same database (created by one implementation, approved by the other,
+  claimed by the first, both ways). `store.json` gains three scenarios (transitions, claim and
+  status, rows written by older code). `opsgate check-db --db <path> --dump <file>` writes the
+  data-parity records of the shadow run (serialisation and recomputed approval checksum per
+  ticket); `rust/parity/shadow/serialize_python.py` writes the same with the Python service and
+  `compare_dump.py` compares both. The Rust CI job now sets up Python for the round trip. The plan
+  documents how approval reads stored values and the stored-row cases of D-2.
 - Rust port slice S2c (`rust/crates/opsgate-core`): new-ticket validation and normalisation with
   the check order of `_normalize_new_ticket` (source, title/summary, `task_ref`, execution plan,
   policy requirements with the submitter floor and the reviewer rule, context, `expires_at`,

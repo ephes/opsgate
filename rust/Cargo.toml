@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/opsgate-core",
+    "crates/opsgate-store",
+    "crates/opsgate-web",
+    "crates/opsgate-runner",
+    "crates/opsgate",
+]
+
+# The Rust port starts at 0.3.0 (Python is 0.2.0), so `opsgate --version` and
+# the release tag `rs-v<version>` tell operators which implementation runs
+# (PLAN.md section 0).
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+repository = "https://github.com/ephes/opsgate"
+publish = false
+
+# Shared dependency versions. Slices add the crates they need here (PLAN.md
+# 6.2) and refer to them with `workspace = true` from their crate manifests.
+[workspace.dependencies]
+opsgate-core = { path = "crates/opsgate-core" }
+opsgate-store = { path = "crates/opsgate-store" }
+opsgate-web = { path = "crates/opsgate-web" }
+opsgate-runner = { path = "crates/opsgate-runner" }
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

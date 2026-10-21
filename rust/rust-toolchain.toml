@@ -1,0 +1,7 @@
+# Pinned toolchain for the Rust port (PLAN.md section 0), as nyxmon and
+# mailgun-relay. The pinned version is also the MSRV (`rust-version` in
+# Cargo.toml). Update both together.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

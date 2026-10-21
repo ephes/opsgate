@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Development
+
+- Start the Rust port in `rust/` (plan slice S1): Cargo workspace with toolchain 1.99.0, `deny.toml`,
+  an `opsgate` command-line skeleton (`--version` prints version and git commit; `serve`, `runner`,
+  `check-config` and `check-db` are stubs that exit 2), the fixture generator
+  `rust/fixtures/generate.py` with its first fixture `schema.sql` and a pytest drift test, the
+  `rust` CI job on Linux and macOS, and `just rs-*` recipes. `rust/target/` is ignored. Nothing
+  deploys or runs the Rust code yet; the Python implementation is unchanged.
+
 ### Documentation
 
 - Add the Rust port plan (`rust/PLAN.md`) and its test map (`rust/TESTMAP.md`): contract,

@@ -7,6 +7,9 @@
 //! 2. `git rev-parse HEAD` in the source tree;
 //! 3. `unknown` (no git, not a repository).
 //!
+//! `OPSGATE_GIT_COMMIT_SOURCE` (`env`, `git` or `none`) records which one, so
+//! the tests can compare a `git` commit with the checked-out HEAD.
+//!
 //! The value must be a full object name, 40 (SHA-1) or 64 (SHA-256) lowercase
 //! hex digits, or `unknown`; anything else fails the build so an odd value
 //! never reaches a release binary.
@@ -78,13 +81,13 @@ pub(crate) fn git_head_paths(dir: &Path) -> Vec<PathBuf> {
 fn main() {
     println!("cargo:rerun-if-env-changed={ENV}");
     println!("cargo:rerun-if-changed=build.rs");
-    let commit = match std::env::var(ENV) {
+    let (commit, source) = match std::env::var(ENV) {
         Ok(value) if !value.is_empty() => {
             assert!(
                 is_commit(&value),
                 "{ENV} must be 40 or 64 lowercase hex digits, got {value:?}"
             );
-            value
+            (value, "env")
         }
         _ => {
             let dir = Path::new(".");
@@ -93,8 +96,9 @@ fn main() {
             }
             git(dir, &["rev-parse", "HEAD"])
                 .filter(|value| is_commit(value))
-                .unwrap_or_else(|| "unknown".to_owned())
+                .map_or_else(|| ("unknown".to_owned(), "none"), |value| (value, "git"))
         }
     };
     println!("cargo:rustc-env={ENV}={commit}");
+    println!("cargo:rustc-env={ENV}_SOURCE={source}");
 }

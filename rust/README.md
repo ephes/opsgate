@@ -89,16 +89,18 @@ builders to `GENERATORS` in `generate.py`.
 ## Command line
 
 ```
-opsgate [serve] [--db PATH] [--bind-host HOST] [--bind-port PORT]
+opsgate serve [--db PATH] [--bind-host HOST] [--bind-port PORT]
 opsgate runner [--once]
 opsgate check-config api|runner
 opsgate check-db --db PATH
 opsgate --version
 ```
 
-No command means `serve`, as with `python -m opsgate`. Until their slices
+No command (plain `opsgate`) means `serve` without overrides, as with
+`python -m opsgate`; the overrides need the `serve` command. Until their slices
 land, the commands print `opsgate <command>: not implemented yet` on stderr and
 exit 2; usage errors also exit 2. `opsgate --version` prints
 `opsgate <version> (<full commit>)`. `build.rs` takes the commit from
 `OPSGATE_GIT_COMMIT` (40 or 64 lowercase hex digits; the release workflow sets
-it), else from `git rev-parse HEAD`, else `unknown`.
+it), else from `git rev-parse HEAD`, else `unknown`, and records the choice in
+`OPSGATE_GIT_COMMIT_SOURCE` (`env`, `git`, `none`) for the tests.

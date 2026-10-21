@@ -35,19 +35,20 @@ fn version_prints_version_and_full_commit() {
 /// Without an override, the embedded commit is the checked-out commit.
 #[test]
 fn version_commit_is_head_of_the_source_tree() {
-    if std::env::var_os("OPSGATE_GIT_COMMIT").is_some() {
-        return;
-    }
-    let Ok(head) = Command::new("git")
+    let head = Command::new("git")
         .args(["-C", env!("CARGO_MANIFEST_DIR"), "rev-parse", "HEAD"])
         .output()
-    else {
-        return;
-    };
-    if !head.status.success() {
-        return;
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| text(&output.stdout).trim().to_owned());
+    match env!("OPSGATE_GIT_COMMIT_SOURCE") {
+        "git" => assert_eq!(head.as_deref(), Some(env!("OPSGATE_GIT_COMMIT"))),
+        "none" => {
+            assert_eq!(env!("OPSGATE_GIT_COMMIT"), "unknown");
+            assert_eq!(head, None);
+        }
+        source => assert_eq!(source, "env"),
     }
-    assert_eq!(text(&head.stdout).trim(), env!("OPSGATE_GIT_COMMIT"));
 }
 
 #[test]
@@ -91,6 +92,8 @@ fn every_command_is_a_stub_that_exits_2() {
 fn usage_errors_exit_2_with_a_clap_error() {
     for args in [
         &["unknown"][..],
+        // The `serve` overrides need the `serve` command.
+        &["--db", "/nonexistent/opsgate.sqlite3"],
         &["serve", "--once"],
         &["serve", "--bind-port", "65536"],
         &["check-config"],

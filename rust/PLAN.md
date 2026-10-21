@@ -1,8 +1,8 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
 Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str, S2b core settings/files, S2c core validation, S6a runner I and
-the S7b runner parity harness landed); owner
+JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S6a
+runner I and the S7b runner parity harness landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -642,7 +642,10 @@ Validation order (P1; the first failing check decides the code):
 12. Transaction: lazily expire open tickets with the same `(source, task_ref)`
     in `pending_approval`/`approved`, not archived, ordered by `created_at`
     (`_expire_open_tickets_for_task_ref` → `_maybe_expire_ticket`: only if
-    `expires_at` parses and `<= now`; `UPDATE … state='expired',
+    `expires_at` is non-blank after stripping and `<= now`; a stored value
+    that does not parse raises — Python's `ValueError` is unhandled, so the
+    request is a 500 and the transaction rolls back, nothing written (pinned
+    by `fixtures/store.json`); `UPDATE … state='expired',
     finished_at, result='failure', result_detail='expired_before_execution'
     WHERE id=? AND state=?`; audit `ticket_expired` with `{"expires_at": raw}`);
     then insert (`state='pending_approval'`, JSON columns written with
@@ -793,8 +796,20 @@ re-create, then `_sync_ui_session_state`; the DB parent directory is created
 identical (contract test: `sqlite_master` of a Python-initialised and a
 Rust-initialised database compared after whitespace normalisation, and Rust
 start on a Python database is a no-op except the index re-creation Python also
-does). `check-db` verifies the schema read-only. Journal mode WAL is set per
-connection. Rust opens one connection per request inside `spawn_blocking`,
+does; S3a: `opsgate-store/tests/schema_contract.rs` against
+`fixtures/schema.sql`, plus the pytest `test_rust_store_ddl_is_the_python_ddl`
+that compares the DDL constants with `init_db`'s text). `check-db` verifies the
+schema: every table, index (and any foreign view or trigger) by its
+whitespace-normalised SQL text — so column types, collations and constraints
+count — against a reference database initialised in memory with the same DDL;
+a `tickets` table created before archiving (March 2026, as production's) and
+migrated by `init_db`'s `ALTER TABLE` is the other accepted table text. It
+opens the file `SQLITE_OPEN_READONLY` with `PRAGMA query_only=ON`, so the
+database file is never written (a read-write connection would checkpoint
+committed WAL content into it on close); like any SQLite reader of a WAL
+database it may create the `-wal`/`-shm` side files (owned by the database
+owner when run as root), which the next API connection uses as usual.
+Journal mode WAL is set per connection. Rust opens one connection per request inside `spawn_blocking`,
 like Python, so locking behaviour (writers serialised by `BEGIN IMMEDIATE`,
 5 s busy timeout) is unchanged.
 
@@ -1221,7 +1236,11 @@ covers 4.7.1 order), `log_preview.json`, `proxy_fix.json` (headers → client
 address/scheme/host via waitress and Werkzeug, 4.4), `bcrypt.json` (hash/password → result,
 generated with pyca bcrypt 4.3 incl. long and NUL passwords),
 `throttle.json` (event sequences with clock → locked/unlocked), `schema.sql`
-(Python-initialised `sqlite_master`).
+(Python-initialised `sqlite_master`), `store.json` (S3a: store scenarios run
+by `OpsGateService` — creation with lazy expiry and dedupe, manual tickets and
+the operator floor, get/list/serialisation of rows written by older code,
+health, session generation — with every step result and the final tables,
+generated ids and timestamps masked after a format check).
 
 S1 ships the generator with `schema.sql` as its first fixture (tables, then
 indexes, so it runs as one script; the S3a contract test uses it) and the
@@ -1642,7 +1661,7 @@ run with `just test` as today).
 | S2b | Core settings and files: env-file loader, API and runner settings with all rules of 4.2, log preview + step log, non-strict path containment, proxy-header selection (4.4); fixtures `settings`, `log_preview`, `proxy_fix` | opsgate | S1 | yes (S2a, …) | 3 | no |
 | S2c | Core validation: ticket normalisation of 4.7.1 steps 1–10, plan/policy/merge/enforce, duration, D-2/D-3 rules; fixture `validation` | opsgate | S2a | yes (S2b, S6a) | 3 | no |
 | S3a | Store I: DDL verbatim, connection setup, `init_db`, session-state sync/generation/revoke, create (lazy expiry + dedupe + unique mapping), get/list/serialise, health, `check-db`; schema contract test | opsgate | S2a, S2b, S2c | yes (S6a/S6b) | 3 | no |
-| S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests | opsgate | S3a | yes (S6b) | 4 | no |
+| S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests; `check-db --dump` (11.2) | opsgate | S3a | yes (S6b) | 4 | no |
 | S4a | Web I (shared foundations): `serve`, router, gate (forwarded headers ignored, 4.4), security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the UI-CSRF layer with `ensure_csrf_token` (4.5.4, applies to every non-API `POST` incl. routes added later), the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
 | S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
 | S5 | Web III: remaining UI pages and UI action routes, manual form, log views (rendered through the S4a environment; authenticated in tests through the S4a session helper with the session's CSRF token in forms) | opsgate | S4a | yes (S4b) | 4 | no |
@@ -1695,7 +1714,12 @@ Acceptance criteria (beyond green checks and a clean review):
   ticket/checksum or the same error code (D-2/D-3 cases marked).
 - **S3a/S3b:** every store row of TESTMAP passes; race tests pass 100 runs;
   schema contract test; Python→Rust and Rust→Python database round trip
-  (create in one, approve in the other, claim in the first).
+  (create in one, approve in the other, claim in the first). S3a lands the
+  schema contract test and the `store.json` fixture (Rust writes the rows
+  Python writes and reads rows Python wrote, including the ones of states
+  S3b produces); the round trip needs approve and claim and lands with S3b,
+  as does `check-db --dump` (11.2 step 1), which recomputes the approval
+  checksum from the stored fields.
 - **S4a/S4b/S5:** every web row of TESTMAP owned by the slice passes
   in-process (S5 authenticates through the S4a session helper and gets the
   UI-CSRF layer from S4a, so it does not need S4b to merge; S4b's tests use

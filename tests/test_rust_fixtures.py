@@ -9,6 +9,7 @@ shows the Rust side what to change.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import sqlite3
 import sys
@@ -125,3 +126,62 @@ def test_schema_fixture_is_the_python_schema(generator: ModuleType, tmp_path: Pa
         "tickets",
         "ui_session_state",
     }
+
+
+RUST_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "rust" / "crates" / "opsgate-store" / "src" / "schema.rs"
+
+
+def _rust_str_constants(source: str) -> dict[str, str]:
+    """The ``pub const NAME: &str = …;`` constants of a Rust file whose value
+    is one raw string (``r#"…"#``) or one plain string without escapes."""
+    constants: dict[str, str] = {}
+    for match in re.finditer(
+        r'pub const (\w+): &str =\s*(?:r#"(.*?)"#|"([^"\\]*)");', source, flags=re.DOTALL
+    ):
+        name, raw, plain = match.groups()
+        constants[name] = raw if raw is not None else plain
+    return constants
+
+
+def test_rust_store_ddl_is_the_python_ddl() -> None:
+    """``opsgate-store`` runs ``init_db``'s statements with the same text
+    (rust/PLAN.md 4.10), so both implementations initialise identical
+    databases and Rust's start on a Python database re-creates only what
+    Python re-creates."""
+    import ast
+
+    from opsgate import service
+
+    module = ast.parse(Path(service.__file__).read_text(encoding="utf-8"))
+    init_db = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.FunctionDef) and node.name == "init_db"
+    )
+    calls = sorted(
+        (
+            call
+            for call in ast.walk(init_db)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Attribute)
+            and call.func.attr in {"executescript", "execute"}
+            and call.args
+        ),
+        key=lambda call: (call.lineno, call.col_offset),
+    )
+    statements = [
+        (call.func.attr, call.args[0].value if isinstance(call.args[0], ast.Constant) else ast.unparse(call.args[0]))
+        for call in calls
+        if isinstance(call.func, ast.Attribute)
+    ]
+    rust = _rust_str_constants(RUST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert statements == [
+        ("executescript", rust["INIT_SCRIPT"]),
+        ("execute", "PRAGMA table_info(tickets)"),
+        ("execute", rust["ADD_ARCHIVED_AT"]),
+        ("execute", rust["ADD_ARCHIVED_BY"]),
+        ("execute", rust["ARCHIVED_AT_INDEX"]),
+        ("execute", rust["DROP_OPEN_TICKET_DEDUPE_INDEX"]),
+        ("execute", "OPEN_TICKET_DEDUPE_INDEX"),
+    ]
+    assert rust["OPEN_TICKET_DEDUPE_INDEX"] == service.OPEN_TICKET_DEDUPE_INDEX

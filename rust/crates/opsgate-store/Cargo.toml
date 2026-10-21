@@ -9,6 +9,16 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+opsgate-core.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+subtle.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+regex.workspace = true
+tempfile.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

@@ -47,6 +47,13 @@ reqwest = { version = "0.13", default-features = false }
 shlex = "2"
 # Test-only fake API of the runner tests (PLAN.md 7.1).
 axum = { version = "0.8", default-features = false }
+# Store (PLAN.md 6.2): SQLite with a pinned, bundled library (the same
+# SQLite on macOS and in CI), constant-time compare, ticket ids; regex for
+# the store tests.
+regex = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+subtle = "2"
+uuid = { version = "1", default-features = false, features = ["std", "v4"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

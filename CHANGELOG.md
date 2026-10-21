@@ -17,6 +17,14 @@
   `rust/fixtures/generate.py` with its first fixture `schema.sql` and a pytest drift test, the
   `rust` CI job on Linux and macOS, and `just rs-*` recipes. `rust/target/` is ignored. Nothing
   deploys or runs the Rust code yet; the Python implementation is unchanged.
+- Rust port slice S3a (`rust/crates/opsgate-store`): the SQLite store's first half — the schema
+  with `init_db`'s DDL text verbatim (contract test against `schema.sql`, pytest drift check of the
+  DDL), connections as `service.py` opens them, the approver session generation (sync at start,
+  revoke), ticket creation with lazy expiry, dedupe and audit events, get/list/serialisation,
+  health — and `opsgate check-db --db <path>`, which verifies a database without writing to it
+  (schema, every stored row readable by Rust, counts; exit 0/1). New Python-generated fixture
+  `store.json` pins results and written rows of 7 store scenarios. The plan now states that an
+  unparsable stored `expires_at` fails ticket creation (Python's unhandled `ValueError`).
 - Rust port slice S2c (`rust/crates/opsgate-core`): new-ticket validation and normalisation with
   the check order of `_normalize_new_ticket` (source, title/summary, `task_ref`, execution plan,
   policy requirements with the submitter floor and the reviewer rule, context, `expires_at`,

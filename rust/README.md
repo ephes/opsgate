@@ -8,14 +8,16 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection; S2c: ticket validation), the runner's first half (S6a:
-API client, tmux adapter, artifacts, agent commands and the ticket
-executor), the black-box API parity harness (S7a, green against Python)
-and the black-box runner parity harness (S7b, green against the Python
-runner). The workspace, CI, the fixture generator and the command-line
-skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
-implementation and the oracle for the contract. Nothing deploys or runs this
-code yet.
+header selection; S2c: ticket validation), the first half of the SQLite store
+(S3a: schema, ticket creation, get/list, health, session generation and
+`check-db`), the runner's first half (S6a: API client, tmux adapter,
+artifacts, agent commands and the ticket executor), the black-box API parity
+harness (S7a, green against Python) and the black-box runner parity harness
+(S7b, green against the Python runner). The workspace, CI, the fixture
+generator and the command-line skeleton exist; `check-db` works, every other
+command is still a stub that exits 2. The Python package in `src/opsgate` is
+the production implementation and the oracle for the contract. Nothing
+deploys or runs this code yet.
 
 ## Layout
 
@@ -27,7 +29,7 @@ rust/
   deny.toml             cargo-deny policy (licenses, advisories, sources)
   crates/
     opsgate-core/       pure logic: settings, JSON canon/checksum, time, validation, log preview, path containment (S2a-S2c)
-    opsgate-store/      SQLite store, check-db (S3a, S3b)
+    opsgate-store/      SQLite store: schema, tickets, health, session generation, check-db (S3a, S3b)
     opsgate-web/        HTTP API and web UI (S4a, S4b, S5)
     opsgate-runner/     runner (S6a, S6b)
     opsgate/            the binary: command line, build.rs (embeds the git commit)
@@ -43,6 +45,7 @@ rust/
     datetime.json       timestamp parsing and formatting, Python 3.14 (4.9)
     pystr.json          str() of JSON scalars, strip, lower (4.6)
     validation.json     new-ticket validation and normalisation (4.7.1)
+    store.json          store scenarios: creation, dedupe, expiry, reading, health, sessions (4.5.2, 4.6, 4.7.1)
   parity/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
     runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
@@ -64,9 +67,34 @@ children started with exactly the merged settings environment, 4.13.8),
 `commands` (slugs, session names, agent command lines, the attach command
 and `run_step.sh`, 4.13.3) and `executor` (one ticket's steps, heartbeats,
 cancel, timeout, status retries and the resume rules, 4.13.4/4.13.5); the
-supervisor and the `runner` command follow with S6b. The store and web
-crates are empty until their slices land. Every crate forbids
-`unsafe` code (workspace lint).
+supervisor and the `runner` command follow with S6b.
+
+`opsgate-store` (S3a) is the SQLite store of `service.py`, one connection per
+operation (WAL, foreign keys, 5 s busy timeout) and `BEGIN IMMEDIATE` for
+every write: `schema` (the DDL of `init_db`, verbatim), `Store::open`
+(`init_db` and the session-state sync), the session generation
+(`ui_session_generation`, `revoke_ui_sessions`), ticket creation
+(`create_ticket`, `create_manual_ticket`: validation, lazy expiry, dedupe,
+audit), `get_ticket`, `list_tickets`, `health`, and `check` (`check-db`).
+Transitions, claim and runner status follow in S3b. The web crate is
+empty until its slices land. Every crate forbids `unsafe` code (workspace
+lint).
+
+## check-db
+
+`opsgate check-db --db <path>` checks a database before Rust serves it
+(PLAN.md 3.1, 4.10): the schema must be the one `init_db` creates (tables
+and indexes by their SQL text, so types, collations and constraints count;
+a `tickets` table migrated by `init_db`'s archive `ALTER TABLE` is accepted
+too), and every stored row must be
+readable by Rust (JSON columns under the rules of 4.6 including the D-2
+cases, storage classes, `expires_at`, integer durations). It prints the
+result and the counts (tickets per state, audit events, approver rows,
+runner heartbeats) and exits 0, or 1 when anything is wrong or the file is
+not a readable SQLite database. Problems name ticket ids, audit event ids and
+columns, never stored values. It opens the database read-only and never
+creates, migrates, checkpoints or writes it; for a WAL database SQLite may
+create the `-wal`/`-shm` side files, as for any reader.
 
 ## Toolchain
 
@@ -204,9 +232,10 @@ UV_PYTHON=3.14 just rs-fixtures
 | `log_preview.json` | file contents (as recipes) and limits → `read_tail_lines` preview lines and `read_step_log` text (long step logs by SHA-256, length, head and tail) | `opsgate-core/tests/log_preview_fixture.rs` |
 | `proxy_fix.json` | request header lines → client address, scheme and `Host` the app sees in production (waitress's proxy-header middleware around the Flask app with and without `ProxyFix`): forwarded headers never apply | `opsgate-core/tests/proxy_fix_fixture.rs` |
 | `pystr.json` | `str()` of JSON scalars (D-2/D-3 marked), `strip`, `lower`, Python's whitespace set, non-ASCII characters whose lowercase is ASCII | `opsgate-core/tests/pystr_fixture.rs` |
-| `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
+| `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | `opsgate-store/tests/schema_contract.rs`, `check_db.rs` |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 | `storage_json.json` | JSON text → stored column text `json.dumps(value, sort_keys=True)` | `opsgate-core/tests/checksum_fixture.rs` |
+| `store.json` | store scenarios run by `OpsGateService` (creation with lazy expiry and dedupe, manual tickets and the operator floor, validation failures, get/list/serialisation of rows written by older code, health, session generation): every step's result and the final four tables, generated ids and timestamps masked after a format check | `opsgate-store/tests/store_fixture.rs` |
 | `validation.json` | request body text, source, reviewer floor and default duration → `_normalize_new_ticket`: canonical checksum text and `payload_checksum`, or error code, status and message (469 cases: the S2c Python tests, every check of 4.7.1 and their order, 240 random multi-field mutations; D-2/D-3 marked with the Rust result) | `opsgate-core/tests/validation_fixture.rs` |
 
 ## API parity harness

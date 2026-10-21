@@ -102,15 +102,35 @@ pub enum ConfigTarget {
     Runner,
 }
 
-/// Runs a parsed command line. Every command is a stub until its slice lands
-/// (PLAN.md 12): it says so on stderr and exits 2.
+/// Runs a parsed command line. A command whose slice has not landed yet
+/// (PLAN.md 12) is a stub: it says so on stderr and exits 2.
 pub fn run(cli: Cli) -> ExitCode {
-    let command = cli.into_command();
-    eprintln!(
-        "opsgate {}: not implemented yet (rust/PLAN.md section 12)",
-        command.name()
-    );
-    ExitCode::from(NOT_IMPLEMENTED)
+    match cli.into_command() {
+        Command::CheckDb { db } => check_db(&db),
+        command => {
+            eprintln!(
+                "opsgate {}: not implemented yet (rust/PLAN.md section 12)",
+                command.name()
+            );
+            ExitCode::from(NOT_IMPLEMENTED)
+        }
+    }
+}
+
+/// `check-db --db <path>` (slice S3a): the report on stdout; exit 0 when the
+/// schema and every stored row are fine, 1 otherwise or when the file cannot
+/// be read as an OpsGate database (one line on stderr). Nothing is written.
+fn check_db(path: &std::path::Path) -> ExitCode {
+    match opsgate_store::check::check_db(path) {
+        Ok(report) => {
+            print!("{report}");
+            ExitCode::from(u8::from(!report.is_ok()))
+        }
+        Err(error) => {
+            eprintln!("opsgate check-db: {}: {error}", path.display());
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
-//! Process-level tests of the `opsgate` binary skeleton (PLAN.md 4.1, D-15,
-//! slice S1): `--version`, the stub commands and usage errors.
+//! Process-level tests of the `opsgate` binary (PLAN.md 4.1, D-15):
+//! `--version`, the stub commands and usage errors (slice S1), `check-db`
+//! (slice S3a).
 
 use std::process::{Command, Output};
 
@@ -52,7 +53,7 @@ fn version_commit_is_head_of_the_source_tree() {
 }
 
 #[test]
-fn every_command_is_a_stub_that_exits_2() {
+fn unlanded_commands_are_stubs_that_exit_2() {
     for (args, name) in [
         (&[][..], "serve"),
         (&["serve"], "serve"),
@@ -72,10 +73,6 @@ fn every_command_is_a_stub_that_exits_2() {
         (&["runner", "--once"], "runner"),
         (&["check-config", "api"], "check-config"),
         (&["check-config", "runner"], "check-config"),
-        (
-            &["check-db", "--db", "/nonexistent/opsgate.sqlite3"],
-            "check-db",
-        ),
     ] {
         let output = opsgate(args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
@@ -86,6 +83,49 @@ fn every_command_is_a_stub_that_exits_2() {
             "{args:?}"
         );
     }
+}
+
+#[test]
+fn check_db_reports_and_exits_0_or_1() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("opsgate.sqlite3");
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(include_str!("../../../fixtures/schema.sql"))
+        .unwrap();
+    let db = path.to_str().unwrap();
+
+    let output = opsgate(&["check-db", "--db", db]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.starts_with(&format!("database: {db}\nschema: ok\nrows: ok\n")),
+        "{stdout}"
+    );
+    assert!(stdout.contains("tickets: 0 ()\n"), "{stdout}");
+
+    connection
+        .execute_batch("DROP INDEX idx_tickets_state")
+        .unwrap();
+    let output = opsgate(&["check-db", "--db", db]);
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = text(&output.stdout);
+    assert!(
+        stdout.contains("schema: FAILED\n  missing index idx_tickets_state\n"),
+        "{stdout}"
+    );
+
+    let missing = directory.path().join("missing.sqlite3");
+    let output = opsgate(&["check-db", "--db", missing.to_str().unwrap()]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        text(&output.stderr).starts_with(&format!("opsgate check-db: {}: ", missing.display())),
+        "{}",
+        text(&output.stderr)
+    );
+    assert!(!missing.exists());
 }
 
 #[test]

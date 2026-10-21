@@ -222,8 +222,11 @@ and parse JSON with the rules of 4.6. `session::OptionalApprover` and
 `templates::Templates` renders the embedded files of
 `src/opsgate/templates` with `url_for`, `get_flashed_messages`, `csrf_token`,
 `ui_datetime` and `tojson`, printing values as Jinja2 does (MarkupSafe
-escaping, `None`, `True`, float `repr`). Later slices add their routes in
-`routes::router` and get every layer.
+escaping, `None`, `True`, float `repr`, integers of any size). Later slices
+add their routes in `routes::router`, each wrapped in `routes::allow`
+(Flask's automatic `OPTIONS` and the probe behind Werkzeug's repeated-slash
+redirect: a path like `/api//v1/health` is a 308 to `/api/v1/health`), and
+get every layer.
 
 Tests (`crates/opsgate-web/tests/`) call the application in-process with
 `tower::ServiceExt::oneshot` from a chosen peer address and keep the session
@@ -426,7 +429,9 @@ It initialises the database like `init_db` (4.10), serves HTTP on two runtime
 worker threads and stops on SIGTERM or SIGINT: no new connections, requests in
 flight get five seconds, exit 0. A configuration error is one stderr line
 naming the setting (never its value), exit 1; a database that cannot be opened
-or an address that cannot be bound is one log line, exit 1. It logs an INFO
+or an address that cannot be bound is one log line, exit 1. A store operation
+still blocked when the five seconds are up (a locked database) does not keep
+the process alive. It logs an INFO
 startup line (version, `implementation=rust`, bind address, database path) and
 one line per request that fails with a 500.
 

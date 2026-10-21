@@ -167,13 +167,18 @@ pub fn json_response(status: StatusCode, value: &Value) -> Response {
 
 /// `redirect(location)`: 302 with the `Location` header.
 pub fn redirect(location: &str) -> Response {
+    redirect_with_status(location, StatusCode::FOUND)
+}
+
+/// A redirect with `status` (302, or 308 for Werkzeug's routing redirects).
+pub fn redirect_with_status(location: &str, status: StatusCode) -> Response {
     match HeaderValue::try_from(location) {
         Ok(value) => {
             let body = html_body(
                 "Redirecting...",
                 "You should be redirected automatically to the target URL.",
             );
-            let mut response = (StatusCode::FOUND, body).into_response();
+            let mut response = (status, body).into_response();
             response.headers_mut().insert(header::LOCATION, value);
             response
         }

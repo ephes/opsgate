@@ -15,10 +15,12 @@
 //! the forms, fields, links and flashes are P1 (4.11).
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::Arc;
 
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use minijinja::value::{Kwargs, Value as JinjaValue};
+use minijinja::value::{Kwargs, Object, ObjectRepr, Value as JinjaValue, ValueKind};
 use minijinja::{AutoEscape, Environment, Error, ErrorKind, Output, State};
 use opsgate_core::json::{PyNumber, py_float_repr, py_number};
 use opsgate_core::pytext::strip;
@@ -130,17 +132,33 @@ impl Templates {
     }
 }
 
+/// An integer beyond 128 bits (Python's integers are unbounded): printed
+/// and written by `tojson` as its digits.
+#[derive(Debug)]
+struct BigInt(String);
+
+impl Object for BigInt {
+    fn repr(self: &Arc<Self>) -> ObjectRepr {
+        ObjectRepr::Plain
+    }
+
+    fn render(self: &Arc<Self>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A JSON value (a serialised ticket, a decoded request) as a template
 /// value: objects keep their keys in sorted order, integers stay integers
-/// (as text beyond 128 bits), floats are `f64`.
+/// (of any size), floats are `f64`.
 pub fn to_template_value(value: &Value) -> JinjaValue {
     match value {
         Value::Null => JinjaValue::from(()),
         Value::Bool(flag) => JinjaValue::from(*flag),
         Value::Number(number) => match py_number(number) {
-            PyNumber::Int(digits) => digits
-                .parse::<i128>()
-                .map_or_else(|_| JinjaValue::from(digits.into_owned()), JinjaValue::from),
+            PyNumber::Int(digits) => digits.parse::<i128>().map_or_else(
+                |_| JinjaValue::from_object(BigInt(digits.into_owned())),
+                JinjaValue::from,
+            ),
             PyNumber::Float(float) => JinjaValue::from(float),
         },
         Value::String(text) => JinjaValue::from(text.as_str()),
@@ -255,9 +273,7 @@ fn tojson(value: JinjaValue, indent: Option<usize>, kwargs: Kwargs) -> Result<Ji
         None => indent,
     };
     kwargs.assert_all_used()?;
-    let json = serde_json::to_value(&value)
-        .map_err(|error| Error::new(ErrorKind::BadSerialization, error.to_string()))?;
-    let json = sorted(json);
+    let json = sorted(to_json(&value)?);
     let text = match indent {
         Some(width) => {
             let indent = " ".repeat(width);
@@ -277,6 +293,33 @@ fn tojson(value: JinjaValue, indent: Option<usize>, kwargs: Kwargs) -> Result<Ji
             .replace('&', "\\u0026")
             .replace('\'', "\\u0027"),
     ))
+}
+
+/// A template value as JSON, integers of any size included.
+fn to_json(value: &JinjaValue) -> Result<Value, Error> {
+    let bad = |error: serde_json::Error| Error::new(ErrorKind::BadSerialization, error.to_string());
+    if let Some(big) = value.downcast_object_ref::<BigInt>() {
+        // `arbitrary_precision` keeps every digit of the token.
+        return serde_json::from_str(&big.0).map_err(bad);
+    }
+    match value.kind() {
+        ValueKind::Map => {
+            let mut map = serde_json::Map::new();
+            for key in value.try_iter()? {
+                let item = value.get_item(&key)?;
+                let name = key.as_str().map_or_else(|| key.to_string(), str::to_owned);
+                map.insert(name, to_json(&item)?);
+            }
+            Ok(Value::Object(map))
+        }
+        ValueKind::Seq | ValueKind::Iterable => Ok(Value::Array(
+            value
+                .try_iter()?
+                .map(|item| to_json(&item))
+                .collect::<Result<_, _>>()?,
+        )),
+        _ => serde_json::to_value(value).map_err(bad),
+    }
 }
 
 /// The value with every object rebuilt in key order (independent of
@@ -345,6 +388,41 @@ mod tests {
             .unwrap()
             .to_string(),
             "{\n  \"x\": [],\n  \"y\": {}\n}"
+        );
+    }
+
+    #[test]
+    fn integers_of_any_size() {
+        let big = "1".repeat(40);
+        let value = to_template_value(
+            &serde_json::from_str(&format!(
+                "{{\"big\": {big}, \"wide\": {}, \"x\": [-0, 1.5]}}",
+                i128::MAX
+            ))
+            .unwrap(),
+        );
+        assert_eq!(
+            tojson(
+                value.clone(),
+                None,
+                Kwargs::from_iter(Vec::<(&str, JinjaValue)>::new())
+            )
+            .unwrap()
+            .to_string(),
+            format!("{{\"big\":{big},\"wide\":{},\"x\":[0,1.5]}}", i128::MAX)
+        );
+        let mut templates = Templates::new().unwrap();
+        templates
+            .env
+            .add_template("big.html", "{{ v.big }}|{{ v.wide }}")
+            .unwrap();
+        let mut context = Context::new();
+        context.insert("v".to_owned(), value);
+        assert_eq!(
+            templates
+                .render("big.html", &SessionHandle::default(), context)
+                .unwrap(),
+            format!("{big}|{}", i128::MAX)
         );
     }
 

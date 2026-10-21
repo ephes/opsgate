@@ -571,3 +571,57 @@ fn serve_exits_1_when_the_address_is_taken() {
         "{stderr}"
     );
 }
+
+/// A store operation blocked on a locked database cannot be cancelled; the
+/// process still exits within the grace period after SIGTERM (4.1) instead
+/// of waiting for it.
+#[test]
+fn serve_exits_within_the_grace_period_with_a_locked_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = serve_env(dir.path(), &[]);
+    let db = dir.path().join("locked/opsgate.sqlite3");
+    let port = closed_port();
+    let mut child = runner_command(
+        &[
+            "serve",
+            "--db",
+            db.to_str().unwrap(),
+            "--bind-host",
+            "127.0.0.1",
+            "--bind-port",
+            &port.to_string(),
+        ],
+        &env,
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while http_get(port, "/api/v1/health").is_none() {
+        assert!(Instant::now() < deadline, "serve did not answer");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Every connection of the server now waits for the lock.
+    let lock = rusqlite::Connection::open(&db).unwrap();
+    lock.execute_batch(
+        "PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; CREATE TABLE probe_lock(x);",
+    )
+    .unwrap();
+    let request = std::thread::spawn(move || {
+        let _ = http_get(port, "/api/v1/health");
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let stopped = Instant::now();
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let status = wait_for_exit(&mut child, Duration::from_secs(20));
+    let elapsed = stopped.elapsed();
+    assert_eq!(status.and_then(|s| s.code()), Some(0));
+    assert!(elapsed < Duration::from_secs(9), "{elapsed:?}");
+    drop(lock);
+    request.join().unwrap();
+}

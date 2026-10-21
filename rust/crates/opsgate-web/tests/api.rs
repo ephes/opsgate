@@ -494,3 +494,116 @@ async fn routing_methods_and_unknown_paths() {
         .await;
     assert_eq!(response.error(), "ticket_not_found");
 }
+
+/// Flask answers `OPTIONS` on every route with 200 and `Allow`; unknown
+/// paths stay 404 (bodies and `Allow` details are D-9).
+#[tokio::test]
+async fn options_on_every_route() {
+    let app = TestApp::new();
+    for (path, allow) in [
+        ("/api/v1/health", "GET"),
+        ("/api/v1/tickets", "POST"),
+        ("/api/v1/tickets/x", "GET"),
+        ("/api/v1/runner/claim", "POST"),
+        ("/api/v1/runner/x/status", "POST"),
+        ("/login", "GET"),
+    ] {
+        let response = app.send(Call::new(Method::OPTIONS, path)).await;
+        assert_eq!(response.status, StatusCode::OK, "{path}");
+        assert!(response.body.is_empty(), "{path}");
+        let header = response.headers["allow"].to_str().unwrap();
+        assert!(
+            header.contains(allow) && header.contains("OPTIONS"),
+            "{path}: {header}"
+        );
+        response.assert_security_headers();
+    }
+    let unknown = app.send(Call::new(Method::OPTIONS, "/no-such-page")).await;
+    assert_eq!(unknown.status, StatusCode::NOT_FOUND);
+    let outsider = app
+        .send(Call::new(Method::OPTIONS, "/api/v1/tickets").peer(Some("8.8.8.8:1")))
+        .await;
+    assert_eq!(outsider.status, StatusCode::FORBIDDEN);
+}
+
+/// Werkzeug's `merge_slashes`: repeated slashes that merge into a route are
+/// a 308 to the merged URL (after the gate and the UI-CSRF check); with
+/// another method the route's 405; otherwise 404.
+#[tokio::test]
+async fn repeated_slashes_redirect_to_the_merged_route() {
+    let app = TestApp::new();
+    for (method, path, status, location) in [
+        (
+            Method::GET,
+            "/api//v1/health",
+            StatusCode::PERMANENT_REDIRECT,
+            Some("http://opsgate.test:8711/api/v1/health"),
+        ),
+        (
+            Method::GET,
+            "/api//v1/health?x=1&y",
+            StatusCode::PERMANENT_REDIRECT,
+            Some("http://opsgate.test:8711/api/v1/health?x=1&y"),
+        ),
+        (
+            Method::HEAD,
+            "/api///v1//health",
+            StatusCode::PERMANENT_REDIRECT,
+            Some("http://opsgate.test:8711/api/v1/health"),
+        ),
+        (
+            Method::POST,
+            "/api//v1/tickets",
+            StatusCode::PERMANENT_REDIRECT,
+            Some("http://opsgate.test:8711/api/v1/tickets"),
+        ),
+        (
+            Method::GET,
+            "/api/v1/tickets//a%20b",
+            StatusCode::PERMANENT_REDIRECT,
+            Some("http://opsgate.test:8711/api/v1/tickets/a%20b"),
+        ),
+        (Method::GET, "/login//", StatusCode::NOT_FOUND, None),
+        (
+            Method::PUT,
+            "/api//v1/health",
+            StatusCode::METHOD_NOT_ALLOWED,
+            None,
+        ),
+        (Method::GET, "/api/v1//nope", StatusCode::NOT_FOUND, None),
+        (
+            Method::GET,
+            "/api/v1/tickets/a//b",
+            StatusCode::NOT_FOUND,
+            None,
+        ),
+    ] {
+        let response = app
+            .send(
+                Call::new(method.clone(), path)
+                    .header("host", "opsgate.test:8711")
+                    .bearer(NYXMON_TOKEN)
+                    .json(&ticket_payload("Slashes", None)),
+            )
+            .await;
+        assert_eq!(response.status, status, "{method} {path}");
+        assert_eq!(response.location(), location, "{method} {path}");
+        response.assert_security_headers();
+    }
+    // Nothing ran: the POST was redirected, not created.
+    assert!(app.snapshot()[0].is_empty());
+    // The gates come first: an outsider gets 403, a UI form without token
+    // the CSRF redirect.
+    let outsider = app
+        .send(Call::new(Method::GET, "/api//v1/health").peer(Some("8.8.8.8:1")))
+        .await;
+    assert_eq!(outsider.status, StatusCode::FORBIDDEN);
+    let form = app.send(Call::post("/tickets//x/approve").form(&[])).await;
+    assert_eq!(
+        (form.status, form.location()),
+        (StatusCode::FOUND, Some("/tickets"))
+    );
+    // Without a Host header the redirect names localhost.
+    let bare = app.send(Call::new(Method::GET, "/api//v1/health")).await;
+    assert_eq!(bare.location(), Some("http://localhost/api/v1/health"));
+}

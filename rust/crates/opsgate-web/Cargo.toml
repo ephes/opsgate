@@ -27,13 +27,13 @@ serde_json.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
+tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "sync", "time", "macros"] }
-tower = { workspace = true, features = ["util"] }
 
 [lints]
 workspace = true

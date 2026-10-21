@@ -114,10 +114,39 @@ def test_api_error_and_redirect_responses_carry_security_headers(anon: Browser) 
         ("GET", "/api/v2/health", 404),
         ("HEAD", "/api/v1/health", 200),
         ("POST", "/api/v1/health", 405),
+        ("OPTIONS", "/api/v1/health", 200),
+        ("OPTIONS", "/api/v1/tickets", 200),
+        ("OPTIONS", "/api/v1/tickets/x", 200),
+        ("OPTIONS", "/login", 200),
+        ("OPTIONS", "/no-such-page", 404),
+        ("PUT", "/api//v1/health", 405),
+        ("GET", "/api/v1//nope", 404),
+        ("GET", "/api/v1/tickets/a//b", 404),
+        ("GET", "/login//", 404),
     ],
 )
 def test_routing_methods_and_unknown_paths(anon: Browser, method: str, path: str, status: int) -> None:
     assert anon.request(method, path).status == status
+
+
+@S4A
+@pytest.mark.parametrize(
+    ("method", "path", "merged"),
+    [
+        ("GET", "/api//v1/health", "/api/v1/health"),
+        ("GET", "/api//v1/health?x=1", "/api/v1/health?x=1"),
+        ("HEAD", "/api///v1//health", "/api/v1/health"),
+        ("POST", "/api//v1/tickets", "/api/v1/tickets"),
+        ("GET", "/api/v1/tickets//x", "/api/v1/tickets/x"),
+    ],
+)
+def test_repeated_slashes_redirect_to_the_merged_route(anon: Browser, method: str, path: str, merged: str) -> None:
+    # Werkzeug's merge_slashes: 308 to the absolute merged URL (its port differs per process, so the
+    # exchange is checked here instead of recorded).
+    resp = anon.request(method, path, json_body=ticket_payload(), record=False)
+    assert resp.status == 308
+    assert resp.location == f"{anon.target.base_url}{merged}"
+    assert anon.get("/api/v1/health").json()["ticket_counters"] == {}
 
 
 @S4B

@@ -322,7 +322,9 @@ else that differs is a bug.
   exit 1). Rust: one stderr line naming the setting, never its value, exit 1
   (P1: non-zero exit and setting name; P2: text).
 - `serve` stops on SIGTERM/SIGINT (waitress default). Rust: graceful
-  shutdown, in-flight requests finish (≤ 5 s), exit 0.
+  shutdown, in-flight requests finish (≤ 5 s), exit 0. A store operation
+  still running after the 5 s (SQLite cannot be interrupted) does not hold
+  the process: the runtime is shut down at the deadline (S4a).
 - `runner`: SIGTERM/SIGINT set the stop flag (`runner.py:install_signal_handlers`);
   workers observe it at their next 1 s poll, the supervisor after its current
   `time.sleep(poll_interval)` (default 5 s), and an HTTP request in flight
@@ -437,7 +439,12 @@ All routes, with their auth and the order of checks. "gate" = network gate
 Routing details (P1): `<id>` matches one path segment; `<int:n>` matches ASCII
 digits only (`0` matches and then fails `log_not_found`); no trailing-slash
 variants. Unknown routes 404, wrong methods 405 (bodies P2). `HEAD` works for
-every `GET` route.
+every `GET` route; `OPTIONS` answers 200 on every route (Flask's automatic
+`OPTIONS`, `Allow` details P2). A path with repeated slashes that matches a
+route once they are merged is a 308 to the absolute merged URL
+(`http://<Host>/<merged path>[?query]`), or that route's 405 for another
+method (Werkzeug's `merge_slashes`); like every routing outcome it comes after
+the gate and the UI-CSRF check (S4a).
 
 ### 4.4 Request processing order, gates, headers, errors
 
@@ -1169,8 +1176,9 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   and a setting whose process-environment value is not UTF-8 →
   `SettingsError` at startup (Python accepted or failed later). Production
   values are plain.
-- **D-9 Framework responses** (unknown route 404, 405, `OPTIONS`, 500 pages)
-  differ in body and `Allow` details.
+- **D-9 Framework responses** (unknown route 404, 405, `OPTIONS`, 308
+  slash redirects, 500 pages) differ in body and `Allow` details; the
+  statuses are the same.
 - **D-10 Runner base URL** must be `http://` (production
   `http://127.0.0.1:8711`); `https://` is a startup `SettingsError`.
 - **D-11 `__PYVENV_LAUNCHER__`** (a Python launcher artefact) is no longer in

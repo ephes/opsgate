@@ -13,7 +13,7 @@
 //! an address that cannot be bound, or a server error (one line each).
 
 use std::process::ExitCode;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use opsgate_core::settings::{Environment, load_api_settings};
 use opsgate_runner::install_signal_handlers;
@@ -85,21 +85,29 @@ pub fn run(args: ServeArgs) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    runtime.block_on(serve(state, host, port))
+    let (code, deadline) = runtime.block_on(serve(state, host, port));
+    // Store operations run on the blocking pool and cannot be cancelled;
+    // dropping the runtime would wait for them. Give them what is left of
+    // the grace period, then exit anyway (an unfinished SQLite transaction
+    // is rolled back by the next connection, as after a crash).
+    runtime.shutdown_timeout(deadline.saturating_duration_since(Instant::now()));
+    code
 }
 
-async fn serve(state: AppState, host: String, port: u16) -> ExitCode {
+/// Serves until a stop signal: the exit code and the end of the grace
+/// period for work still running (now, when the server ended on its own).
+async fn serve(state: AppState, host: String, port: u16) -> (ExitCode, Instant) {
     let listener = match TcpListener::bind((host.as_str(), port)).await {
         Ok(listener) => listener,
         Err(error) => {
             tracing::error!("opsgate serve: cannot listen on {host}:{port}: {error}");
-            return ExitCode::FAILURE;
+            return (ExitCode::FAILURE, Instant::now());
         }
     };
     let stop = CancellationToken::new();
     if let Err(error) = install_signal_handlers(stop.clone()) {
         tracing::error!("opsgate serve: cannot install the signal handlers: {error}");
-        return ExitCode::FAILURE;
+        return (ExitCode::FAILURE, Instant::now());
     }
     let address = listener
         .local_addr()
@@ -114,18 +122,19 @@ async fn serve(state: AppState, host: String, port: u16) -> ExitCode {
         stop.clone().cancelled_owned(),
     ));
     tokio::select! {
-        result = &mut server => return finished(result),
+        result = &mut server => return (finished(result), Instant::now()),
         () = stop.cancelled() => {}
     }
+    let deadline = Instant::now() + SHUTDOWN_GRACE;
     match tokio::time::timeout(SHUTDOWN_GRACE, &mut server).await {
-        Ok(result) => finished(result),
+        Ok(result) => (finished(result), deadline),
         Err(_) => {
             tracing::warn!(
                 "opsgate serve: requests still in flight after {} s, stopping",
                 SHUTDOWN_GRACE.as_secs()
             );
             server.abort();
-            ExitCode::SUCCESS
+            (ExitCode::SUCCESS, deadline)
         }
     }
 }

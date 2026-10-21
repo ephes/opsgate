@@ -57,7 +57,13 @@ from opsgate.config import (
     load_runner_settings,
     load_settings,
 )
-from opsgate.service import OpsGateService, compute_payload_checksum, isoformat_z, parse_iso_datetime
+from opsgate.service import (
+    OpsGateService,
+    ServiceError,
+    compute_payload_checksum,
+    isoformat_z,
+    parse_iso_datetime,
+)
 
 FIXTURES_DIR = Path(__file__).resolve().parent
 
@@ -1288,6 +1294,504 @@ def build_datetime() -> str:
     return render_json({"generated_by": GENERATED_BY, "parse": parse, "format": format_cases})
 
 
+# --- validation.json (PLAN.md 4.7.1 steps 1-10; slice S2c) ------------------
+#
+# Inputs are JSON texts of request bodies, so the D-2 spellings (``NaN``
+# literals, lone surrogate escapes, overflowing number tokens) can be written
+# down; every text decodes to an object with Python's ``json.loads`` (the
+# endpoint rejects anything else before validation). Lone surrogates appear
+# only as escapes in the text (see the S2a note above).
+
+#: Leaves a base field out of the payload.
+_ABSENT = object()
+
+_INSPECT_STEP = {"role": "investigator", "agent": "codex", "prompt_markdown": "Inspect the service"}
+_REVIEW_STEP = {"role": "reviewer", "agent": "claude", "prompt_markdown": "Review the change"}
+
+_NYXMON_CONTEXT = {
+    "producer": "nyxmon",
+    "check": {"check_id": 42, "name": "OpsGate Health (JSON Metrics)", "check_type": "json-http",
+              "url": "http://studio.example:8711/api/v1/health", "service_id": 7},
+    "result": {"status": "error", "data": {"value": 0.95, "threshold": 3.0, "latency": 14.0, "ok": False}},
+}
+
+
+def _vpayload(**fields: Any) -> dict[str, Any]:
+    """A valid payload with ``fields`` replaced (``_ABSENT`` removes one)."""
+    payload: dict[str, Any] = {
+        "title": "Title",
+        "summary": "Summary",
+        "execution_plan": [dict(_INSPECT_STEP)],
+    }
+    payload.update(fields)
+    return {key: value for key, value in payload.items() if value is not _ABSENT}
+
+
+def _vtext(payload: dict[str, Any], *, ascii_only: bool = False) -> str:
+    """The request body text of ``payload``; lone surrogates force ASCII
+    escapes so the fixture stays strict JSON."""
+    return json.dumps(payload, ensure_ascii=ascii_only or _has_lone_surrogate(payload))
+
+
+def _has_lone_surrogate(value: Any) -> bool:
+    if isinstance(value, str):
+        return any(0xD800 <= ord(c) <= 0xDFFF for c in value)
+    if isinstance(value, list):
+        return any(_has_lone_surrogate(child) for child in value)
+    if isinstance(value, dict):
+        return any(_has_lone_surrogate(key) or _has_lone_surrogate(child) for key, child in value.items())
+    return False
+
+
+class _ConstantLiteral(ValueError):
+    pass
+
+
+def _reject_constant(name: str) -> Any:
+    raise _ConstantLiteral(name)
+
+
+def _has_constant_literal(text: str) -> bool:
+    """Whether ``text`` uses ``NaN``/``Infinity``/``-Infinity`` (D-2)."""
+    try:
+        json.loads(text, parse_constant=_reject_constant)
+    except _ConstantLiteral:
+        return True
+    return False
+
+
+def _rust_str_failure(value: Any) -> str | None:
+    """The divergence when Rust rejects ``str(value)`` of a text field."""
+    if isinstance(value, list | dict):
+        return "D-3"
+    if isinstance(value, float) and not math.isfinite(value):
+        return "D-2"
+    return None
+
+
+def _rust_text_failure(payload: dict[str, Any], source: str) -> str | None:
+    """Where Rust stops at a ``str()`` that Python stores (steps 2 and 3, in
+    the Rust order: title, summary, the emptiness check, task_ref). Step 1
+    and ``expires_at`` reject such values in Python as well."""
+    if str(payload.get("source", source)).strip() != source:
+        return None
+    for field in ("title", "summary"):
+        failure = _rust_str_failure(payload.get(field, ""))
+        if failure is not None:
+            return failure
+    if not str(payload.get("title", "")).strip() or not str(payload.get("summary", "")).strip():
+        return None
+    task_ref = payload.get("task_ref")
+    return None if task_ref is None else _rust_str_failure(task_ref)
+
+
+def _rust_divergence(text: str, payload: dict[str, Any], source: str, python: dict[str, Any]) -> Any:
+    """``(divergence, rust)`` when the decided Rust result differs from
+    Python's (PLAN.md D-2, D-3); ``(divergence, None)`` when Rust stops at an
+    earlier check with the same code (only the P2 message differs); else
+    ``None``."""
+    def error(code: str) -> dict[str, Any]:
+        return {"error": {"code": code, "status": 400}}
+
+    if _has_constant_literal(text) or _has_lone_surrogate(payload):
+        return "D-2", error("invalid_json")  # the body does not decode
+    failure = _rust_text_failure(payload, source)
+    if failure is not None:
+        rust = error("invalid_ticket")
+    elif "canonical" in python and _has_constant_literal(python["canonical"]):
+        failure, rust = "D-2", error("invalid_json")  # a non-finite float in the checksum payload
+    else:
+        return None
+    python_error = python.get("error")
+    if python_error is not None and (python_error["code"], python_error["status"]) == (
+        rust["error"]["code"], rust["error"]["status"],
+    ):
+        return failure, None  # same code from an earlier check: only the (P2) message differs
+    return failure, rust
+
+
+#: The ``ValueError`` texts ``parse_iso_datetime`` raises itself.
+_OPSGATE_EXPIRY_MESSAGES = ("Datetime must include timezone information", "Datetime is outside supported UTC bounds")
+
+
+def _validation_case(
+    name: str, body: dict[str, Any] | str, *, source: str = "nyxmon", floor: bool = False, default: int = 3600,
+) -> dict[str, Any]:
+    text = body if isinstance(body, str) else _vtext(body)
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise AssertionError(f"validation input {name} is not an object")
+    settings = dataclasses.replace(
+        _settings(Path(tempfile.gettempdir()) / "opsgate-fixture.sqlite3"), max_duration_seconds_default=default,
+    )
+    case: dict[str, Any] = {"name": name, "input": text, "source": source, "floor": floor, "default_duration": default}
+    try:
+        # Pure: normalisation reads only the settings, never the database.
+        ticket = OpsGateService(settings)._normalize_new_ticket(
+            payload, source=source, require_reviewer_step_floor=floor,
+        )
+    except ServiceError as exc:
+        python: dict[str, Any] = {"error": {"code": exc.error_code, "status": exc.status_code}}
+        message = str(exc)
+        # ``datetime.fromisoformat``'s own texts change between CPython
+        # versions; messages are P2, so only OpsGate's own ones are kept.
+        if exc.error_code != "invalid_expires_at" or message in _OPSGATE_EXPIRY_MESSAGES:
+            python["error"]["message"] = message.encode("utf-8", "backslashreplace").decode("utf-8")
+    else:
+        checksum = ticket.pop("payload_checksum")
+        if compute_payload_checksum(ticket) != checksum:
+            raise AssertionError("the checksum no longer covers exactly the normalised ticket fields")
+        canonical = json.dumps(ticket, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        python = {"canonical": canonical, "payload_checksum": checksum}
+    case["python"] = python
+    divergence = _rust_divergence(text, payload, source, python)
+    if divergence is not None and divergence[1] is None:
+        case["message_divergence"] = divergence[0]
+    elif divergence is not None:
+        case["divergence"], case["rust"] = divergence
+    return case
+
+
+def _validation_hand_cases() -> list[dict[str, Any]]:
+    c = _validation_case
+    p = _vpayload
+    cases = [
+        # Ports of the tests/test_api.py cases owned by S2c (TESTMAP).
+        c("test_api_ticket_creation_rejects_unsupported_agent", p(
+            title="Bad API agent", summary="Unsupported agents should be rejected",
+            execution_plan=[{"role": "investigator", "agent": "shell", "prompt_markdown": "Inspect the service"}])),
+        c("test_api_ticket_creation_normalizes_agent_case", p(
+            title="Mixed case agent", summary="Agent values should normalize to lowercase",
+            execution_plan=[{"role": "reviewer", "agent": "CLAUDE", "prompt_markdown": "Review the change"}])),
+        c("test_operator_submitter_may_explicitly_require_reviewer_step", p(
+            title="Operator task", summary="Operator may opt into reviewer requirement",
+            execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}],
+            policy_requirements={"require_reviewer_step": True}), source="operator"),
+        c("test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor", p(
+            title="Operator task with omitted policy", summary="Should default to no reviewer floor",
+            execution_plan=[{"role": "reviewer", "agent": "codex", "prompt_markdown": "Review"}]), source="operator"),
+        c("test_api_rejects_utc_expiry_overflow[year-1]", p(expires_at="0001-01-01T00:00:00+01:00")),
+        c("test_api_rejects_utc_expiry_overflow[year-9999]", p(expires_at="9999-12-31T23:59:59-01:00")),
+        c("test_api_accepts_trimmed_plan_and_optional_expiry[none]", p(
+            title="Valid", summary="Normalization",
+            execution_plan=[{"role": " investigator ", "agent": " CODEX ", "prompt_markdown": " Inspect "}])),
+        c("test_api_accepts_trimmed_plan_and_optional_expiry[offset]", p(
+            title="Valid", summary="Normalization", expires_at="2099-01-01T01:00:00+01:00",
+            execution_plan=[{"role": " investigator ", "agent": " CODEX ", "prompt_markdown": " Inspect "}])),
+        c("test_ticket_duration_rejects_json_exponent_overflow",
+          '{"title":"Overflow","summary":"Duration","max_duration_seconds":1e309,'
+          '"execution_plan":[{"role":"investigator","agent":"codex","prompt_markdown":"Inspect"}]}'),
+    ]
+    for field in ("role", "agent", "prompt_markdown"):
+        for label, field_value in (("none", None), ("true", True), ("int", 42), ("list", []), ("object", {}),
+                                   ("empty", ""), ("blank", "   ")):
+            step: dict[str, Any] = dict(_INSPECT_STEP)
+            step[field] = field_value
+            cases.append(c(f"test_api_rejects_non_text_plan_fields[{field}-{label}]",
+                           p(title="Invalid plan", summary="Validate text", execution_plan=[step])))
+    for label, duration in (("true", True), ("false", False), ("float", 1.5), ("integral-float", 900.0),
+                            ("inf", float("inf")), ("googol", 10**100), ("zero", 0), ("negative", -1),
+                            ("string", "900"), ("above", 31_536_001)):
+        cases.append(c(f"test_ticket_duration_rejects_invalid_values[{label}]",
+                       p(title="Duration", summary="Invalid duration", max_duration_seconds=duration)))
+    for label, value in (("min", 1), ("max", 31_536_000), ("none", None)):
+        cases.append(c(f"test_ticket_duration_accepts_boundaries[{label}]",
+                       p(title="Duration", summary="Valid duration", max_duration_seconds=value)))
+    for field in ("title", "summary", "task_ref"):
+        for surrogate in ("\ud800", "\udfff"):
+            cases.append(c(f"test_ticket_text_rejects_unpaired_surrogates[{field}-{ord(surrogate):x}]",
+                           p(**{"task_ref": "task", field: "private text " + surrogate * 3})))
+
+    # Step 1: source.
+    cases += [
+        c("source/absent", p()),
+        c("source/equal", p(source="nyxmon")),
+        c("source/padded", p(source=" nyxmon\t")),
+        c("source/other", p(source="openclaw")),
+        c("source/case", p(source="NYXMON")),
+        c("source/empty", p(source="")),
+        c("source/null", p(source=None)),
+        c("source/number", p(source=1)),
+        c("source/list", p(source=["nyxmon"])),
+        c("source/object", p(source={"nyxmon": 1})),
+        c("source/overflow", '{"source":1e400,"title":"T","summary":"S","execution_plan":[]}'),
+        c("source/lone-surrogate", p(source="nyxmon\ud800")),
+        c("source/before-title", p(source="operator", title=_ABSENT)),
+        c("source/operator", p(source="operator"), source="operator"),
+        c("source/openclaw", p(source="openclaw"), source="openclaw", floor=True),
+    ]
+    # Step 2: title and summary.
+    for field in ("title", "summary"):
+        cases += [
+            c(f"{field}/absent", p(**{field: _ABSENT})),
+            c(f"{field}/empty", p(**{field: ""})),
+            c(f"{field}/blank", p(**{field: " \t\n"})),
+            c(f"{field}/python-whitespace", p(**{field: "　\x1c\x85"})),
+            c(f"{field}/padded", p(**{field: "  padded  "})),
+            c(f"{field}/null-is-None", p(**{field: None})),
+            c(f"{field}/true", p(**{field: True})),
+            c(f"{field}/false", p(**{field: False})),
+            c(f"{field}/int", p(**{field: 42})),
+            c(f"{field}/bigint", p(**{field: 10**30})),
+            c(f"{field}/float", p(**{field: 1.5})),
+            c(f"{field}/list", p(**{field: ["x"]})),
+            c(f"{field}/empty-list", p(**{field: []})),
+            c(f"{field}/object", p(**{field: {"a": 1}})),
+            c(f"{field}/overflow", '{"' + field + '":-1e400,"title":"T","summary":"S","execution_plan":'
+              '[{"role":"r","agent":"codex","prompt_markdown":"p"}]}'),
+        ]
+    cases += [
+        c("title/float-tokens", '{"title":1E2,"summary":-0,"execution_plan":'
+          '[{"role":"r","agent":"codex","prompt_markdown":"p"}]}'),
+        c("title/exponent-repr", '{"title":1e16,"summary":0.0001,"execution_plan":'
+          '[{"role":"r","agent":"codex","prompt_markdown":"p"}]}'),
+        c("title/unicode", p(title="Prüfung \U0001f9ea 中", summary="café\u0000 x")),
+        c("title/unicode-ascii-text", p(title="Prüfung \U0001f9ea", summary="café"), source="nyxmon"),
+        c("title/list-and-blank-summary", p(title=["x"], summary=" ")),
+        c("title/blank-and-list-summary", p(title="", summary={"a": 1})),
+        c("title/list-and-bad-plan", p(title=[1], execution_plan=[])),
+        c("title/before-plan", p(title="", execution_plan="x")),
+        c("title/duplicate-key", '{"title":"first","title":"second","summary":"S","execution_plan":'
+          '[{"role":"r","agent":"codex","prompt_markdown":"p"}]}'),
+    ]
+    # Step 3: task_ref.
+    cases += [
+        c("task_ref/absent", p()),
+        c("task_ref/null", p(task_ref=None)),
+        c("task_ref/empty", p(task_ref="")),
+        c("task_ref/blank", p(task_ref=" 　 ")),
+        c("task_ref/padded", p(task_ref="  nyxmon-check-42 ")),
+        c("task_ref/zero", p(task_ref=0)),
+        c("task_ref/false", p(task_ref=False)),
+        c("task_ref/float", p(task_ref=1.0)),
+        c("task_ref/list", p(task_ref=["a"])),
+        c("task_ref/object", p(task_ref={})),
+        c("task_ref/overflow", '{"task_ref":1e999,"title":"T","summary":"S","execution_plan":'
+          '[{"role":"r","agent":"codex","prompt_markdown":"p"}]}'),
+        c("task_ref/list-and-bad-plan", p(task_ref=["a"], execution_plan=None)),
+        c("task_ref/list-and-blank-title", p(task_ref=["a"], title=" ")),
+        c("task_ref/unicode", p(task_ref="tâche-\U0001f600")),
+    ]
+    # Step 5: execution plan.
+    cases += [
+        c("plan/absent", p(execution_plan=_ABSENT)),
+        c("plan/null", p(execution_plan=None)),
+        c("plan/empty", p(execution_plan=[])),
+        c("plan/object", p(execution_plan={"role": "investigator"})),
+        c("plan/string", p(execution_plan="investigate")),
+        c("plan/number-item", p(execution_plan=[1])),
+        c("plan/null-item", p(execution_plan=[None])),
+        c("plan/list-item", p(execution_plan=[[]])),
+        c("plan/second-item-invalid", p(execution_plan=[dict(_INSPECT_STEP), "step"])),
+        c("plan/second-item-missing-role", p(execution_plan=[
+            dict(_INSPECT_STEP), {"agent": "codex", "prompt_markdown": "x"}])),
+        c("plan/first-agent-before-second-item", p(execution_plan=[
+            {"role": "a", "agent": "bash", "prompt_markdown": "x"}, 7])),
+        c("plan/missing-agent", p(execution_plan=[{"role": "a", "prompt_markdown": "x"}])),
+        c("plan/missing-prompt", p(execution_plan=[{"role": "a", "agent": "codex"}])),
+        c("plan/agent-claude-padded", p(execution_plan=[{"role": "a", "agent": "\tClaude\n", "prompt_markdown": "x"}])),
+        c("plan/agent-python-whitespace", p(execution_plan=[
+            {"role": "a", "agent": "　codex\x1f", "prompt_markdown": "x"}])),
+        c("plan/agent-kelvin", p(execution_plan=[{"role": "a", "agent": "KODEX", "prompt_markdown": "x"}])),
+        c("plan/agent-fullwidth", p(execution_plan=[
+            {"role": "a", "agent": "ＣＯＤＥＸ", "prompt_markdown": "x"}])),
+        c("plan/agent-inner-space", p(execution_plan=[{"role": "a", "agent": "co dex", "prompt_markdown": "x"}])),
+        c("plan/agent-lone-surrogate", p(execution_plan=[
+            {"role": "a", "agent": "codex\udc00", "prompt_markdown": "x"}])),
+        c("plan/extra-keys-dropped", '{"title":"T","summary":"S","execution_plan":[{"role":"a","agent":"codex",'
+          '"prompt_markdown":"x","model":"gpt","nested":{"x":1e400,"y":[{}]}}]}'),
+        c("plan/extra-key-nan-literal", '{"title":"T","summary":"S","execution_plan":'
+          '[{"role":"a","agent":"codex","prompt_markdown":"x","weight":NaN}]}'),
+        c("plan/multi-step", p(execution_plan=[
+            {"role": " Implementer ", "agent": "codex", "prompt_markdown": "\n# Implement\n\nDo it.\n"},
+            {"role": "reviewer", "agent": "CLAUDE", "prompt_markdown": "Review \U0001f50e"},
+        ])),
+        c("plan/unicode-role", p(execution_plan=[{"role": "étape", "agent": "codex", "prompt_markdown": "x"}])),
+        c("plan/before-policy", p(execution_plan=[], policy_requirements=[])),
+        c("plan/before-context", p(execution_plan=[], context=[])),
+    ]
+    # Step 6: policy requirements, floor and reviewer enforcement.
+    review = [dict(_INSPECT_STEP), dict(_REVIEW_STEP)]
+    cases += [
+        c("policy/absent", p()),
+        c("policy/null", p(policy_requirements=None)),
+        c("policy/empty-string", p(policy_requirements="")),
+        c("policy/empty-object", p(policy_requirements={})),
+        c("policy/other-keys", p(policy_requirements={"require_tests": True})),
+        c("policy/true-with-reviewer", p(policy_requirements={"require_reviewer_step": True}, execution_plan=review)),
+        c("policy/true-without-reviewer", p(policy_requirements={"require_reviewer_step": True})),
+        c("policy/false", p(policy_requirements={"require_reviewer_step": False, "other": [1]})),
+        c("policy/value-int", p(policy_requirements={"require_reviewer_step": 1})),
+        c("policy/value-string", p(policy_requirements={"require_reviewer_step": "true"})),
+        c("policy/value-null", p(policy_requirements={"require_reviewer_step": None})),
+        c("policy/list", p(policy_requirements=[])),
+        c("policy/zero", p(policy_requirements=0)),
+        c("policy/false-literal", p(policy_requirements=False)),
+        c("policy/string", p(policy_requirements="x")),
+        c("policy/floor-absent-with-reviewer", p(execution_plan=review), floor=True),
+        c("policy/floor-absent-without-reviewer", p(), floor=True),
+        c("policy/floor-null-without-reviewer", p(policy_requirements=None), floor=True),
+        c("policy/floor-explicit-false", p(policy_requirements={"require_reviewer_step": False},
+                                           execution_plan=review), floor=True),
+        c("policy/floor-violation-before-reviewer", p(policy_requirements={"require_reviewer_step": False}),
+          floor=True),
+        c("policy/floor-explicit-true", p(policy_requirements={"require_reviewer_step": True},
+                                          execution_plan=review), floor=True),
+        c("policy/invalid-before-floor", p(policy_requirements={"require_reviewer_step": 0}), floor=True),
+        c("policy/reviewer-role-padded-case", p(policy_requirements={"require_reviewer_step": True},
+                                                execution_plan=[{"role": "  REVIEWER　", "agent": "codex",
+                                                                 "prompt_markdown": "x"}])),
+        c("policy/reviewer-role-plural", p(policy_requirements={"require_reviewer_step": True},
+                                           execution_plan=[{"role": "reviewers", "agent": "codex",
+                                                            "prompt_markdown": "x"}])),
+        c("policy/reviewer-role-dotted-i", p(policy_requirements={"require_reviewer_step": True},
+                                             execution_plan=[{"role": "REVİEWER", "agent": "codex",
+                                                              "prompt_markdown": "x"}])),
+        c("policy/reviewer-before-context", p(policy_requirements={"require_reviewer_step": True}, context=[])),
+        c("policy/operator-floor", p(execution_plan=review), source="operator", floor=True),
+        c("policy/operator-floor-missing-reviewer", p(), source="operator", floor=True),
+    ]
+    # Step 7: context.
+    cases += [
+        c("context/absent", p()),
+        c("context/null", p(context=None)),
+        c("context/empty", p(context={})),
+        c("context/nyxmon", p(context=_NYXMON_CONTEXT, task_ref="nyxmon-check-42")),
+        c("context/list", p(context=[])),
+        c("context/string", p(context="x")),
+        c("context/zero", p(context=0)),
+        c("context/false", p(context=False)),
+        c("context/nested", p(context={"a": [1, {"b": [None, True, "x", -7, 2.5]}], "": {}, "é": "\U0001f600"})),
+        c("context/numbers", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"context":{"a":-0,"b":-0.0,"c":1E2,"d":0.1e1,"e":1e16,"f":1e-5,'
+          '"g":123456789012345678901234567890,"h":1e-400,"i":9007199254740993,"j":0.30000000000000004}}'),
+        c("context/serde-number-key", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"context":{"$serde_json::private::Number":"123"}}'),
+        c("context/escapes", p(context={"s": "\"\\/\b\f\n\r\t\x00\x1f\x7f ﻿"})),
+        c("context/lone-surrogate", p(context={"text": "x\ud800"})),
+        c("context/lone-surrogate-key", p(context={"\udfff": 1})),
+        c("context/overflow", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"context":{"metric":1e400}}'),
+        c("context/negative-overflow", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"context":{"metric":[-1e999]}}'),
+        c("context/nan-literal", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"context":{"metric":NaN}}'),
+        c("context/infinity-literal", p(context={"metric": float("inf")})),
+        c("context/overflow-and-bad-duration", '{"title":"T","summary":"S","execution_plan":[{"role":"r",'
+          '"agent":"codex","prompt_markdown":"p"}],"context":{"metric":1e400},"max_duration_seconds":0}'),
+        c("context/overflow-and-bad-expiry", '{"title":"T","summary":"S","execution_plan":[{"role":"r",'
+          '"agent":"codex","prompt_markdown":"p"}],"context":{"metric":1e400},"expires_at":"soon"}'),
+        c("context/before-expiry", p(context="x", expires_at="soon")),
+    ]
+    # Step 8: expires_at.
+    expiries: list[tuple[str, Any]] = [
+        ("null", None), ("utc-z", "2099-01-01T00:00:00Z"), ("offset", "2099-06-30T23:30:00-02:00"),
+        ("fraction", "2099-01-01T00:00:00.123456+00:00"), ("space-separator", "2099-01-01 08:15:00+05:30"),
+        ("padded", "  2099-01-01T00:00:00Z \n"), ("minutes-only", "2099-01-01T00:00Z"),
+        ("past", "2020-01-01T00:00:00Z"), ("naive", "2099-01-01T00:00:00"), ("date-only", "2099-01-01"),
+        ("garbage", "soon"), ("empty", ""), ("blank", "   "), ("int", 0), ("true", True), ("list", ["2099"]),
+        ("object", {"at": "2099-01-01T00:00:00Z"}), ("bad-month", "2099-13-01T00:00:00Z"),
+        ("bad-offset", "2099-01-01T00:00:00+25:00"),
+    ]
+    for label, expiry in expiries:
+        cases.append(c(f"expires_at/{label}", p(expires_at=expiry)))
+    cases += [
+        c("expires_at/absent", p()),
+        c("expires_at/overflow-number", '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex",'
+          '"prompt_markdown":"p"}],"expires_at":1e400}'),
+        c("expires_at/before-duration", p(expires_at="soon", max_duration_seconds=0)),
+    ]
+    # Step 9: max_duration_seconds and the configured default.
+    durations: list[tuple[str, Any]] = [
+        ("absent", _ABSENT), ("null", None), ("int", 900), ("negative-zero", "-0"), ("exponent", "1E3"),
+        ("fraction", "60.0"), ("list", "[]"), ("object", "{}"), ("i64-overflow", "9223372036854775808"),
+        ("u64-overflow", "18446744073709551616"), ("negative-big", "-9223372036854775809"),
+    ]
+    for label, value in durations:
+        if isinstance(value, str):
+            body: dict[str, Any] | str = (
+                '{"title":"T","summary":"S","execution_plan":[{"role":"r","agent":"codex","prompt_markdown":"p"}],'
+                f'"max_duration_seconds":{value}}}'
+            )
+        else:
+            body = p(max_duration_seconds=value)
+        cases.append(c(f"duration/{label}", body))
+    cases += [
+        c("duration/default-900", p(), default=900),
+        c("duration/default-max", p(max_duration_seconds=None), default=31_536_000),
+        c("duration/default-min", p(), default=1),
+        c("duration/explicit-over-default", p(max_duration_seconds=60), default=900),
+    ]
+    # Everything at once, with every optional field set.
+    cases.append(c("full/production-shaped", p(
+        source="nyxmon", task_ref="nyxmon-check-42", title="OpsGate Health failing",
+        summary="Check 42 reported error (value 0.95 below 3.0)", execution_plan=review,
+        policy_requirements={"require_reviewer_step": True}, context=_NYXMON_CONTEXT,
+        expires_at="2026-10-22T10:00:00.5+02:00", max_duration_seconds=1800,
+    )))
+    return cases
+
+
+#: Values the random corpus draws for each field (``_ABSENT`` removes it).
+_VALIDATION_POOLS: dict[str, list[Any]] = {
+    "source": [_ABSENT, _ABSENT, "@source", " @source ", "nyxmon", "other", None, ["x"]],
+    "title": ["Title", " Title ", "", "  ", None, 7, 2.5, ["x"], {"k": "v"}, _ABSENT],
+    "summary": ["Summary", "　Summary\n", "", None, False, ["x"], _ABSENT],
+    "task_ref": [_ABSENT, None, "", " ", " ref-1 ", "nyxmon-check-7", 3, True, ["x"]],
+    "execution_plan": [
+        [dict(_INSPECT_STEP)], [dict(_INSPECT_STEP), dict(_REVIEW_STEP)], [dict(_REVIEW_STEP)],
+        [{"role": "a", "agent": "gpt", "prompt_markdown": "x"}],
+        [{"role": "", "agent": "codex", "prompt_markdown": "x"}],
+        [dict(_INSPECT_STEP), 5], [], "plan", None, _ABSENT,
+    ],
+    "policy_requirements": [
+        _ABSENT, None, "", {}, {"require_reviewer_step": True}, {"require_reviewer_step": False},
+        {"require_reviewer_step": 1}, [], "x",
+    ],
+    "context": [_ABSENT, None, {}, _NYXMON_CONTEXT, {"value": 0.95, "n": -3, "s": "é"}, [], "x", 0],
+    "expires_at": [_ABSENT, None, "2099-01-01T00:00:00Z", "2099-01-01T01:00:00+01:00", "2099-01-01T00:00:00",
+                   "never", 5, ["x"]],
+    "max_duration_seconds": [_ABSENT, None, 1, 900, 31_536_000, 0, 31_536_001, 900.0, True, "60"],
+}
+
+
+def _validation_random_cases(count: int) -> list[dict[str, Any]]:
+    """Valid payloads with one to four fields replaced from the pools, so
+    several checks fail at once and the order decides."""
+    rng = random.Random(0x5EED_4C01)
+    cases = []
+    for index in range(count):
+        source = rng.choice(["nyxmon", "openclaw", "operator"])
+        floor = rng.random() < 0.3
+        payload = _vpayload()
+        for field in rng.sample(sorted(_VALIDATION_POOLS), rng.randint(1, 4)):
+            value = rng.choice(_VALIDATION_POOLS[field])
+            if isinstance(value, str):
+                value = value.replace("@source", source)
+            payload[field] = value
+        payload = {key: value for key, value in payload.items() if value is not _ABSENT}
+        default = rng.choice([3600, 3600, 900, 1, 31_536_000])
+        body = json.dumps(payload, ensure_ascii=rng.random() < 0.5, sort_keys=rng.random() < 0.5)
+        cases.append(_validation_case(f"random/{index:03d}", body, source=source, floor=floor, default=default))
+    return cases
+
+
+def build_validation() -> str:
+    """``validation.json``: request body text, authenticated source, reviewer
+    floor and configured default duration → ``_normalize_new_ticket``
+    (PLAN.md 4.7.1 steps 1-10): the canonical checksum text of the
+    normalised ticket and its ``payload_checksum``, or the ``ServiceError``
+    (code, status, message). ``divergence`` (D-2, D-3) with ``rust``: the
+    decided Rust result where it differs; ``message_divergence``: Rust stops
+    at an earlier check with the same code and status, so only the message
+    (P2) differs."""
+    cases = _validation_hand_cases() + _validation_random_cases(240)
+    names = [case["name"] for case in cases]
+    if len(set(names)) != len(names):
+        raise AssertionError("validation case names must be unique")
+    return render_json({"generated_by": GENERATED_BY, "cases": cases})
+
+
 GENERATORS: dict[str, Callable[[], str]] = {
     "checksum.json": build_checksum,
     "datetime.json": build_datetime,
@@ -1298,6 +1802,7 @@ GENERATORS: dict[str, Callable[[], str]] = {
     "schema.sql": build_schema,
     "settings.json": build_settings,
     "storage_json.json": build_storage_json,
+    "validation.json": build_validation,
 }
 
 # Fixtures whose content depends on the CPython minor version: they are

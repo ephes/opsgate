@@ -8,9 +8,9 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection), the black-box API parity harness (S7a, green against
-Python) and the black-box runner parity harness (S7b, green against the
-Python runner). The workspace, CI, the fixture generator and the command-line
+header selection; S2c: ticket validation), the black-box API parity harness
+(S7a, green against Python) and the black-box runner parity harness (S7b,
+green against the Python runner). The workspace, CI, the fixture generator and the command-line
 skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
@@ -40,6 +40,7 @@ rust/
     storage_json.json   stored JSON column text (4.8)
     datetime.json       timestamp parsing and formatting, Python 3.14 (4.9)
     pystr.json          str() of JSON scalars, strip, lower (4.6)
+    validation.json     new-ticket validation and normalisation (4.7.1)
   parity/
     api/                black-box API parity harness (S7a, PLAN.md 7.3)
     runner/             black-box runner parity harness (S7b, PLAN.md 7.4)
@@ -51,7 +52,10 @@ the checksum and stored-JSON formatter, depth check, PLAN.md 4.6/4.8) and
 `settings` (env file, API and runner settings, 4.2), `log_preview` (4.12),
 `paths` (step-log containment, 4.12) and `proxy_fix` (4.4); and `pytext`
 (Python's `str.strip` whitespace, `splitlines` boundaries, `str()` of JSON
-scalars and `lower`). The other library crates are empty
+scalars and `lower`); of S2c: `validate` (new-ticket validation and
+normalisation in Python's check order, plan/policy/floor/reviewer rules,
+duration, the checksum payload, 4.7.1) and `error` (`ServiceError`: status,
+code, message). The other library crates are empty
 until their slices land. Every crate forbids
 `unsafe` code (workspace lint).
 
@@ -179,6 +183,7 @@ UV_PYTHON=3.14 just rs-fixtures
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 | `storage_json.json` | JSON text → stored column text `json.dumps(value, sort_keys=True)` | `opsgate-core/tests/checksum_fixture.rs` |
+| `validation.json` | request body text, source, reviewer floor and default duration → `_normalize_new_ticket`: canonical checksum text and `payload_checksum`, or error code, status and message (469 cases: the S2c Python tests, every check of 4.7.1 and their order, 240 random multi-field mutations; D-2/D-3 marked with the Rust result) | `opsgate-core/tests/validation_fixture.rs` |
 
 ## API parity harness
 

@@ -17,6 +17,13 @@
   `rust/fixtures/generate.py` with its first fixture `schema.sql` and a pytest drift test, the
   `rust` CI job on Linux and macOS, and `just rs-*` recipes. `rust/target/` is ignored. Nothing
   deploys or runs the Rust code yet; the Python implementation is unchanged.
+- Rust port slice S2c (`rust/crates/opsgate-core`): new-ticket validation and normalisation with
+  the check order of `_normalize_new_ticket` (source, title/summary, `task_ref`, execution plan,
+  policy requirements with the submitter floor and the reviewer rule, context, `expires_at`,
+  `max_duration_seconds`, payload checksum), the plan/policy checks approval and claim repeat, and a
+  shared `ServiceError`. New Python-generated fixture `validation.json` (469 request bodies) pins
+  every result; `str()` of arrays/objects and of overflowing numbers in `title`, `summary` and
+  `task_ref` is rejected by Rust (plan D-2/D-3). Nothing calls this code yet.
 - Rust port slice S2b (`rust/crates/opsgate-core`): the env-file loader and the API and runner
   settings with every rule of `config.py` (same check order and messages), step log previews and
   the step log page, step-log path containment with CPython's non-strict `Path.resolve()`, and the

@@ -1,8 +1,8 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
 Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str, S2b core settings/files and the S7b runner parity harness
-landed); owner
+JSON/time/str, S2b core settings/files, S2c core validation and the S7b runner
+parity harness landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
 work item `rust-ports-campaign`).
 
@@ -617,7 +617,8 @@ Validation order (P1; the first failing check decides the code):
 2. `title`, `summary` stripped non-empty → 400 `invalid_ticket`.
 3. `task_ref`: `None` stays none; else stripped, empty → none.
 4. UTF-8 validity of source/title/summary/task_ref → 400 `invalid_ticket`
-   "<field> must be valid UTF-8 text" (D-2 for lone surrogates).
+   "<field> must be valid UTF-8 text" (D-2 for lone surrogates: Rust cannot
+   decode such a body, so this step has nothing left to reject).
 5. `execution_plan` (`parse_execution_plan`): non-empty list → else
    `invalid_execution_plan`; each item an object with non-blank string `role`,
    `agent`, `prompt_markdown`; trimmed; agent lowercased ∈ {`codex`,`claude`}.
@@ -633,7 +634,8 @@ Validation order (P1; the first failing check decides the code):
 9. `max_duration_seconds`: null/absent → configured default; must be a JSON
    integer (not bool, not float — `900.0` and `1e309` fail) in
    1..31 536 000 → 400 `invalid_ticket`.
-10. checksum of the normalised payload (4.8).
+10. checksum of the normalised payload (4.8); a non-finite float in it is
+    D-2 (`invalid_json`, Rust `opsgate_core::validate`, S2c).
 11. `created_by`/`actor` = `submit:<source>` or `approver:<user>`;
     `source_ip`, `user_agent` (request header) → UTF-8 check →
     400 `invalid_ticket`.
@@ -1053,16 +1055,23 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   surrogate escapes (Python: 400 `invalid_ticket` in direct text fields,
   accepted inside `context`/`execution_plan`); UTF-16/UTF-32 encoded bodies
   (Python auto-detects); floats that overflow to ±inf when the payload is
-  canonicalised (Python stores `Infinity`). Validation order is otherwise
-  kept, so `{"max_duration_seconds": 1e309}` still answers `invalid_ticket`.
+  canonicalised (Python stores `Infinity`; Rust: `invalid_json` at 4.7.1
+  step 10); `str()` of a number that overflows to ±inf in `title`, `summary`
+  or `task_ref` (Python stores `inf`; Rust: `invalid_ticket`, as D-3).
+  Validation order is otherwise kept, so `{"max_duration_seconds": 1e309}`
+  still answers `invalid_ticket`.
   `check-db` reports stored rows Rust cannot read; production has none
   (section 1: every column `json_valid`, no non-finite numbers).
 - **D-3 `str()` of arrays/objects.** Where Python stores the `repr` of a JSON
   array/object passed in a text field (4.6), Rust answers 400 with the field's
-  code (`invalid_ticket` for ticket fields, `invalid_runner_event`/
+  code (`invalid_ticket` for `title`, `summary` and `task_ref`, at the check
+  where Python applies `str()`, 4.7.1 steps 2–3; `invalid_runner_event`/
   `invalid_runner_state`/`invalid_runner_result` for runner fields,
-  `invalid_json` for `reason`/`runner_host`/`result_detail`). No producer
-  sends them.
+  `invalid_json` for `reason`/`runner_host`/`result_detail`). Ticket `source`
+  and `expires_at` are no divergence: Python rejects such values too
+  (`source_mismatch`, `invalid_expires_at`), and so does Rust. Where Python
+  fails a later check with the same code, only the P2 message differs. No
+  producer sends them.
 - **D-4 Truthy non-object bodies** on reject/cancel/claim (e.g. `[1]`, `"x"`):
   Rust 400 `invalid_json`; Python 500 (`AttributeError`).
 - **D-5 Request body limit** 8 MiB → 413 (Python: waitress' 1 GiB default).

@@ -27,12 +27,12 @@ section ("Rust-only tests") with their paths.
 
 | Python test | Rust target | Slice | Parity |
 | --- | --- | --- | --- |
-| `test_ui_ticket_detail_redirects_to_login_with_next` | `web::ui` (the redirect is S5's `GET /tickets/<id>`; the login side is `crates/opsgate-web/tests/login.rs::test_login_redirects_to_requested_next_path`) | S5 | A |
+| `test_ui_ticket_detail_redirects_to_login_with_next` | `crates/opsgate-web/tests/ui.rs::test_ui_ticket_detail_redirects_to_login_with_next` (the login side is `crates/opsgate-web/tests/login.rs::test_login_redirects_to_requested_next_path`; the whole round trip `crates/opsgate-web/tests/ui.rs::detail_page_login_round_trip`) | S5 ✓ | A |
 | `test_login_redirects_to_requested_next_path` | `crates/opsgate-web/tests/login.rs::test_login_redirects_to_requested_next_path` (signs in on `/login?next=/tickets/<id>` directly; the detail page that redirects there is S5's) | S4b ✓ | A |
-| `test_manual_ticket_creation_from_ui` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_form_defaults_investigator_to_codex` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_form_renders_role_scaffolding` | `web::ui::manual_form` | S5 | A |
-| `test_ticket_list_renders_compact_created_at_timestamp` | `web::ui` | S5 | A |
+| `test_manual_ticket_creation_from_ui` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_from_ui` | S5 ✓ | A |
+| `test_manual_ticket_form_defaults_investigator_to_codex` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_form_defaults_investigator_to_codex` | S5 ✓ | A |
+| `test_manual_ticket_form_renders_role_scaffolding` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_form_renders_role_scaffolding` | S5 ✓ | A |
+| `test_ticket_list_renders_compact_created_at_timestamp` | `crates/opsgate-web/tests/ui.rs::test_ticket_list_renders_compact_created_at_timestamp` | S5 ✓ | A |
 | `test_api_archive_and_unarchive_preserve_ticket_access_and_audit` | `crates/opsgate-store/tests/transitions.rs::test_api_archive_and_unarchive_preserve_ticket_access_and_audit` | S3b ✓ | A |
 | `test_archive_rejects_non_archivable_active_states` | `crates/opsgate-store/tests/transitions.rs::test_archive_rejects_non_archivable_active_states` | S3b ✓ | A |
 | `test_archive_allowed_for_all_terminal_states` | `crates/opsgate-store/tests/transitions.rs::test_archive_allowed_for_all_terminal_states` | S3b ✓ | A |
@@ -40,30 +40,30 @@ section ("Rust-only tests") with their paths.
 | `test_archive_rejects_double_archive` | `crates/opsgate-store/tests/transitions.rs::test_archive_rejects_double_archive` | S3b ✓ | A |
 | `test_unarchive_rejects_non_archived_ticket` | `crates/opsgate-store/tests/transitions.rs::test_unarchive_rejects_non_archived_ticket` | S3b ✓ | A |
 | `test_unarchive_rejects_when_replacement_open_ticket_exists` | `crates/opsgate-store/tests/transitions.rs::test_unarchive_rejects_when_replacement_open_ticket_exists` | S3b ✓ | A |
-| `test_ui_archive_and_restore_controls_manage_ticket_visibility` | `web::ui` | S5 | A |
-| `test_ticket_list_shows_archive_and_restore_actions_with_list_redirect` | `web::ui` | S5 | A |
-| `test_pending_approval_ticket_shows_archive_action_in_list_and_detail` | `web::ui` | S5 | A |
-| `test_archived_pending_ticket_hides_approve_reject_and_cancel_actions` | `web::ui` | S5 | A |
+| `test_ui_archive_and_restore_controls_manage_ticket_visibility` | `crates/opsgate-web/tests/ui.rs::test_ui_archive_and_restore_controls_manage_ticket_visibility` (the reject through the store: the cookie API action is S4b's) | S5 ✓ | A |
+| `test_ticket_list_shows_archive_and_restore_actions_with_list_redirect` | `crates/opsgate-web/tests/ui.rs::test_ticket_list_shows_archive_and_restore_actions_with_list_redirect` (the reject through the store: the cookie API action is S4b's) | S5 ✓ | A |
+| `test_pending_approval_ticket_shows_archive_action_in_list_and_detail` | `crates/opsgate-web/tests/ui.rs::test_pending_approval_ticket_shows_archive_action_in_list_and_detail` | S5 ✓ | A |
+| `test_archived_pending_ticket_hides_approve_reject_and_cancel_actions` | `crates/opsgate-web/tests/ui.rs::test_archived_pending_ticket_hides_approve_reject_and_cancel_actions` | S5 ✓ | A |
 | `test_archived_pending_ticket_blocks_lifecycle_actions` | `crates/opsgate-store/tests/transitions.rs::test_archived_pending_ticket_blocks_lifecycle_actions` | S3b ✓ | A |
 | `test_runner_does_not_claim_archived_approved_ticket` | `crates/opsgate-store/tests/claim.rs::test_runner_does_not_claim_archived_approved_ticket` | S3b ✓ | A |
-| `test_ticket_list_archive_redirect_sanitizes_invalid_targets` | `web::ui` | S5 | A |
+| `test_ticket_list_archive_redirect_sanitizes_invalid_targets` | `crates/opsgate-web/tests/ui.rs::test_ticket_list_archive_redirect_sanitizes_invalid_targets` (the reject through the store: the cookie API action is S4b's) | S5 ✓ | A |
 | `test_ui_archive_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
-| `test_ticket_detail_renders_log_preview_and_full_log_link` | `web::ui` | S5 | A |
-| `test_ticket_step_log_view_renders_bounded_log` | `web::ui` | S5 | A |
-| `test_ticket_step_log_view_rejects_paths_outside_ticket_artifacts` | `web::ui` | S5 | A |
-| `test_ticket_detail_hides_full_log_link_for_session_without_numeric_step_index` | `web::ui` | S5 | A |
-| `test_ticket_step_log_view_rejects_missing_step_number` | `web::ui` | S5 | A |
-| `test_ticket_detail_shows_log_unavailable_message_for_missing_file` | `web::ui` | S5 | A |
-| `test_manual_ticket_creation_defaults_agent_from_role` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_supports_legacy_single_step_fields` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_rejects_empty_execution_plan_from_ui` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_role` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_enforces_operator_reviewer_floor_when_enabled` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_rejects_invalid_context_json` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_rejects_unsupported_agent_from_ui` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_requires_csrf_token` | `web::ui::manual_form` | S5 | A |
-| `test_manual_ticket_creation_rejects_tampered_csrf_token` | `web::ui::manual_form` | S5 | A |
-| `test_ui_ticket_action_failure_redirects_back_to_ticket_detail` | `web::ui` | S5 | A |
+| `test_ticket_detail_renders_log_preview_and_full_log_link` | `crates/opsgate-web/tests/ui.rs::test_ticket_detail_renders_log_preview_and_full_log_link` | S5 ✓ | A |
+| `test_ticket_step_log_view_renders_bounded_log` | `crates/opsgate-web/tests/ui.rs::test_ticket_step_log_view_renders_bounded_log` | S5 ✓ | A |
+| `test_ticket_step_log_view_rejects_paths_outside_ticket_artifacts` | `crates/opsgate-web/tests/ui.rs::test_ticket_step_log_view_rejects_paths_outside_ticket_artifacts` | S5 ✓ | A |
+| `test_ticket_detail_hides_full_log_link_for_session_without_numeric_step_index` | `crates/opsgate-web/tests/ui.rs::test_ticket_detail_hides_full_log_link_for_session_without_numeric_step_index` | S5 ✓ | A |
+| `test_ticket_step_log_view_rejects_missing_step_number` | `crates/opsgate-web/tests/ui.rs::test_ticket_step_log_view_rejects_missing_step_number` | S5 ✓ | A |
+| `test_ticket_detail_shows_log_unavailable_message_for_missing_file` | `crates/opsgate-web/tests/ui.rs::test_ticket_detail_shows_log_unavailable_message_for_missing_file` | S5 ✓ | A |
+| `test_manual_ticket_creation_defaults_agent_from_role` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_defaults_agent_from_role` | S5 ✓ | A |
+| `test_manual_ticket_creation_supports_legacy_single_step_fields` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_supports_legacy_single_step_fields` | S5 ✓ | A |
+| `test_manual_ticket_creation_rejects_empty_execution_plan_from_ui` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_rejects_empty_execution_plan_from_ui` | S5 ✓ | A |
+| `test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_role` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_form_uses_implementer_guidance_for_legacy_implementor_role` | S5 ✓ | A |
+| `test_manual_ticket_creation_enforces_operator_reviewer_floor_when_enabled` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_enforces_operator_reviewer_floor_when_enabled` | S5 ✓ | A |
+| `test_manual_ticket_creation_rejects_invalid_context_json` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_rejects_invalid_context_json` | S5 ✓ | A |
+| `test_manual_ticket_creation_rejects_unsupported_agent_from_ui` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_rejects_unsupported_agent_from_ui` | S5 ✓ | A |
+| `test_manual_ticket_creation_requires_csrf_token` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_requires_csrf_token` | S5 ✓ | A |
+| `test_manual_ticket_creation_rejects_tampered_csrf_token` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_creation_rejects_tampered_csrf_token` | S5 ✓ | A |
+| `test_ui_ticket_action_failure_redirects_back_to_ticket_detail` | `crates/opsgate-web/tests/ui.rs::test_ui_ticket_action_failure_redirects_back_to_ticket_detail` (the first approval through the UI action: the cookie API action is S4b's) | S5 ✓ | A |
 | `test_api_ticket_creation_rejects_unsupported_agent` | `crates/opsgate-core/tests/validation.rs::test_api_ticket_creation_rejects_unsupported_agent` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_approval_revalidates_stored_agent_allowlist` | `crates/opsgate-store/tests/transitions.rs::test_approval_revalidates_stored_agent_allowlist` | S3b ✓ | A |
 | `test_approval_revalidates_stored_reviewer_requirement` | `crates/opsgate-store/tests/transitions.rs::test_approval_revalidates_stored_reviewer_requirement` | S3b ✓ | A |
@@ -123,28 +123,28 @@ section ("Rust-only tests") with their paths.
 | `test_login_throttle_bounds_tracked_clients` | `crates/opsgate-web/tests/throttle.rs::test_login_throttle_bounds_tracked_clients` | S4b ✓ | - |
 | `test_api_bearer_endpoints_reject_non_ascii_token` | `crates/opsgate-web/tests/auth.rs::test_api_bearer_endpoints_reject_non_ascii_token` | S4a ✓ | A |
 | `test_api_session_actions_reject_non_ascii_csrf_header` | `crates/opsgate-web/tests/csrf.rs::test_api_session_actions_reject_non_ascii_csrf_header` | S4b ✓ | A |
-| `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
+| `test_ui_ticket_actions_reject_non_ascii_form_token` | `crates/opsgate-web/tests/csrf.rs::test_ui_ticket_actions_reject_non_ascii_form_token` | S5 ✓ | A |
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
 | `test_api_rejects_non_text_plan_fields` | `crates/opsgate-core/tests/validation.rs::test_api_rejects_non_text_plan_fields` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_claim_rejects_non_text_stored_plan` | `crates/opsgate-store/tests/claim.rs::test_claim_rejects_non_text_stored_plan` | S3b ✓ | A |
 | `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half, S2a) + `crates/opsgate-core/tests/validation.rs::test_api_rejects_utc_expiry_overflow` (`invalid_expires_at`, S2c) | S2a ✓ + S2c ✓ | A |
 | `test_datetime_overflow_is_value_error` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` | S2a | A |
 | `test_api_accepts_trimmed_plan_and_optional_expiry` | `crates/opsgate-core/tests/validation.rs::test_api_accepts_trimmed_plan_and_optional_expiry` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_ui_pages_cannot_be_framed` | `crates/opsgate-web/tests/headers.rs::test_ui_pages_cannot_be_framed` (the S4a pages: login and forbidden; S5 adds the ticket list and detail pages to it) | S4a ✓ + S5 | A |
-| `test_api_error_and_redirect_responses_carry_security_headers` | `crates/opsgate-web/tests/headers.rs::test_api_error_and_redirect_responses_carry_security_headers` (the redirect is the UI-CSRF one; `GET /tickets` is S5's route) | S4a ✓ | A |
+| `test_ui_pages_cannot_be_framed` | `crates/opsgate-web/tests/headers.rs::test_ui_pages_cannot_be_framed` (login and forbidden pages from S4a, ticket list and detail pages from S5) | S4a ✓ + S5 ✓ | A |
+| `test_api_error_and_redirect_responses_carry_security_headers` | `crates/opsgate-web/tests/headers.rs::test_api_error_and_redirect_responses_carry_security_headers` (the UI-CSRF redirect from S4a; the `GET /tickets` redirect to the login page since S5) | S4a ✓ + S5 ✓ | A |
 | `test_forbidden_network_response_carries_security_headers` | `crates/opsgate-web/tests/headers.rs::test_forbidden_network_response_carries_security_headers` | S4a ✓ | A |
 | `test_wrong_username_still_runs_the_password_check` | `crates/opsgate-web/tests/login.rs::test_wrong_username_still_runs_the_password_check` + `crates/opsgate-web/src/password.rs::tests::the_password_check_always_runs` (counts the password checks, Python's monkeypatch) | S4b ✓ | A |
 | `test_non_ascii_username_is_rejected_without_error` | `crates/opsgate-web/tests/login.rs::test_non_ascii_username_is_rejected_without_error` | S4b ✓ | A |
 | `test_json_decode_errors_are_domain_responses` | `crates/opsgate-web/tests/api.rs::test_json_decode_errors_are_domain_responses` (the bearer endpoints, S4a; reject and cancel with a session, S4b) | S4a ✓ + S4b ✓ | A |
-| `test_manual_context_rejects_excessive_nesting` | `web::ui::manual_form` | S5 | A |
+| `test_manual_context_rejects_excessive_nesting` | `crates/opsgate-web/tests/manual_form.rs::test_manual_context_rejects_excessive_nesting` (Python fakes `json.loads`' `RecursionError`; Rust sends nesting beyond `serde_json`'s recursion limit) | S5 ✓ | A |
 | `test_real_json_nesting_limit` | `crates/opsgate-web/tests/api.rs::test_real_json_nesting_limit` (also depth 129, beyond `serde_json`'s recursion limit) | S4a ✓ | A |
-| `test_real_manual_context_nesting_limit` | `web::ui::manual_form` | S5 | A |
+| `test_real_manual_context_nesting_limit` | `crates/opsgate-web/tests/manual_form.rs::test_real_manual_context_nesting_limit` | S5 ✓ | A |
 | `test_malformed_required_json_retains_domain_response` | `crates/opsgate-web/tests/api.rs::test_malformed_required_json_retains_domain_response` | S4a ✓ | A |
 | `test_runner_state_result_matrix` | `crates/opsgate-store/tests/runner_status.rs::test_runner_state_result_matrix` | S3b ✓ | A |
 | `test_ticket_duration_rejects_invalid_values` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_invalid_values` (P3 D-2 for the `Infinity` literal: Rust answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_duration_accepts_boundaries` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_accepts_boundaries` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_duration_rejects_json_exponent_overflow` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_json_exponent_overflow` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_manual_ticket_duration_rejects_invalid_values` | `web::ui::manual_form` | S5 | A |
+| `test_manual_ticket_duration_rejects_invalid_values` | `crates/opsgate-web/tests/manual_form.rs::test_manual_ticket_duration_rejects_invalid_values` | S5 ✓ | A |
 | `test_direct_settings_duration_default_is_validated` | `crates/opsgate-core/tests/settings_fixture.rs::direct_settings_duration_default_is_validated` | S2b ✓ | - |
 | `test_ticket_text_rejects_unpaired_surrogates` | `crates/opsgate-core/tests/validation.rs::test_ticket_text_rejects_unpaired_surrogates` (P3 D-2: Rust answers `invalid_json` for lone surrogates) (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `crates/opsgate-store/tests/claim.rs::test_ticket_unicode_text_persists_and_passes_checksum_validation` (validation half: S2c) | S3b ✓ | A |
@@ -313,3 +313,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-web/src/{password,csrf,urls}.rs` unit tests (S4b parts) | the password check runs for every username; Werkzeug's `get_host` (default port, validation) and the same-origin headers (`Sec-Fetch-Site` before `Origin`, Python's strip and lower); `iri_to_uri` of local targets (4.5.3, 4.5.4) | S4b |
 | `crates/opsgate-web/tests/{login,csrf,session,throttle,api}.rs` (other S4b tests) | over HTTP in-process: `POST /login` replaces the session (stripped username, generation, new token, flashes gone), failed sign-ins keep a sanitised `next` and flash once, the form's `next` wins, success redirects through `iri_to_uri`, missing fields, a malformed configured hash, `session_state_missing` as a UI error, the UI-CSRF check before the sign-in; API-CSRF header rules (stripped values, repeated lines, a session without a token), `Origin` against Werkzeug's host (ports, IPv6, no `Host`: D-19), the check before the body; logout bumps once, clears the session, needs the form token, a stale session revokes nothing; the 429 page (`next`, flash not kept, no new failure), the throttle key is the socket peer (forwarded headers ignored, `unknown` without an address); the approver's API actions (transitions, `reason` rules incl. D-3/D-4, audit actor/address/user agent, archive errors, 404s, routing with 405 and `OPTIONS`) | S4b |
 | `parity/api/` (S4b) | the S4b scenarios (`test_auth.py`, `test_lifecycle.py`, `test_runner_api.py`, `test_cross.py`, `test_gate.py` marked `S4a, S4b`) run against Rust: 454 scenarios compared locally, 0 unexplained differences (29 explained by D-2/D-3/D-4); `test_login_throttle_is_per_client_ip` (needs `127.0.0.2`) runs on Linux in CI | S4b |
+| `crates/opsgate-web/tests/ui.rs` (other tests) | the approver's pages and actions over HTTP in-process (4.3, 4.11, 4.12): every page and action without a session redirects to the login page (`next` for the detail and step log pages, request path decoded and quoted as `url_for` does) and changes nothing; `GET /`; the actions of the detail page and the list for every state × archive flag (forms, fields, the session's CSRF token, back links) read with an HTML tokenizer; the list views (`active`, `archived`, `all`, unknown values, case and whitespace) and the 100 newest tickets; `reason` stripped and the audit actor, address and user agent; unknown tickets flashed through the detail page to the list; a `redirect_to` sent as Werkzeug's `iri_to_uri` sends it; the `<int:n>` converter (Unicode digits, leading zeros, 4300 digits, 404 for every method otherwise); session entries of every shape (`int()` of strings, floats, booleans; the first match; an infinite float is a 500); symbolic links out of the artifact root and NUL paths (500); `HEAD` and `OPTIONS` | S5 |
+| `crates/opsgate-web/tests/manual_form.rs` (other tests) | the form's unhandled `ValueError`s (a step index or a `context_json` integer beyond 4300 digits: 500, nothing written; a duration beyond 4300 digits: `invalid_ticket`), the re-rendered form (the query's view, sticky fields, steps in index order with role defaults) and a `GET` with a form body | S5 |
+| `crates/opsgate-web/tests/common/html.rs` | the test helper reading pages with the `html5gum` tokenizer: forms (action, method, inputs, selects with their selected option, textareas), links, flashes, text, elements by id (6.3) | S5 |
+| `crates/opsgate-web/src/{manual_form,step_logs,pyint,urls}.rs`, `routes/ui.rs` unit tests, `crates/opsgate-core/src/settings.rs::tests::py_int_decimal_is_exact` | `parse_manual_ticket_steps` (Unicode indexes, `$` before a final newline, last key wins, legacy fields and their blank-role quirk), `build_manual_ticket_form_data` and the payload rules (`[0-9]+` durations, `context_json` decoding, depth, D-2); step numbers and the step lookup; Python's `int()` of JSON values as exact decimals (large floats exact); Werkzeug's `iri_to_uri`; `url_for` with integers of any size; the list view and the `<int:n>` segment | S5 |

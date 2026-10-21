@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod html;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -327,6 +329,67 @@ impl TestApp {
     }
 }
 
+impl TestApp {
+    /// `set_ticket_tmux_sessions`: replaces the ticket's stored sessions.
+    pub fn set_tmux_sessions(&self, ticket_id: &str, sessions: &Value) {
+        self.connection()
+            .execute(
+                "UPDATE tickets SET tmux_sessions_json = ?1 WHERE id = ?2",
+                rusqlite::params![sessions.to_string(), ticket_id],
+            )
+            .unwrap();
+    }
+
+    /// `OPSGATE_EXECUTION_DATA_DIR`.
+    pub fn execution_data_dir(&self) -> PathBuf {
+        PathBuf::from(&self.state.settings().execution_data_dir)
+    }
+
+    /// `write_ticket_log`: a log file under the ticket's artifact root.
+    pub fn write_ticket_log(
+        &self,
+        ticket_id: &str,
+        relative_path: &str,
+        content: &[u8],
+    ) -> PathBuf {
+        let path = self
+            .execution_data_dir()
+            .join("sessions")
+            .join(ticket_id)
+            .join(relative_path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    /// Sets the stored state (and the archive columns) directly.
+    pub fn set_state(&self, ticket_id: &str, state: &str, archived: bool) {
+        self.connection()
+            .execute(
+                "UPDATE tickets SET state = ?1, archived_at = ?2, archived_by = ?3 WHERE id = ?4",
+                rusqlite::params![
+                    state,
+                    archived.then_some("2026-10-21T10:00:00Z"),
+                    archived.then_some("approver:opsgate-admin"),
+                    ticket_id,
+                ],
+            )
+            .unwrap();
+    }
+
+    /// A form post with the session's CSRF token added first.
+    pub async fn post_form(
+        &self,
+        path: &str,
+        csrf_token: &str,
+        fields: &[(&str, &str)],
+    ) -> TestResponse {
+        let mut all = vec![("csrf_token", csrf_token)];
+        all.extend_from_slice(fields);
+        self.send(Call::post(path).form(&all)).await
+    }
+}
+
 /// A ticket body of `create_ticket` in `tests/test_api.py`.
 pub fn ticket_payload(title: &str, task_ref: Option<&str>) -> Value {
     let mut payload = json!({
@@ -438,6 +501,11 @@ impl TestResponse {
 
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).into_owned()
+    }
+
+    /// The page's P1 elements ([`html::parse`]).
+    pub fn page(&self) -> html::Page {
+        html::parse(&self.text())
     }
 
     pub fn location(&self) -> Option<&str> {

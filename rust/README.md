@@ -18,11 +18,12 @@ serve` with the request processing order of PLAN.md 4.4, the session cookie,
 the UI-CSRF check, the template environment, the login page and the bearer
 routes; S4b: `POST /login` with the bcrypt check and the login throttle,
 logout with the server-side revocation, the API-CSRF check and the approver's
-API actions), the black-box API parity harness (S7a, green against Python and, for
+API actions; S5: the ticket list with the manual ticket form, the detail and
+step log pages and the approver's form actions), the black-box API parity harness (S7a, green against Python and, for
 the scenarios of the landed web slices, against Rust) and the black-box runner
 parity harness (S7b, green against the Python runner and, run locally, against
 the Rust runner). `check-db`, `runner` and `serve` work (`serve` answers the
-routes of S4a and S4b; the ticket pages and the UI actions follow with S5);
+routes of S4a, S4b and S5);
 `check-config` is still a stub that exits 2. The Python
 package in `src/opsgate` is the production implementation and the oracle for
 the contract. Nothing deploys or runs this code yet.
@@ -38,7 +39,7 @@ rust/
   crates/
     opsgate-core/       pure logic: settings, JSON canon/checksum, time, validation, log preview, path containment (S2a-S2c)
     opsgate-store/      SQLite store: schema, tickets, health, session generation, check-db (S3a, S3b)
-    opsgate-web/        HTTP API and web UI: layers, session, templates, routes (S4a, S4b; S5 adds routes)
+    opsgate-web/        HTTP API and web UI: layers, session, templates, routes (S4a, S4b, S5)
     opsgate-runner/     runner (S6a, S6b)
     opsgate/            the binary: command line, build.rs (embeds the git commit)
   fixtures/
@@ -252,6 +253,16 @@ Slice S4b adds the sign-in and the approver's API (PLAN.md 4.5.3, 4.5.4):
   (`urls::local_iri_to_uri`), as Flask does with every `Location`: a `next`
   of `/tickets/a b` redirects to `/tickets/a%20b`.
 
+The approver's pages and form actions (slice S5) are `routes::ui`: `GET /`,
+`GET`/`POST /tickets` (the list with its `view` and the manual ticket form of
+`manual_form`, re-rendered with status 400 and the error flashed when the
+store rejects it), `GET /tickets/{id}` (the session cards and log previews of
+`step_logs`), `GET /tickets/{id}/steps/{n}/log` (Werkzeug's `<int:n>`: any
+Unicode decimal digits through `int()`, other segments 404 for every method)
+and the `POST` actions approve, reject, cancel, archive and unarchive (the
+form parsed by the UI-CSRF layer, errors flashed by the error mapping).
+Python's `int()` of step indexes is kept exact (`pyint`).
+
 Tests (`crates/opsgate-web/tests/`) call the application in-process with
 `tower::ServiceExt::oneshot` from a chosen peer address and keep the session
 cookie in a jar (`tests/common`). `opsgate_web::testing::approver_session`
@@ -261,7 +272,9 @@ writes any session content and `testing::session_from_response` reads the one
 a response set. The S4b tests sign in through the form (`TestApp::login`),
 run two application processes on one database (`TestApp::sharing`: a second
 browser, a restart, a password change) and drive the throttle with a fake
-clock (`TestApp::with_throttle`).
+clock (`TestApp::with_throttle`). Page tests read forms, fields, links
+and flashes with the `html5gum` tokenizer (`tests/common/html.rs`), never
+bytes.
 
 ## CI
 
@@ -419,10 +432,11 @@ Rust switch-on: every scenario carries `@pytest.mark.rust(<slices>)` naming the
 web slices it needs; against Rust it runs only when all of them are listed in
 `harness.RUST_SLICES_LANDED`, otherwise it is skipped with the missing slices
 as the reason. S4a, S4b and S5 each add their id there when they merge; S4a
-(bearer routes, health, gate, headers, routing, the login page) and S4b
+(bearer routes, health, gate, headers, routing, the login page), S4b
 (sign-in, logout and revocation, the throttle, both CSRF mechanisms, the
 approver's API actions, the ticket lifecycle, claims of approved tickets,
-cross-implementation databases and races) are listed. `test_cross.py` runs every scenario with the
+cross-implementation databases and races) and S5 (the ticket pages and the
+approver's form actions) are listed. `test_cross.py` runs every scenario with the
 peer implementation `python` and `rust`, so a Python run covers python→python
 and python→rust.
 

@@ -4,6 +4,17 @@
 
 ### Development
 
+- Rust port slice S5 (`rust/crates/opsgate-web`): `opsgate serve` answers the approver's pages and
+  form actions — `GET /`, the ticket list with its `view` filter and the manual ticket form
+  (multi-step and legacy fields, role defaults and prompt scaffolding, the operator reviewer floor,
+  `max_duration_seconds` and `context_json` checks, the form shown again with status 400 and the
+  error flashed), the detail page with step sessions and bounded log previews, the step log page
+  with path containment, and approve, reject, cancel, archive and unarchive with their redirects.
+  Redirect targets are quoted as Werkzeug quotes them. Corrects the plan: Werkzeug's `<int:n>`
+  takes any Unicode decimal digits; D-18 now also covers the actions' `redirect_to`. The page tests
+  read forms and links with the `html5gum` tokenizer (dev dependency). The authenticated UI
+  scenarios of the API parity harness run against Rust once S4b has landed too. Nothing deploys or
+  runs the Rust API yet; the Python implementation is unchanged.
 - Rust port slice S4b (`rust/crates/opsgate-web`): `opsgate serve` signs the approver in and out
   and serves the approver's API — `POST /login` (sanitised `next`, the bcrypt check reproducing pyca
   bcrypt 4.3's `checkpw` over the same `bcrypt` crate, always run, the in-memory login throttle of 5

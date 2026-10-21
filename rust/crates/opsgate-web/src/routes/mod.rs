@@ -1,7 +1,8 @@
 //! The routes of PLAN.md 4.3. Slice S4a: the bearer routes and health
 //! ([`api`]) and the login page ([`login`]); slice S4b: `POST /login`,
-//! `POST /logout` and the approver's API actions; slice S5 adds its routes
-//! here. Every route sits behind the layers of [`crate::app`].
+//! `POST /logout` and the approver's API actions; slice S5: the approver's
+//! pages and form actions ([`ui`]). Every route sits behind the layers of
+//! [`crate::app`].
 //!
 //! Routing follows Werkzeug's rules: `{ticket_id}` is one path segment, no
 //! trailing-slash variants, `HEAD` answers every `GET` route, an unknown
@@ -16,6 +17,7 @@
 
 pub mod api;
 pub mod login;
+pub mod ui;
 
 use std::sync::LazyLock;
 
@@ -37,11 +39,11 @@ use crate::path::{PATH_SAFE, RequestPath};
 use crate::state::AppState;
 
 /// The `Allow` value of a `GET` route.
-const GET_ALLOW: &str = "GET, HEAD, OPTIONS";
+pub(crate) const GET_ALLOW: &str = "GET, HEAD, OPTIONS";
 /// The `Allow` value of a `POST` route.
-const POST_ALLOW: &str = "OPTIONS, POST";
+pub(crate) const POST_ALLOW: &str = "OPTIONS, POST";
 /// The `Allow` value of a `GET` and `POST` route.
-const GET_POST_ALLOW: &str = "GET, HEAD, OPTIONS, POST";
+pub(crate) const GET_POST_ALLOW: &str = "GET, HEAD, OPTIONS, POST";
 
 /// The routes with their state.
 pub fn router(state: AppState) -> Router {
@@ -90,7 +92,8 @@ pub fn router(state: AppState) -> Router {
                 GET_POST_ALLOW,
             ),
         )
-        .route("/logout", allow(post(login::logout), POST_ALLOW));
+        .route("/logout", allow(post(login::logout), POST_ALLOW))
+        .merge(ui::routes());
     let probe = routes.clone().with_state(state.clone());
     routes
         .fallback(move |request: Request| not_found(probe.clone(), request))

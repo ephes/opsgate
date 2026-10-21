@@ -11,8 +11,10 @@
 //! `POST /login` with the bcrypt check and the login throttle ([`password`],
 //! [`throttle`]), `POST /logout` with the revocation, the API-CSRF check
 //! ([`csrf::enforce_api_session_csrf`]) and the cookie-authenticated API
-//! actions; slice S5 adds its routes to [`routes::router`] and gets every
-//! layer for free.
+//! actions; slice S5 the approver's pages and form actions ([`routes::ui`]:
+//! the ticket list with the manual ticket form ([`manual_form`]), the detail
+//! and step log pages ([`step_logs`]), approve/reject/cancel/archive/
+//! unarchive). Every route gets every layer for free.
 
 pub mod body;
 pub mod client;
@@ -21,11 +23,14 @@ pub mod error;
 pub mod form;
 pub mod gate;
 pub mod headers;
+pub mod manual_form;
 pub mod password;
 pub mod path;
+pub mod pyint;
 pub mod routes;
 pub mod session;
 pub mod state;
+pub mod step_logs;
 pub mod templates;
 pub mod testing;
 pub mod throttle;

@@ -24,6 +24,13 @@
   Python-generated fixtures `checksum.json`, `float_repr.json`, `storage_json.json`, `datetime.json`
   and `pystr.json`; `datetime.json` is generated and checked only by Python 3.14 (`PYTHON_GATED`),
   other interpreters skip it.
+- Add the black-box API parity harness `rust/parity/api` (plan slice S7a): a pytest suite (new dev
+  dependency `httpx`) that starts a real `serve` process per scenario and runs more than 500
+  scenarios ported from `tests/test_api.py` plus contract cases, writes normalised records, and
+  diffs a Python and a Rust run (`compare.py`, `just rs-parity-api`). It is green against Python;
+  scenarios switch on for Rust as the web slices land. New CI job `parity-api`. Its forwarded-header
+  scenarios confirm against a running server that `X-Forwarded-*` never reaches the app (plan
+  4.4). No runtime change.
 
 ### Documentation
 

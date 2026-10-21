@@ -8,8 +8,9 @@ mapping of every Python test to its Rust test is in [`TESTMAP.md`](TESTMAP.md).
 **Status:** foundations (slice S1) and part of the core library (S2a:
 canonical JSON and the payload checksum, stored-JSON text, Python `str()`
 and `lower`, timestamps; S2b: settings, log previews, path containment, proxy
-header selection). The workspace, CI, the fixture generator and the
-command-line skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
+header selection) and the black-box API parity harness (S7a, green against
+Python). The workspace, CI, the fixture generator and the command-line
+skeleton exist; every command is still a stub that exits 2. The Python package in `src/opsgate` is the production
 implementation and the oracle for the contract. Nothing deploys or runs this
 code yet.
 
@@ -38,6 +39,8 @@ rust/
     storage_json.json   stored JSON column text (4.8)
     datetime.json       timestamp parsing and formatting, Python 3.14 (4.9)
     pystr.json          str() of JSON scalars, strip, lower (4.6)
+  parity/
+    api/                black-box API parity harness (S7a, PLAN.md 7.3)
 ```
 
 `opsgate-core` has the modules of S2a: `json` (parsing like `json.loads`,
@@ -70,11 +73,15 @@ Run from the repository root:
 | `just rs-fmt` | `cargo fmt --all` |
 | `just rs-fixtures` | regenerate `rust/fixtures` from the Python implementation |
 | `just rs-build` | release build for this host (`rust/target/release/opsgate`) |
+| `just rs-parity-api` | API parity harness against Python and Rust, then the record diff (see below) |
 
-The parity harnesses get their recipes (`rs-parity-api`, `rs-parity-runner`)
-with slices S7a and S7b. `just check` stays the Python check.
+The runner parity harness gets its recipe (`rs-parity-runner`) with slice
+S7b. `just check` stays the Python check.
 
 ## CI
+
+The `parity-api` job runs the API parity harness against Python (lint,
+typecheck, scenarios); slice S4a adds the Rust leg.
 
 The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 `macos-15`: rustfmt, clippy, `cargo deny --locked check` (pinned, sha256
@@ -120,6 +127,66 @@ UV_PYTHON=3.14 just rs-fixtures
 | `schema.sql` | `sqlite_master` of a database initialised by `OpsGateService.init_db`, tables then indexes; runs as one script | schema contract test (S3a) |
 | `settings.json` | environment sets (with optional env file) → `load_settings` / `load_runner_settings` result or error, plus `load_env_file` parsing cases; `rust_error` gives the Rust message where Python fails with a traceback or diverges (D-8, D-10) | `opsgate-core/tests/settings_fixture.rs` |
 | `storage_json.json` | JSON text → stored column text `json.dumps(value, sort_keys=True)` | `opsgate-core/tests/checksum_fixture.rs` |
+
+## API parity harness
+
+`parity/api/` (PLAN.md 7.3) is a pytest suite that treats an implementation as
+a black box: every scenario starts its own `serve` process (`python -m opsgate
+serve` or `target/release/opsgate serve`, override with `$OPSGATE_RUST_BIN`)
+on a free loopback port with a generated env file, a temporary database and a
+temporary execution data directory, and talks to it over HTTP with `httpx`.
+Scenarios are ported from `tests/test_api.py` (same test names where they
+exist) and add contract cases of the plan: validation order, JSON body rules,
+explicit `null`/`false`/`0` runner fields, forwarded headers, cookie
+attributes, cross-implementation databases and races.
+
+```bash
+uv run pytest rust/parity/api -rs                        # against Python (default; or OPSGATE_IMPL=python)
+uv run pytest rust/parity/api -rs --impl rust            # against the Rust release binary
+uv run pytest rust/parity/api --records DIR              # also write one normalised record per scenario
+uv run python rust/parity/api/compare.py DIR_A DIR_B     # diff two record sets; exit 1 on unexplained differences
+just rs-parity-api                                       # build, both runs, diff (records in target/parity-api/)
+```
+
+| File | Content |
+| --- | --- |
+| `harness.py` | process start/stop, settings profiles, HTTP clients (security headers checked on every response), page facts, normaliser, records, database snapshots; `RUST_SLICES_LANDED` |
+| `conftest.py` | `--impl`, `--records`, `--target`; fixtures `stack`, `api`, `anon`, `approver`, `db`, `rec` |
+| `compare.py` | record diff (standard library only) |
+| `test_bearer_api.py` | health, create/read, validation, JSON body rules, bearer tokens |
+| `test_lifecycle.py` | approve, reject, cancel, archive, unarchive through the cookie API |
+| `test_runner_api.py` | claim, stored-JSON validation, tamper check, heartbeats, runner status |
+| `test_auth.py` | login, next, sessions, revocation, throttle, both CSRF mechanisms |
+| `test_gate.py` | network gate, forwarded headers, routing, security headers |
+| `test_ui.py` | pages, UI actions, manual ticket form, log previews and step logs |
+| `test_cross.py` | cross-implementation databases, API switch, races |
+
+A record holds, per exchange, the status, `error` code, JSON body (ticket ids
+as `<id1>`…, generated timestamps as `<ts>`, the scenario's temp directory as
+`<tmp>`, error `message` texts masked: they are P2), redirect target, flash
+messages, the forms and internal links of HTML pages and the session cookie
+attributes, plus a snapshot of every table (JSON columns parsed). HTML bytes
+are never compared. A scenario that covers a P3 divergence calls
+`rec.divergence("D-n")`; `compare.py` then reports a difference as explained.
+
+Rust switch-on: every scenario carries `@pytest.mark.rust(<slices>)` naming the
+web slices it needs; against Rust it runs only when all of them are listed in
+`harness.RUST_SLICES_LANDED`, otherwise it is skipped with the missing slices
+as the reason. S4a, S4b and S5 each add their id there (and S4a the Rust leg
+of the CI job) when they merge. `test_cross.py` runs every scenario with the
+peer implementation `python` and `rust`, so a Python run covers python→python
+and python→rust.
+
+Scenarios marked `local` need their own process (settings profile, restart,
+database or artifact access, claims on an empty queue, throttle state). The
+others also run against an already running API, e.g. the shadow of PLAN.md
+11.2: `--target http://127.0.0.1:8712 --target-env <shadow api env file>
+[--target-impl rust]` with the approver password in
+`$OPSGATE_PARITY_UI_PASSWORD`. Their `task_ref`s are fixed (so records stay
+comparable), so each such run needs a fresh database copy.
+
+`test_login_throttle_is_per_client_ip` connects from `127.0.0.2`, which Linux
+provides and macOS does not; it is skipped on macOS and runs in CI.
 
 ## Command line
 

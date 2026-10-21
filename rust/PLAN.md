@@ -441,7 +441,8 @@ every `GET` route.
    proxy-header middleware (`trusted_proxy=None`,
    `clear_untrusted_proxy_headers=True`), which deletes `X-Forwarded-For`,
    `-Host`, `-Proto`, `-Port`, `-By` and `Forwarded` before `ProxyFix` runs
-   (checked against a running waitress server, S2b). So the client address is
+   (checked against a running waitress server, S2b, and black-box by
+   `rust/parity/api/test_gate.py`, S7a). So the client address is
    always the socket peer, the scheme the connection's (`http`) and the host
    the `Host` header (waitress joins repeated lines with `", "`, latin-1), with
    or without `OPSGATE_TRUST_PROXY_HEADERS`. That is the P1 contract
@@ -556,7 +557,7 @@ see D-1).
   non-empty → equal (constant-time bytes) passes, else 403 `invalid_csrf`; if
   no header: `Sec-Fetch-Site` present → passes iff stripped/lowercased equals
   `same-origin`; else `Origin` present → passes iff lowercased equals
-  `<scheme>://<host>` of the request (after proxy fix); else 403
+  `<scheme>://<host>` of the request (`http` and the `Host` header, 4.4); else 403
   `csrf_required`.
 
 ### 4.6 JSON contract
@@ -1204,19 +1205,35 @@ rs-fixtures`. Every other fixture is identical on 3.11 to 3.15.
 
 pytest suite (dev dependency `httpx`) that starts an implementation as a
 subprocess on a free loopback port with a generated env file and a temp
-database (`OPSGATE_IMPL=python|rust`), then runs scenarios ported from
+database (`--impl python|rust`, default `$OPSGATE_IMPL`), then runs scenarios ported from
 `tests/test_api.py` and the races where they are observable over HTTP:
 create/dedupe/expiry/approve/reject/cancel/archive/unarchive/claim/status
-flows, every error code, gate and proxy cases (`trust_proxy_headers` with
-`X-Forwarded-*`: ignored by both, 4.4), login/throttle/logout/generation, both CSRF mechanisms,
-security headers, manual form, log previews against a prepared artifact tree.
+flows, every error code, gate and forwarded-header cases (`trust_proxy_headers`
+with `X-Forwarded-*`, which never reach the app, 4.4), login/throttle/logout/generation, both CSRF mechanisms,
+security headers (checked on every response), manual form, log previews against a prepared artifact tree.
+Scenarios prepare state the way the Python tests do (direct SQLite updates
+between requests, artifact files); the CSRF token comes from a rendered form,
+authentication is observed through the API instead of the Flask session.
 Each scenario records (status, `error`, normalised JSON, redirect target,
-flash texts via the next page, normalised DB snapshot: ids mapped, timestamps
-masked, JSON columns parsed). `just rs-parity-api` runs the suite against both
-and diffs the records; CI runs it on every push (Python always; Rust once S4a
-is merged). Cross-implementation DB scenarios: tickets created/approved by
-Python, claimed by Rust (checksum, 4.8) and vice versa; restart on the other
-implementation's database (schema no-op, generation kept).
+flash texts via the next page, the forms and internal links of every page,
+session cookie attributes, normalised DB snapshot: ids mapped, timestamps
+masked, temp paths masked, JSON columns parsed, error `message` texts masked as
+P2). `just rs-parity-api` runs the suite against both and diffs the records
+(`compare.py`; scenarios that name a P3 divergence are reported as explained);
+CI runs it on every push (job `parity-api`: Python always; Rust once S4a
+is merged). Every scenario names the Rust slices it needs
+(`@pytest.mark.rust(...)`); it runs against Rust once all of them are in
+`harness.RUST_SLICES_LANDED`, which each web slice extends when it merges.
+Cross-implementation DB scenarios: tickets created/approved by
+Python, claimed by Rust (checksum, 4.8, with production-shaped float contexts) and vice versa; restart on the other
+implementation's database (schema no-op, generation kept); a running ticket
+keeps reporting across an API switch. Races: double approve, approve against
+cancel/reject, cancel against runner completion, concurrent claims (one
+winner each; the losing code may be `invalid_state` or `state_changed`).
+Against an already running API (`--target URL --target-env FILE`, password in
+`$OPSGATE_PARITY_UI_PASSWORD`; the shadow of 11.2) only the scenarios that need
+no own process, database or artifact access run (`local` marker); scenario
+`task_ref`s are fixed, so each such run needs a fresh database copy.
 
 ### 7.4 Runner parity harness (`rust/parity/runner/`, black box)
 
@@ -1251,7 +1268,7 @@ harness column says whether a black-box scenario also covers it.
 the release binary for each runner OS; `deny.toml` checks the release target
 `aarch64-apple-darwin` only, so both legs check the same graph), release
 build, `opsgate --version` smoke test against the checked-out commit,
-binary-size report; and a `parity` job running 7.3/7.4. `justfile`:
+binary-size report; and parity jobs running 7.3 (`parity-api`, S7a) and 7.4 (S7b). `justfile`:
 `rs-check` (fmt, clippy, test), `rs-test`, `rs-deny`, `rs-fmt`,
 `rs-fixtures`, `rs-build` (S1), `rs-parity-api` (S7a), `rs-parity-runner`
 (S7b). The Python jobs stay unchanged apart from the fixture drift test,
@@ -1565,7 +1582,7 @@ run with `just test` as today).
 | S2c | Core validation: ticket normalisation of 4.7.1 steps 1–10, plan/policy/merge/enforce, duration, D-2/D-3 rules; fixture `validation` | opsgate | S2a | yes (S2b, S6a) | 3 | no |
 | S3a | Store I: DDL verbatim, connection setup, `init_db`, session-state sync/generation/revoke, create (lazy expiry + dedupe + unique mapping), get/list/serialise, health, `check-db`; schema contract test | opsgate | S2a, S2b, S2c | yes (S6a/S6b) | 3 | no |
 | S3b | Store II: approve, reject, cancel, archive, unarchive, claim (validation, tamper, expiry loop, heartbeat), runner status; race tests | opsgate | S3a | yes (S6b) | 4 | no |
-| S4a | Web I (shared foundations): `serve`, router, proxy fix, gate, security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the UI-CSRF layer with `ensure_csrf_token` (4.5.4, applies to every non-API `POST` incl. routes added later), the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
+| S4a | Web I (shared foundations): `serve`, router, gate (forwarded headers ignored, 4.4), security headers, error mapping (API JSON, UI flash + redirect, `forbidden.html`), JSON body rules, body limit, session cookie storage + approver extractor + flashes + a test helper that mints an authenticated session, the UI-CSRF layer with `ensure_csrf_token` (4.5.4, applies to every non-API `POST` incl. routes added later), the minijinja environment with the embedded templates, globals and filters (6.3) and the `GET/HEAD /login` page, bearer routes (create, get incl. approver session, runner claim/status, health) | opsgate | S3b | yes (S6b) | 4 | no |
 | S4b | Web II: `POST /login` (next, bcrypt, throttle), logout/revocation, API-CSRF, cookie-authenticated API actions | opsgate | S4a | yes (S5) | 4 | no |
 | S5 | Web III: remaining UI pages and UI action routes, manual form, log views (rendered through the S4a environment; authenticated in tests through the S4a session helper with the session's CSRF token in forms) | opsgate | S4a | yes (S4b) | 4 | no |
 | S6a | Runner I: API client, tmux adapter, artifacts/atomic writes, commands/script, executor (fresh path, heartbeats, cancel, timeout, post-status retry) | opsgate | S2a, S2b | yes (S2c, S3-, S4-, S5) | 4 | no |

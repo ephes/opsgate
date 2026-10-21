@@ -8,7 +8,8 @@ path (`crates/<crate>/…::<test>`) and checks the row (`<slice> ✓`). Columns:
 - **Rust target**: planned module (`core` = `opsgate-core`, `store` =
   `opsgate-store`, `web` = `opsgate-web`, `runner` = `opsgate-runner`).
 - **Parity**: `A` = also covered by a black-box scenario of the API parity
-  harness (`rust/parity/api`, plan 7.3), `R` = runner parity harness
+  harness (`rust/parity/api`, plan 7.3; same test name where the scenario
+  ports it, races and the cases the HTTP surface cannot reach are `-`), `R` = runner parity harness
   (`rust/parity/runner`, plan 7.4), `-` = unit level only (pure function,
   pinned by a fixture instead).
 
@@ -114,12 +115,12 @@ section ("Rust-only tests") with their paths.
 | `test_anonymous_logout_does_not_revoke_sessions` | `web::session` | S4b | A |
 | `test_password_change_revokes_existing_sessions` | `web::session` | S4b | A |
 | `test_restart_with_same_password_keeps_sessions` | `web::session` | S4b | A |
-| `test_session_without_generation_is_treated_as_logged_out` | `web::session` | S4b | A |
+| `test_session_without_generation_is_treated_as_logged_out` | `web::session` | S4b | - |
 | `test_login_locks_after_repeated_failures` | `web::login::throttle` | S4b | A |
 | `test_unknown_username_counts_toward_throttle` | `web::login::throttle` | S4b | A |
 | `test_successful_login_resets_failure_count` | `web::login::throttle` | S4b | A |
 | `test_login_throttle_is_per_client_ip` | `web::login::throttle` | S4b | A |
-| `test_login_throttle_bounds_tracked_clients` | `web::login::throttle` | S4b | A |
+| `test_login_throttle_bounds_tracked_clients` | `web::login::throttle` | S4b | - |
 | `test_api_bearer_endpoints_reject_non_ascii_token` | `web::auth` | S4a | A |
 | `test_api_session_actions_reject_non_ascii_csrf_header` | `web::csrf` | S4b | A |
 | `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
@@ -145,9 +146,9 @@ section ("Rust-only tests") with their paths.
 | `test_ticket_duration_rejects_json_exponent_overflow` | `core::validate` | S2c | A |
 | `test_manual_ticket_duration_rejects_invalid_values` | `web::ui::manual_form` | S5 | A |
 | `test_direct_settings_duration_default_is_validated` | `crates/opsgate-core/tests/settings_fixture.rs::direct_settings_duration_default_is_validated` | S2b ✓ | - |
-| `test_ticket_text_rejects_unpaired_surrogates` | `core::validate (P3 D-5: Rust answers invalid_json for lone surrogates)` | S2c | A |
+| `test_ticket_text_rejects_unpaired_surrogates` | `core::validate (P3 D-2: Rust answers invalid_json for lone surrogates)` | S2c | A |
 | `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `core::validate + store::claim` | S3b | A |
-| `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `core::validate (P3 D-5: Rust answers invalid_json for lone surrogates)` | S2c | A |
+| `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `core::validate (P3 D-2: Rust answers invalid_json for lone surrogates)` | S2c | - |
 
 ### `tests/test_ticket_transition_races.py`
 
@@ -157,11 +158,11 @@ section ("Rust-only tests") with their paths.
 | `test_cancel_during_runner_completion_is_reported` | `store::races (two connections, hook between read and write)` | S3b | A |
 | `test_double_approve_has_one_winner` | `store::races (two connections, hook between read and write)` | S3b | A |
 | `test_reject_during_approve_is_not_overwritten` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_approve_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_runner_completion_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_lifecycle_action_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_archive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | A |
-| `test_unarchive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | A |
+| `test_approve_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
+| `test_runner_completion_with_stale_read_after_cancel_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
+| `test_lifecycle_action_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
+| `test_archive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
+| `test_unarchive_with_stale_read_returns_state_changed` | `store::races (two connections, hook between read and write)` | S3b | - |
 
 ### `tests/test_config.py`
 
@@ -249,6 +250,7 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db`, usage errors exit 2, `--version` text (4.1, D-15) | S1 |
 | `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2, usage errors exit 2, `--help` | S1 |
 | `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
+| `parity/api/` (pytest, `just rs-parity-api`) | black-box API parity harness: 520+ scenarios against a real `serve` process per scenario (Python green; Rust switched on per landed slice through `harness.RUST_SLICES_LANDED`), records and `compare.py` diff, cross-implementation databases, races over HTTP, `--target` mode for the shadow (7.3) | S7a |
 | `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |
 | `crates/opsgate-core/tests/settings_fixture.rs` | `settings.json`: 490 environment sets (every variable and rule of 4.2, check order, env-file override, D-8/D-10 cases) and 21 env-file parsing cases; coverage of every 4.2 variable; the merged environment children get (4.13.8) | S2b |
 | `crates/opsgate-core/tests/log_preview_fixture.rs` | `log_preview.json`: preview and step log for 31 contents (window and line cuts, CR/LF forms, invalid UTF-8 replacement, 2 MiB boundary) (4.12) | S2b |

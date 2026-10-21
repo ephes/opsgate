@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Documentation
+
+- Add the Rust port plan (`rust/PLAN.md`) and its test map (`rust/TESTMAP.md`): contract,
+  divergences, slices, release, role switch, shadow run, cutover and rollback for replacing the
+  Python API/UI and runner processes. No runtime change.
+
 ### Security
 
 - Refresh the development lock to pytest 9.1.1 and Pygments 2.21.0 to resolve known

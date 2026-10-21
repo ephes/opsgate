@@ -73,6 +73,7 @@ CSP_DIRECTIVES = {"frame-ancestors 'none'", "base-uri 'self'", "form-action 'sel
 
 UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
+FRAMEWORK_STATUSES = frozenset({404, 405, 413, 500})
 WRITTEN_TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{6})?Z")
 
 
@@ -419,14 +420,17 @@ class Recorder:
     def exchange(self, who: str, method: str, path: str, resp: Resp) -> None:
         entry: dict[str, Any] = {"who": who, "req": f"{method} {self.norm.text(path)}", "status": resp.status}
         content_type = resp.headers.get("content-type", "")
-        if content_type.startswith("application/json"):
+        if resp.status in FRAMEWORK_STATUSES and resp.error is None:
+            # Unknown route, wrong method, unhandled error: the framework's body is D-9 (P2), only the status counts.
+            entry["body"] = "<framework response>"
+        elif content_type.startswith("application/json"):
             try:
                 entry["json"] = self.norm.value(resp.json())
             except ValueError:
                 entry["json"] = "<undecodable>"
         if resp.location is not None:
             entry["location"] = self.norm.text(resp.location)
-        if resp.facts is not None:
+        if resp.facts is not None and "body" not in entry:
             entry["flashes"] = [[cat, self.norm.text(text)] for cat, text in resp.facts.flashes]
             entry["forms"] = [
                 {**form, "action": self.norm.text(form["action"]), "fields": sorted(set(form["fields"]))}

@@ -50,7 +50,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--target-impl",
         choices=IMPLS,
         default=None,
-        help="implementation behind --target (defaults to --impl)",
+        help="implementation behind --target (defaults to --impl); selects the expectations and Rust gating",
     )
 
 
@@ -78,8 +78,15 @@ def missing_rust_slices(item: pytest.Item) -> list[str]:
     return sorted(set(required_slices(item)) - RUST_SLICES_LANDED)
 
 
+def effective_impl(config: pytest.Config) -> str:
+    """The implementation under test: ``--target-impl`` for a ``--target`` run, else ``--impl``."""
+    if config.getoption("--target") is not None and config.getoption("--target-impl"):
+        return str(config.getoption("--target-impl"))
+    return str(config.getoption("--impl"))
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    impl = config.getoption("--impl")
+    impl = effective_impl(config)
     external = config.getoption("--target") is not None
     for item in items:
         missing = missing_rust_slices(item)
@@ -123,7 +130,7 @@ def external_target(config: pytest.Config) -> Target | None:
         raise pytest.UsageError("--target needs --target-env and $OPSGATE_PARITY_UI_PASSWORD")
     env = read_env_file(env_path)
     return Target(
-        impl=config.getoption("--target-impl") or config.getoption("--impl"),
+        impl=effective_impl(config),
         base_url=base_url.rstrip("/"),
         password=password,
         username=env.get("OPSGATE_UI_USERNAME", ""),
@@ -245,7 +252,7 @@ class Stack:
 
 @pytest.fixture(scope="session")
 def impl(request: pytest.FixtureRequest) -> str:
-    return str(request.config.getoption("--impl"))
+    return effective_impl(request.config)
 
 
 @pytest.fixture

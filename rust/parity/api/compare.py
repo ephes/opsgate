@@ -10,7 +10,7 @@ equal records, unless the scenario names a P3 divergence (PLAN.md section 5;
 ``Recorder.divergence``): then the difference is reported as explained. A
 scenario recorded by only one run (the other skipped it, e.g. because the
 Rust slice has not landed) is listed, not failed. A scenario that did not
-pass in a run fails the comparison. Exit status: 0 when no unexplained
+pass in a run (also one recorded by only one run) fails the comparison. Exit status: 0 when no unexplained
 difference was found, 1 otherwise. Standard library only.
 """
 
@@ -65,12 +65,14 @@ def compare(first: Path, second: Path) -> dict[str, Any]:
         "only_first": sorted(set(a) - set(b)),
         "only_second": sorted(set(b) - set(a)),
     }
+    for name in sorted(set(a) | set(b)):
+        outcomes = (a.get(name, {}).get("outcome", "absent"), b.get(name, {}).get("outcome", "absent"))
+        if any(outcome not in {"passed", "absent"} for outcome in outcomes):
+            report["not_passed"][name] = outcomes
     for name in sorted(set(a) & set(b)):
         left, right = a[name], b[name]
         report["compared"] += 1
-        outcomes = (left.get("outcome"), right.get("outcome"))
-        if outcomes != ("passed", "passed"):
-            report["not_passed"][name] = outcomes
+        if name in report["not_passed"]:
             continue
         found = differences(
             {key: left.get(key) for key in ("steps", "db")}, {key: right.get(key) for key in ("steps", "db")}

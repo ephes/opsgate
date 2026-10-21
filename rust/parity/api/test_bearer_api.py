@@ -179,12 +179,14 @@ def test_ticket_validation_order_and_normalisation(anon: Browser, changes: dict[
 @pytest.mark.parametrize("field", ["title", "summary", "task_ref", "source"])
 @pytest.mark.parametrize("value", [[1, "a"], {"k": "v"}])
 def test_text_fields_with_arrays_or_objects(anon: Browser, rec: Recorder, impl: str, field: str, value: Any) -> None:
-    # D-3: Python stores the repr of the container (source then mismatches); Rust answers 400.
-    rec.divergence("D-3")
     resp = post_ticket(anon, ticket_payload(**{field: value}))
     if field == "source":
-        assert (resp.status, resp.error) == ((403, "source_mismatch") if impl == "python" else (400, "invalid_ticket"))
-    elif impl == "python":
+        # The repr of a container never equals the source: both answer source_mismatch (PLAN.md D-3).
+        assert (resp.status, resp.error) == (403, "source_mismatch")
+        return
+    # D-3: Python stores the repr of the container; Rust answers 400.
+    rec.divergence("D-3")
+    if impl == "python":
         assert resp.status == 201
         assert resp.json()[field] == str(value)
     else:

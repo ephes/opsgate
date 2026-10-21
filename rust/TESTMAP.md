@@ -64,10 +64,10 @@ section ("Rust-only tests") with their paths.
 | `test_manual_ticket_creation_requires_csrf_token` | `web::ui::manual_form` | S5 | A |
 | `test_manual_ticket_creation_rejects_tampered_csrf_token` | `web::ui::manual_form` | S5 | A |
 | `test_ui_ticket_action_failure_redirects_back_to_ticket_detail` | `web::ui` | S5 | A |
-| `test_api_ticket_creation_rejects_unsupported_agent` | `core::validate` | S2c | A |
+| `test_api_ticket_creation_rejects_unsupported_agent` | `crates/opsgate-core/tests/validation.rs::test_api_ticket_creation_rejects_unsupported_agent` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_approval_revalidates_stored_agent_allowlist` | `store::transitions` | S3b | A |
 | `test_approval_revalidates_stored_reviewer_requirement` | `store::transitions` | S3b | A |
-| `test_api_ticket_creation_normalizes_agent_case` | `core::validate` | S2c | A |
+| `test_api_ticket_creation_normalizes_agent_case` | `crates/opsgate-core/tests/validation.rs::test_api_ticket_creation_normalizes_agent_case` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_runner_claim_fails_invalid_stored_agent_and_moves_on` | `store::claim` | S3b | A |
 | `test_runner_claim_isolates_corrupt_stored_json` | `store::claim` | S3b | A |
 | `test_runner_claim_accepts_stored_json_at_depth_limit` | `store::claim` | S3b | A |
@@ -85,8 +85,8 @@ section ("Rust-only tests") with their paths.
 | `test_dedupe_expires_stale_pending_ticket_before_replacement_submit` | `store::create` | S3a | A |
 | `test_dedupe_expires_stale_approved_ticket_before_replacement_submit` | `store::create + store::transitions` | S3b | A |
 | `test_dedupe_not_applied_when_task_ref_missing` | `store::create` | S3a | A |
-| `test_operator_submitter_may_explicitly_require_reviewer_step` | `core::validate` | S2c | A |
-| `test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` | `core::validate` | S2c | A |
+| `test_operator_submitter_may_explicitly_require_reviewer_step` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_may_explicitly_require_reviewer_step` (cases also in fixture `validation.json`) | S2c ✓ | A |
+| `test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` | `crates/opsgate-core/tests/validation.rs::test_operator_submitter_omitted_ticket_policy_defaults_to_no_reviewer_floor` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_lazy_expiry_blocks_approval` | `store::transitions` | S3b | A |
 | `test_approve_and_reject_flow` | `store::transitions` | S3b | A |
 | `test_cancel_flow` | `store::transitions` | S3b | A |
@@ -125,11 +125,11 @@ section ("Rust-only tests") with their paths.
 | `test_api_session_actions_reject_non_ascii_csrf_header` | `web::csrf` | S4b | A |
 | `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
-| `test_api_rejects_non_text_plan_fields` | `core::validate` | S2c | A |
+| `test_api_rejects_non_text_plan_fields` | `crates/opsgate-core/tests/validation.rs::test_api_rejects_non_text_plan_fields` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_claim_rejects_non_text_stored_plan` | `store::claim` | S3b | A |
-| `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half; the `invalid_expires_at` mapping is `core::validate`, S2c) | S2a + S2c | A |
+| `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half, S2a) + `crates/opsgate-core/tests/validation.rs::test_api_rejects_utc_expiry_overflow` (`invalid_expires_at`, S2c) | S2a ✓ + S2c ✓ | A |
 | `test_datetime_overflow_is_value_error` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` | S2a | A |
-| `test_api_accepts_trimmed_plan_and_optional_expiry` | `core::validate` | S2c | A |
+| `test_api_accepts_trimmed_plan_and_optional_expiry` | `crates/opsgate-core/tests/validation.rs::test_api_accepts_trimmed_plan_and_optional_expiry` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ui_pages_cannot_be_framed` | `web::headers` | S4a | A |
 | `test_api_error_and_redirect_responses_carry_security_headers` | `web::headers` | S4a | A |
 | `test_forbidden_network_response_carries_security_headers` | `web::headers` | S4a | A |
@@ -141,14 +141,14 @@ section ("Rust-only tests") with their paths.
 | `test_real_manual_context_nesting_limit` | `web::ui::manual_form` | S5 | A |
 | `test_malformed_required_json_retains_domain_response` | `core::json + web::api` | S4a | A |
 | `test_runner_state_result_matrix` | `store::runner_status` | S3b | A |
-| `test_ticket_duration_rejects_invalid_values` | `core::validate` | S2c | A |
-| `test_ticket_duration_accepts_boundaries` | `core::validate` | S2c | A |
-| `test_ticket_duration_rejects_json_exponent_overflow` | `core::validate` | S2c | A |
+| `test_ticket_duration_rejects_invalid_values` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_invalid_values` (P3 D-2 for the `Infinity` literal: Rust answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | A |
+| `test_ticket_duration_accepts_boundaries` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_accepts_boundaries` (cases also in fixture `validation.json`) | S2c ✓ | A |
+| `test_ticket_duration_rejects_json_exponent_overflow` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_json_exponent_overflow` (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_manual_ticket_duration_rejects_invalid_values` | `web::ui::manual_form` | S5 | A |
 | `test_direct_settings_duration_default_is_validated` | `crates/opsgate-core/tests/settings_fixture.rs::direct_settings_duration_default_is_validated` | S2b ✓ | - |
-| `test_ticket_text_rejects_unpaired_surrogates` | `core::validate (P3 D-2: Rust answers invalid_json for lone surrogates)` | S2c | A |
+| `test_ticket_text_rejects_unpaired_surrogates` | `crates/opsgate-core/tests/validation.rs::test_ticket_text_rejects_unpaired_surrogates` (P3 D-2: Rust answers `invalid_json` for lone surrogates) (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_unicode_text_persists_and_passes_checksum_validation` | `core::validate + store::claim` | S3b | A |
-| `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `core::validate (P3 D-2: Rust answers invalid_json for lone surrogates)` | S2c | - |
+| `test_ticket_creation_metadata_rejects_unpaired_surrogates` | `crates/opsgate-core/tests/validation.rs::test_ticket_creation_metadata_rejects_unpaired_surrogates` (P3 D-2: lone surrogates cannot reach Rust strings; the body path answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | - |
 
 ### `tests/test_ticket_transition_races.py`
 
@@ -272,6 +272,9 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-core/tests/pystr_fixture.rs` | `pystr.json`: `str()` of JSON scalars (D-2/D-3 rejected), `strip`, `lower`, Python's whitespace set over all code points, the non-ASCII characters whose lowercase is ASCII (4.6) | S2a |
 | `crates/opsgate-core/tests/formatter_properties.rs` | property test: canonical and stored texts are ASCII, parse back to the same value and are fixed points (7.1) | S2a |
 | `crates/opsgate-core/src/{json,pytext,time}.rs::tests` (S2a parts) | unit tests: escapes, separators, number classification, 4300-digit limit, BOM and UTF-8 handling of bodies, depth limit at 64 (and serde_json's 128), float `repr` examples, ISO parsing corners | S2a |
+| `crates/opsgate-core/tests/validation_fixture.rs` | `validation.json`: 469 request bodies → the same canonical checksum text and `payload_checksum`, or the same error code, status and (where both stop at the same check) message as `_normalize_new_ticket`; every check of 4.7.1 steps 1–10 and their order (hand cases plus 240 random multi-field mutations), sources and floors, configured default durations; D-2/D-3 cases with the decided Rust result | S2c |
+| `crates/opsgate-core/tests/validation.rs::{normalised_ticket_and_checksum_payload,text_field_divergences}` | the normalised fields and the checksum payload; D-2/D-3 of the text fields, `source` and `expires_at` containers answered as Python does | S2c |
+| `crates/opsgate-core/src/validate.rs::tests` | Python truthiness of stored policies (approval, 4.7.2), floor lookup by source (manual tickets), the merge rules | S2c |
 | `tests/test_rust_fixtures.py::test_python_gated_fixtures_follow_the_interpreter` | fixtures gated to another CPython version (`PYTHON_GATED`) are neither written nor checked, and are checked on their own version (7.2) | S2a |
 | `rust/parity/runner/test_runner_execution.py` | runner black box over a fake API (7.4): one/three steps, names and slugs, context and previous summary, agent command lines, env-file keys in the agents' environment (4.13.8), file modes, request shapes, exit-code failure, unsupported agent, invalid plan, timeout, cancel/terminal state during a step, session killed externally, heartbeat cadence, `max_parallel_jobs`, state files | S7b |
 | `rust/parity/runner/test_runner_api_faults.py` | status retry (503, dropped connection), status and heartbeat outages (state kept, live session re-attached), permanent 4xx, 409 conflicts, claim errors and their P1 log lines (4.13.1, 4.15) | S7b |

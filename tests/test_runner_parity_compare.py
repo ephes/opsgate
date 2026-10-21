@@ -94,3 +94,78 @@ def test_every_baseline_is_checked(tmp_path: Path, capsys: pytest.CaptureFixture
     out = capsys.readouterr().out
     assert "s: api=fake runners=python (second baseline" in out and "differs at /a" in out
     assert "t: baseline api=fake runners=python failed" in out
+
+
+def test_complete_fails_on_a_skipped_stack(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    python = write(tmp_path / "py", record("s", "fake", ["python"], {"a": 1}))
+    rust = write(
+        tmp_path / "rs",
+        record("s", "fake", ["rust"], {"a": 1}),
+        record("s", "rust", ["rust"], {}, outcome="skipped"),
+    )
+    assert compare.main([str(python), str(rust), "--require-rust"]) == 0
+    assert compare.main([str(python), str(rust), "--require-rust", "--complete"]) == 1
+    assert "s: api=rust runners=rust skipped" in capsys.readouterr().out
+
+
+SKIP_ALL_PLUGIN = '''
+import pytest
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        item.add_marker(pytest.mark.skip(reason="skipped before the scenario's rig exists"))
+'''
+
+
+def test_setup_skips_leave_records_that_complete_rejects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A stack skipped at setup (e.g. a missing Rust slice) writes a ``skipped`` record through the harness's
+    pytest hooks, so ``--complete`` fails instead of silently comparing fewer stacks."""
+    import os
+    import subprocess
+
+    repo = COMPARE.parents[3]
+    (tmp_path / "skip_all_plugin.py").write_text(SKIP_ALL_PLUGIN, encoding="utf-8")
+    # The harness refuses to start without tmux on PATH; nothing runs, so a stand-in is enough.
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "tmux").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (fake_bin / "tmux").chmod(0o755)
+    records = tmp_path / "rust"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+        "PYTHONPATH": str(tmp_path),
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "skip_all_plugin",
+            "-p",
+            "no:cacheprovider",
+            "rust/parity/runner/test_runner_mixed_stacks.py",
+            "--impl",
+            "rust",
+            "--records",
+            str(records),
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    written = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(records.glob("*.json"))]
+    stacks = sorted((r["stack"]["api"], tuple(r["stack"]["runners"])) for r in written)
+    assert stacks == [("python", ("rust",)), ("rust", ("python",)), ("rust", ("rust",))]
+    assert {r["outcome"] for r in written} == {"skipped"}
+    python = write(
+        tmp_path / "python", *(record(r["scenario"], "python", ["python"], {}) for r in written[:1])
+    )
+    assert compare.main([str(python), str(records), "--require-rust", "--complete"]) == 1
+    assert "skipped" in capsys.readouterr().out

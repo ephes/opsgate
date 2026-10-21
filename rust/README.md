@@ -19,14 +19,16 @@ the UI-CSRF check, the template environment, the login page and the bearer
 routes; S4b: `POST /login` with the bcrypt check and the login throttle,
 logout with the server-side revocation, the API-CSRF check and the approver's
 API actions; S5: the ticket list with the manual ticket form, the detail and
-step log pages and the approver's form actions), the black-box API parity harness (S7a, green against Python and, for
-the scenarios of the landed web slices, against Rust) and the black-box runner
-parity harness (S7b, green against the Python runner and, run locally, against
-the Rust runner). `check-db`, `runner` and `serve` work (`serve` answers the
-routes of S4a, S4b and S5);
-`check-config` is still a stub that exits 2. The Python
-package in `src/opsgate` is the production implementation and the oracle for
-the contract. Nothing deploys or runs this code yet.
+step log pages and the approver's form actions), the black-box API parity
+harness (S7a) and the black-box runner parity harness (S7b), and the
+integration (S8): every command works (`serve`, `runner`, `check-config`,
+`check-db`), every Python test of `tests/` is ported (`TESTMAP.md`), and both
+parity harnesses run every scenario against both implementations in CI with
+no unexplained difference — including cross-implementation databases and
+restarts and all four API/runner stacks (Python/Rust × Python/Rust). The
+Python package in `src/opsgate` is the production implementation and the
+oracle for the contract. Nothing deploys or runs this code yet; the release
+(S9) and the role switch (S10) come next.
 
 ## Layout
 
@@ -158,8 +160,8 @@ Run from the repository root:
 | `just rs-fmt` | `cargo fmt --all` |
 | `just rs-fixtures` | regenerate `rust/fixtures` from the Python implementation |
 | `just rs-build` | release build for this host (`rust/target/release/opsgate`) |
-| `just rs-parity-api` | API parity harness against Python and Rust, then the record diff (see below) |
-| `just rs-parity-runner` | runner parity harness against Python, then Rust, then the diff of both (needs tmux) |
+| `just rs-parity-api` | API parity harness against Python and Rust, then the record diff with `--complete` (see below) |
+| `just rs-parity-runner` | runner parity harness against Python, then Rust, then the diff of both with `--require-rust --complete` (needs tmux) |
 
 `just check` stays the Python check.
 
@@ -291,10 +293,13 @@ verified cargo-deny release), `cargo test --locked` (with tmux installed and
 `OPSGATE_REQUIRE_PYTHON=1`), a release build, a
 `--version` smoke test (version and the checked-out commit) and the release
 binary size in the job summary. The fixture drift test runs in the Python job
-as part of pytest. The `parity-runner` job runs the runner parity harness
-against the Python runner on both systems (tmux from apt or Homebrew); its
-Rust leg is switched on by slice S8 (until then run `just rs-parity-runner`
-locally).
+as part of pytest. The `parity-runner` job runs the runner parity harness on
+both systems (tmux from apt or Homebrew): it builds the release binary, runs
+the Python runner, then every stack with Rust (since S8), and diffs both record
+sets with `compare.py --require-rust --complete`. Both parity diffs run with
+`--complete` since S8: a scenario recorded by only one run, or a skipped
+runner stack, fails the job (a runner stack skipped before its scenario starts,
+e.g. for a missing Rust slice, still writes a `skipped` record).
 
 ## Runner parity harness
 
@@ -441,7 +446,10 @@ approver's API actions, the ticket lifecycle, claims of approved tickets,
 cross-implementation databases and races) and S5 (the ticket pages and the
 approver's form actions) are listed. `test_cross.py` runs every scenario with the
 peer implementation `python` and `rust`, so a Python run covers python→python
-and python→rust.
+and python→rust. Since S8 every scenario runs against both implementations, and
+`compare.py --complete` (CI, `just rs-parity-api`) fails on a scenario recorded
+by only one run; `test_login_throttle_is_per_client_ip` is skipped on macOS on
+both sides alike.
 
 Scenarios marked `local` need their own process (settings profile, restart,
 database or artifact access, claims on an empty queue, throttle state). The
@@ -465,9 +473,21 @@ opsgate --version
 ```
 
 No command (plain `opsgate`) means `serve` without overrides, as with
-`python -m opsgate`; the overrides need the `serve` command. `check-config`
-prints `opsgate check-config: not implemented yet` on stderr and exits 2
-until its slice lands; usage errors also exit 2.
+`python -m opsgate`; the overrides need the `serve` command. Usage errors
+exit 2.
+
+`opsgate check-config api|runner` (S8) loads the settings exactly as `serve`
+or `runner` would at startup (process environment, then `OPSGATE_ENV_FILE`,
+PLAN.md 4.2), including the bind port of `serve` and the runner's API client,
+and opens, binds, creates or contacts nothing. Valid settings: exit 0 with
+`opsgate check-config <target>: ok` and a few non-secret values on stdout
+(service name, bind address, database path, execution data directory and
+disable file for `api`; service name, runner host, execution data directory,
+socket label and disable file for `runner`). Invalid settings: one stderr line
+naming the setting, never its value, exit 1. Tokens, the session secret, the
+password hash and the runner's API base URL are never printed. The release
+checks (PLAN.md 9) and the role's install task (10.1) run it against the
+production env files before anything points at a new binary.
 
 `opsgate serve` reads the API settings like `python -m opsgate serve`
 (`OPSGATE_ENV_FILE`, then the variables of PLAN.md 4.2); `--db`,

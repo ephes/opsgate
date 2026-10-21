@@ -515,15 +515,53 @@ def test_ui_ticket_actions_reject_missing_or_non_ascii_form_token(
 
 
 @UI
-def test_ui_post_routes_require_csrf_token(anon: Browser, approver: Browser) -> None:
+@pytest.mark.parametrize("route", ["logout", "approve", "reject", "cancel", "unknown"])
+def test_ui_post_routes_require_csrf_token(anon: Browser, approver: Browser, route: str) -> None:
     ticket_id = create_ticket(anon)
-    resp = approver.post("/logout", data={})
-    assert (resp.status, resp.location) == (302, "/tickets")
+    path, data, location = {
+        "logout": ("/logout", {}, "/tickets"),
+        "approve": (f"/tickets/{ticket_id}/approve", {}, f"/tickets/{ticket_id}"),
+        "reject": (f"/tickets/{ticket_id}/reject", {"reason": "nope"}, f"/tickets/{ticket_id}"),
+        "cancel": (f"/tickets/{ticket_id}/cancel", {"reason": "stop"}, f"/tickets/{ticket_id}"),
+        "unknown": ("/no-such-form", {}, "/tickets"),
+    }[route]
+    resp = approver.post(path, data=data)
+    assert (resp.status, resp.location) == (302, location)
     page = approver.follow(resp)
     assert page.status == 200 and page.flashes == [["error", "Invalid form token"]]
-    resp = approver.post("/no-such-form", data={})
+    assert get_ticket(anon, ticket_id)["state"] == "pending_approval"
+    # The approver is still signed in.
+    assert approver.get("/tickets").status == 200
+
+
+@UI
+def test_ui_archive_routes_require_csrf_token(anon: Browser, approver: Browser) -> None:
+    ticket_id = create_ticket(anon)
+    assert approver.api_action(ticket_id, "reject", {"reason": "done"}).status == 200
+    resp = approver.post(f"/tickets/{ticket_id}/archive", data={})
+    assert (resp.status, resp.location) == (302, f"/tickets/{ticket_id}")
+    assert approver.follow(resp).flashes == [["error", "Invalid form token"]]
+    assert get_ticket(anon, ticket_id)["archived_at"] is None
+    resp = approver.ui_action(ticket_id, "archive")
+    assert (resp.status, resp.location) == (302, f"/tickets/{ticket_id}")
+    assert get_ticket(anon, ticket_id)["archived_at"] is not None
+    resp = approver.post(f"/tickets/{ticket_id}/unarchive", data={})
+    assert (resp.status, resp.location) == (302, f"/tickets/{ticket_id}")
+    assert approver.follow(resp).flashes == [["error", "Invalid form token"]]
+    assert get_ticket(anon, ticket_id)["archived_at"] is not None
+
+
+@UI
+@pytest.mark.parametrize("path", ["/login", "/logout", "/tickets"])
+def test_ui_forms_reject_non_ascii_form_token(stack: Stack, api: Target, anon: Browser, path: str) -> None:
+    browser = anon if path == "/login" else stack.approver(api)
+    if path == "/login":
+        assert browser.get("/login").status == 200
+    resp = browser.post(path, data={"csrf_token": NON_ASCII_TOKEN, "username": api.username, "password": api.password})
     assert (resp.status, resp.location) == (302, "/tickets")
-    assert ticket_id
+    # A signed-in approver stays signed in; the login form signs nobody in.
+    tickets = browser.get("/tickets")
+    assert tickets.status == (302 if path == "/login" else 200)
 
 
 # ------------------------------------------------------------------ log previews and step logs (4.12)

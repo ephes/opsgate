@@ -49,19 +49,19 @@ rs-fixtures: _sync
 rs-build:
     cd rust && cargo build --release --locked
 
-# API parity harness (rust/PLAN.md 7.3): scenarios against Python and Rust `serve`, then the record diff.
-# Scenarios whose Rust slices have not landed are skipped on the Rust side (harness.RUST_SLICES_LANDED).
+# API parity harness (rust/PLAN.md 7.3): scenarios against Python and Rust `serve`, then the record diff
+# (--complete: a scenario recorded by only one run fails, as in CI).
 rs-parity-api *args: _sync
     cd rust && cargo build --release --locked
     rm -rf rust/target/parity-api && mkdir -p rust/target/parity-api/python rust/target/parity-api/rust
     uv run pytest rust/parity/api -rs --impl python --records rust/target/parity-api/python {{args}}
     uv run pytest rust/parity/api -rs --impl rust --records rust/target/parity-api/rust {{args}}
-    uv run python rust/parity/api/compare.py rust/target/parity-api/python rust/target/parity-api/rust --report rust/target/parity-api/report.json
+    uv run python rust/parity/api/compare.py rust/target/parity-api/python rust/target/parity-api/rust --report rust/target/parity-api/report.json --complete
 
-# Runner parity harness (rust/PLAN.md 7.4; needs tmux): the Python runner, then the Rust runner
-# (stacks with a Rust API are skipped until slices S4a, S4b and S5 land), then the diff of both record sets
+# Runner parity harness (rust/PLAN.md 7.4; needs tmux): the Python runner, then every stack with Rust
+# (cross-implementation recovery, the four mixed API/runner stacks), then the diff of both record sets as in CI
 rs-parity-runner: _sync rs-build
     rm -rf rust/target/parity-runner
     uv run pytest rust/parity/runner --impl python --records rust/target/parity-runner/python
     uv run pytest rust/parity/runner --impl rust --records rust/target/parity-runner/rust
-    uv run python rust/parity/runner/compare.py rust/target/parity-runner/python rust/target/parity-runner/rust
+    uv run python rust/parity/runner/compare.py rust/target/parity-runner/python rust/target/parity-runner/rust --require-rust --complete

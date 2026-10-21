@@ -22,9 +22,6 @@ pub const VERSION: &str = concat!(
     ")"
 );
 
-/// Exit code of a command whose slice has not landed yet (PLAN.md 12, S1).
-pub const NOT_IMPLEMENTED: u8 = 2;
-
 /// OpsGate control service (API and web UI) and runner
 #[derive(Debug, Parser)]
 #[command(name = "opsgate", version = VERSION)]
@@ -107,20 +104,13 @@ pub enum ConfigTarget {
     Runner,
 }
 
-/// Runs a parsed command line. A command whose slice has not landed yet
-/// (PLAN.md 12) is a stub: it says so on stderr and exits 2.
+/// Runs a parsed command line.
 pub fn run(cli: Cli) -> ExitCode {
     match cli.into_command() {
+        Command::CheckConfig { target } => crate::check_config::run(target),
         Command::CheckDb { db, dump } => check_db(&db, dump.as_deref()),
         Command::Runner(args) => crate::runner::run(args.once),
         Command::Serve(args) => crate::serve::run(args),
-        command => {
-            eprintln!(
-                "opsgate {}: not implemented yet (rust/PLAN.md section 12)",
-                command.name()
-            );
-            ExitCode::from(NOT_IMPLEMENTED)
-        }
     }
 }
 

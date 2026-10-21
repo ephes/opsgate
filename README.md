@@ -59,9 +59,13 @@ say so explicitly and explain how source-of-truth will be reconciled afterward.
 
 ## Runtime model
 
-- API/UI process is expected to run as `control_service_user`.
-- Runner process is expected to run as `ops`.
+- API/UI process (`python -m opsgate serve`) is expected to run as `control_service_user`.
+- Runner process (`python -m opsgate runner`) is expected to run as `ops`.
 - v1 access assumptions are Tailscale-only context.
+- The API owns the SQLite database; the runner talks to it only over HTTP (`/api/v1/runner/*` and
+  `GET /api/v1/tickets/<id>`) and shares the session artifact tree with the UI's log views.
+- The Rust port (`rust/`, see below) provides the same two processes as `opsgate serve` and `opsgate runner`
+  with the same settings, database and artifacts; each can replace its Python counterpart on its own.
 
 ## Runner restart recovery
 
@@ -127,16 +131,21 @@ Required keys:
 
 Useful keys:
 
-- `OPSGATE_SUBMIT_TOKEN_OPENCLAW` (optional in the current slice)
+- `OPSGATE_SUBMIT_TOKEN_OPENCLAW` (optional; at least 20 characters when set)
+- `OPSGATE_SERVICE_NAME` (default `opsgate`; shown by `GET /api/v1/health`)
 - `OPSGATE_DB_PATH` (default `/usr/local/var/opsgate/run/opsgate.sqlite3`)
 - `OPSGATE_BIND_HOST` (default `0.0.0.0`)
 - `OPSGATE_BIND_PORT` (default `8711`)
 - `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` (default `3600`; integer from `1` to `31536000`)
+- `OPSGATE_UI_SESSION_TIMEOUT_SECONDS` (default `28800`; approver session lifetime)
 - `OPSGATE_MAX_PARALLEL_JOBS` (default `3`)
 - `OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP` (default `false`)
 - `OPSGATE_SUBMIT_POLICY_*_REQUIRE_REVIEWER_STEP`
 - `OPSGATE_REQUIRE_TAILSCALE_CONTEXT` (default `true`)
-- `OPSGATE_ALLOWED_CIDRS` (default loopback + Tailscale ranges)
+- `OPSGATE_ALLOWED_CIDRS` (default `127.0.0.1/32,::1/128,100.64.0.0/10,fd7a:115c:a1e0::/48`: loopback and the
+  Tailscale ranges)
+- `OPSGATE_EXECUTION_DATA_DIR` (default `/Users/ops/remediation`; the runner's working area and the root the
+  UI's log views must stay inside)
 - `OPSGATE_RUNNER_API_BASE_URL` (default `http://127.0.0.1:<bind_port>`)
 - `OPSGATE_RUNNER_HOST` (default hostname)
 - `OPSGATE_RUNNER_POLL_INTERVAL_SECONDS` (default `5`)
@@ -144,7 +153,9 @@ Useful keys:
 - `OPSGATE_TICKETS_DIR` (default `{{ execution_data_dir }}/jobs`)
 - `OPSGATE_SESSION_ARTIFACTS_DIR` (default `{{ execution_data_dir }}/sessions`)
 - `OPSGATE_TMUX_SOCKET_LABEL` (default `remediation`)
-- `OPSGATE_DISABLE_FILE_PATH` (default `{{ execution_data_dir }}/.disabled` equivalent)
+- `TMUX_TMPDIR` (optional; only shown in the runner's attach command)
+- `OPSGATE_DISABLE_FILE_PATH` (default `{{ execution_data_dir }}/.disabled` equivalent; while the file exists the
+  API hands out no tickets and the runner does not claim)
 
 ## API endpoints
 
@@ -239,7 +250,7 @@ matches the state it read (compare-and-set).
 
 ### Approver sessions
 
-- Sessions expire after `OPSGATE_SESSION_TIMEOUT_SECONDS`.
+- Sessions expire after `OPSGATE_UI_SESSION_TIMEOUT_SECONDS` (default `28800`, eight hours).
 - Sessions are also revoked server-side: the database keeps a session generation for the approver, and every
   session cookie records the generation it was issued under. `POST /logout` from an authenticated session bumps
   the generation, so a copied cookie stops working too. This signs the approver out of **every** browser.
@@ -301,9 +312,13 @@ Default UI routes:
 
 ## Rust port
 
-A Rust port of the API/UI and the runner is being built in `rust/` (one
-`opsgate` binary; plan `rust/PLAN.md`, test map `rust/TESTMAP.md`). It is not
-deployed yet; the Python package stays the production implementation. Its
-checks run with `just rs-check` (rustup needed) and in the `rust` CI job on
-Linux and macOS; the drift test of its Python-generated fixtures
-(`tests/test_rust_fixtures.py`) is part of `just test`. See `rust/README.md`.
+A Rust port of the API/UI and the runner lives in `rust/` (one `opsgate` binary: `opsgate serve`,
+`opsgate runner [--once]`, plus `opsgate check-config api|runner`, `opsgate check-db --db <path>` and
+`opsgate --version`; plan `rust/PLAN.md`, test map `rust/TESTMAP.md`). It reads the same environment
+variables and env files as the Python processes (see Configuration). It is complete but not deployed yet;
+the Python package stays the production implementation and the rollback target. Its checks run with
+`just rs-check` (rustup needed) and in the `rust` CI job on Linux and macOS; the drift test of its
+Python-generated fixtures (`tests/test_rust_fixtures.py`) is part of `just test`. The black-box parity
+harnesses (`just rs-parity-api`, `just rs-parity-runner`; CI jobs `parity-api` and `parity-runner`) run
+every scenario against both implementations, including mixed Python/Rust API and runner stacks. See
+`rust/README.md`.

@@ -90,7 +90,35 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
     report = yield
     if report.when == "call":
         item.stash[OUTCOME] = report.outcome
+    elif report.when == "setup" and report.skipped:
+        # A scenario skipped before its rig exists (a missing Rust slice, any skip marker) still leaves a
+        # record, so that `compare.py --complete` sees the skipped stack.
+        runners, api = stack_of(item, str(item.config.getoption("--impl")))
+        write_record(item, scenario_name(item), api, runners, "skipped", {})
     return report
+
+
+def write_record(
+    node: pytest.Item, scenario: str, api: str, runners: list[str], outcome: str, observed: dict[str, Any]
+) -> None:
+    """Write the scenario's record into ``--records`` (if given); one file per scenario and stack."""
+    records = node.config.getoption("--records")
+    if not records:
+        return
+    out = Path(records)
+    out.mkdir(parents=True, exist_ok=True)
+    record = {
+        "scenario": scenario,
+        "test": node.nodeid,
+        "stack": {"api": api, "runners": runners},
+        "outcome": outcome,
+        "observed": observed,
+    }
+    stack = "-".join([api, *runners])
+    name = re.sub(r"[^A-Za-z0-9_.=-]+", "_", f"{scenario}__{stack}")[:200]
+    (out / f"{name}.json").write_text(
+        json.dumps(record, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def scenario_name(item: pytest.Item) -> str:
@@ -186,23 +214,14 @@ class Rig:
                 server.process.kill()
         self.ws.cleanup()
         self.api.stop()
-        records = self.request.config.getoption("--records")
-        if not records:
-            return
         node = self.request.node
-        out = Path(records)
-        out.mkdir(parents=True, exist_ok=True)
-        record = {
-            "scenario": self.scenario,
-            "test": node.nodeid,
-            "stack": {"api": self.api_impl, "runners": self.runner_impls or self.runners_planned},
-            "outcome": node.stash.get(OUTCOME, "not-run"),
-            "observed": self.observed,
-        }
-        stack = "-".join([self.api_impl, *(self.runner_impls or self.runners_planned)])
-        name = re.sub(r"[^A-Za-z0-9_.=-]+", "_", f"{self.scenario}__{stack}")[:200]
-        (out / f"{name}.json").write_text(
-            json.dumps(record, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8"
+        write_record(
+            node,
+            self.scenario,
+            self.api_impl,
+            self.runner_impls or self.runners_planned,
+            node.stash.get(OUTCOME, "not-run"),
+            self.observed,
         )
 
 

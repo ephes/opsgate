@@ -298,7 +298,8 @@ both systems (tmux from apt or Homebrew): it builds the release binary, runs
 the Python runner, then every stack with Rust (since S8), and diffs both record
 sets with `compare.py --require-rust --complete`. Both parity diffs run with
 `--complete` since S8: a scenario recorded by only one run, or a skipped
-runner stack, fails the job.
+runner stack, fails the job (a runner stack skipped before its scenario starts,
+e.g. for a missing Rust slice, still writes a `skipped` record).
 
 ## Runner parity harness
 

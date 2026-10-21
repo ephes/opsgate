@@ -16,7 +16,7 @@ use opsgate_runner::{TicketExecutor, Tmux, TmuxCli, TmuxError};
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-/// The environment of the test's tmux children: isolated from the caller,
+/// The environment of the test's tmux children, built from an allowlist
 /// so neither a real agent nor the caller's tmux or shell configuration can
 /// be reached. `HOME` is a fresh directory (no `~/.tmux.conf`, which may set
 /// a `default-shell` whose startup files reorder `PATH`), `SHELL` is
@@ -26,11 +26,13 @@ use tokio_util::sync::CancellationToken;
 fn environment(home: &Path, tmux_tmpdir: &Path, fake_bin: &Path) -> Environment {
     let mut path = OsString::from(fake_bin);
     path.push(":/usr/bin:/bin:/usr/sbin:/sbin");
+    // An allowlist: anything else (exported shell functions such as
+    // `BASH_FUNC_codex%%`, `ENV`, `BASH_ENV`, the caller's tmux) could put a
+    // real agent in front of the fakes.
     let mut vars: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(key, _)| {
             let key = key.to_string_lossy();
-            !(key.starts_with("TMUX") || key.starts_with("XDG_") || key == "OPSGATE_TEST_MARKER")
-                && !matches!(key.as_ref(), "PATH" | "HOME" | "SHELL" | "ENV" | "BASH_ENV")
+            matches!(key.as_ref(), "USER" | "LOGNAME" | "LANG" | "TERM") || key.starts_with("LC_")
         })
         .collect();
     vars.push(("PATH".into(), path));

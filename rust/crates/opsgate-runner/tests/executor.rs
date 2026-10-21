@@ -35,7 +35,7 @@ impl Fixture {
         ticket_id: &str,
         ticket: serde_json::Map<String, Value>,
         tmux: FakeTmux,
-        heartbeat: u32,
+        heartbeat: i64,
     ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_owned();
@@ -621,6 +621,32 @@ async fn heartbeats_follow_the_interval() {
         ]
     );
     assert_eq!(f.api.events()[1..3], ["heartbeat", "heartbeat"]);
+}
+
+/// An interval at the top of the accepted range never comes due and never
+/// overflows the clock.
+#[tokio::test(start_paused = true)]
+async fn huge_heartbeat_interval_never_fires() {
+    let id = "77777777-7777-4777-8777-777777777777";
+    let plan = json!([{"role": "implementer", "agent": "codex", "prompt_markdown": "deploy"}]);
+    let tmux = FakeTmux::new(false, None).on_launch(|tmux, _| {
+        tmux.has_session.store(true, Ordering::SeqCst);
+    });
+    let f = Fixture::with_heartbeat(id, running_ticket(id, plan.clone(), 0, 120), tmux, i64::MAX);
+    let exit_code = f.paths(0, &plan[0]).exit_code_path;
+    let mut calls = 0;
+    f.api.on_get(move |_| {
+        calls += 1;
+        if calls == 5 {
+            std::fs::write(&exit_code, "0\n").unwrap();
+        }
+        Ok(())
+    });
+    f.run().await.unwrap();
+    assert_eq!(
+        f.api.events(),
+        ["step_started", "step_finished", "ticket_succeeded"]
+    );
 }
 
 fn write_interrupted_step(

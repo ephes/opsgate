@@ -38,7 +38,7 @@ impl Clock for TestClock {
 }
 
 /// `_runner_settings(tmp_path)` with an optional heartbeat interval.
-pub fn runner_settings(root: &Path, heartbeat: u32) -> RunnerSettings {
+pub fn runner_settings(root: &Path, heartbeat: i64) -> RunnerSettings {
     let execution = root.join("execution");
     let execution = execution.to_str().unwrap();
     let mut environment = Environment::from_vars([

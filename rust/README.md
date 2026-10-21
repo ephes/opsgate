@@ -99,7 +99,7 @@ Run from the repository root:
 paused tokio time; the API client is tested against an in-process axum
 server. `tests/tmux_integration.rs` runs real `tmux` on a private socket
 label and `TMUX_TMPDIR` with fake `codex`/`claude` scripts, in an isolated
-environment (own `HOME`, `SHELL=/bin/sh`, a `PATH` with only the fakes, a
+environment built from an allowlist (no exported shell functions; own `HOME`, `SHELL=/bin/sh`, a `PATH` with only the fakes, a
 `tmux` link and the system directories), so neither a real agent nor your
 tmux configuration is reached. Without `tmux` these tests skip; with
 `OPSGATE_REQUIRE_TMUX=1` (set in CI) they fail instead.

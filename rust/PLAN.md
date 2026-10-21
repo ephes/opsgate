@@ -1197,7 +1197,8 @@ implementations by the parity harness.
 - `opsgate-runner`: executor and supervisor with a fake API (in-memory
   trait implementation; the HTTP client against an in-process axum server)
   and a fake tmux trait, paused tokio time; `tmux` integration tests with a
-  private socket label and `TMUX_TMPDIR` and an isolated environment (own
+  private socket label and `TMUX_TMPDIR` and an isolated environment built
+  from an allowlist (own
   `HOME`, `SHELL=/bin/sh`, `PATH` with only the fake agents, `tmux` and the
   system directories, so no real agent and no tmux configuration of the
   caller is reachable); skipped only if `tmux` is absent, and CI installs

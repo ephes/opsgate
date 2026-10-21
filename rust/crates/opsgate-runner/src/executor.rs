@@ -538,7 +538,9 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
 
         let heartbeat_seconds = self.settings.runner_heartbeat_interval_seconds.max(1);
         let heartbeat_interval = Duration::from_secs(u64::try_from(heartbeat_seconds).unwrap_or(1));
-        let mut next_heartbeat = Instant::now() + heartbeat_interval;
+        // An interval beyond tokio's clock range never comes due (as in
+        // Python, where the sum stays a finite float).
+        let mut next_heartbeat = Instant::now().checked_add(heartbeat_interval);
 
         // An exit code that already exists (adopted on resume) skips the poll.
         if !exit_code_present {
@@ -588,7 +590,7 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                 }
 
                 let now = Instant::now();
-                if now >= next_heartbeat {
+                if next_heartbeat.is_some_and(|due| now >= due) {
                     let detail = format!("running_step_{number}_of_{}", step.total);
                     self.post_status(StatusUpdate {
                         result_detail: &detail,
@@ -596,7 +598,7 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                         ..StatusUpdate::event("heartbeat")
                     })
                     .await?;
-                    next_heartbeat = now + heartbeat_interval;
+                    next_heartbeat = now.checked_add(heartbeat_interval);
                 }
 
                 self.sleep(POLL_INTERVAL).await;

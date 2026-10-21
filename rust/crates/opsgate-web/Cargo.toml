@@ -9,6 +9,31 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+opsgate-core.workspace = true
+opsgate-store.workspace = true
+axum = { workspace = true, features = ["tokio", "http1"] }
+base64.workspace = true
+chrono.workspace = true
+cookie.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
+http-body-util.workspace = true
+ipnet.workspace = true
+minijinja.workspace = true
+percent-encoding.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "sync", "time", "macros"] }
+tower = { workspace = true, features = ["util"] }
+tracing.workspace = true
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "sync", "time", "macros"] }
 
 [lints]
 workspace = true

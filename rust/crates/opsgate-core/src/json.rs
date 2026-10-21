@@ -52,6 +52,16 @@ pub enum ParseError {
     NotUtf8,
 }
 
+impl ParseError {
+    /// Whether decoding stopped at `serde_json`'s recursion limit (nesting
+    /// beyond 128 levels): the text is deeper than [`MAX_DEPTH`] up to that
+    /// point, which request bodies answer like Python's depth check
+    /// (`invalid_json`, PLAN.md 4.6) instead of as undecodable text.
+    pub fn exceeds_recursion_limit(&self) -> bool {
+        matches!(self, Self::Syntax(message) if message.starts_with("recursion limit exceeded"))
+    }
+}
+
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -828,6 +838,16 @@ mod tests {
         assert_eq!(check_depth(&json!([object])), Err(TooDeep));
         // serde_json stops at 128 levels; deeper text is undecodable.
         assert!(matches!(parse(&nested(200)), Err(ParseError::Syntax(_))));
+        assert!(parse(&nested(200)).unwrap_err().exceeds_recursion_limit());
+        // The deepest text serde_json decodes has 127 levels.
+        assert!(parse(&nested(127)).is_ok());
+        assert!(parse(&nested(128)).unwrap_err().exceeds_recursion_limit());
+        assert!(!parse("[").unwrap_err().exceeds_recursion_limit());
+        assert!(
+            !parse(&"[".repeat(100))
+                .unwrap_err()
+                .exceeds_recursion_limit()
+        );
         assert_eq!(parse_stored(&nested(65)), Err(StoredJsonError::TooDeep));
         assert!(matches!(
             parse_stored("{"),

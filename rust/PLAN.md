@@ -2,7 +2,9 @@
 
 Status: plan; implementation in progress (S1 foundations, S2a core
 JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S3b
-store II, S6a runner I, S6b runner II (`opsgate runner` works; the runner
+store II, S4a web I (`opsgate serve` with the bearer routes, health and the
+login page; the API parity harness runs its S4a scenarios against Rust in CI),
+S6a runner I, S6b runner II (`opsgate runner` works; the runner
 parity harness is green against it locally) and the S7b runner parity harness
 landed); owner
 questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
@@ -320,7 +322,9 @@ else that differs is a bug.
   exit 1). Rust: one stderr line naming the setting, never its value, exit 1
   (P1: non-zero exit and setting name; P2: text).
 - `serve` stops on SIGTERM/SIGINT (waitress default). Rust: graceful
-  shutdown, in-flight requests finish (≤ 5 s), exit 0.
+  shutdown, in-flight requests finish (≤ 5 s), exit 0. A store operation
+  still running after the 5 s (SQLite cannot be interrupted) does not hold
+  the process: the runtime is shut down at the deadline (S4a).
 - `runner`: SIGTERM/SIGINT set the stop flag (`runner.py:install_signal_handlers`);
   workers observe it at their next 1 s poll, the supervisor after its current
   `time.sleep(poll_interval)` (default 5 s), and an HTTP request in flight
@@ -435,7 +439,12 @@ All routes, with their auth and the order of checks. "gate" = network gate
 Routing details (P1): `<id>` matches one path segment; `<int:n>` matches ASCII
 digits only (`0` matches and then fails `log_not_found`); no trailing-slash
 variants. Unknown routes 404, wrong methods 405 (bodies P2). `HEAD` works for
-every `GET` route.
+every `GET` route; `OPTIONS` answers 200 on every route (Flask's automatic
+`OPTIONS`, `Allow` details P2). A path with repeated slashes that matches a
+route once they are merged is a 308 to the absolute merged URL
+(`http://<Host>/<merged path>[?query]`), or that route's 405 for another
+method (Werkzeug's `merge_slashes`); like every routing outcome it comes after
+the gate and the UI-CSRF check (S4a).
 
 ### 4.4 Request processing order, gates, headers, errors
 
@@ -510,10 +519,15 @@ Cookie (P1 attributes, D-1 format): name `session`, `HttpOnly`,
 `SameSite=Lax`, `Secure` iff `OPSGATE_SESSION_COOKIE_SECURE`, `Path=/`, no
 `Expires`/`Max-Age` (browser-session cookie, as Flask's non-permanent session);
 set only when the session changed; an emptied session deletes the cookie
-(`Vary: Cookie` when the session was read is P2). Rust stores the state in an
-authenticated-encrypted cookie (`axum-extra` `PrivateCookieJar`, AES-256-GCM)
-keyed from `OPSGATE_SESSION_SECRET` via HKDF-SHA256 with a fixed info label;
-a cookie that does not decrypt is an empty session.
+(`Vary: Cookie` when the session was read is P2). Rust stores the state as
+JSON in an authenticated-encrypted cookie (the `cookie` crate's private jar,
+AES-256-GCM with the cookie name as associated data, which is what
+`axum-extra`'s `PrivateCookieJar` wraps; S4a uses the jar directly in its
+session layer) keyed from `OPSGATE_SESSION_SECRET` via HKDF-SHA256 with a
+fixed info label; a cookie that does not decrypt or decode is an empty
+session. "Changed" is Flask's `modified`: any write, also `session.clear()`
+of an empty session and `ensure_csrf_token` creating a token; taking flashes
+out of a session that has none is no change.
 
 Generation (`_sync_ui_session_state`, `revoke_ui_sessions`): at API start the
 row for the configured username is created with generation 1 and
@@ -573,12 +587,16 @@ Input (`parse_request_json`): Flask `get_json(silent=True)`: only when the
 Endpoints that require an object answer 400 `invalid_json` ("JSON object
 required") for no JSON or a non-object; nesting deeper than 64 object/array
 levels (root counts) → 400 `invalid_json` before any mutation
-(`check_json_depth`). Reject/cancel/claim treat a falsy body (`null`, `{}`,
+(`check_json_depth`). Bodies are read after the route's token check (a 401
+never reads the body) and are at most 8 MiB (D-5). Reject/cancel/claim treat a falsy body (`null`, `{}`,
 `[]`, `0`, `""`, `false`) as `{}` (D-4 for truthy non-objects). A UTF-8 BOM is
 accepted; integer tokens longer than 4300 digits are undecodable (CPython
-limit). Rust (`opsgate_core::json`) cannot decode text nested deeper than 128
-levels (`serde_json`'s recursion limit); such text is deeper than 64 anyway,
-so every caller answers the same code Python's depth check gives.
+limit). Rust (`opsgate_core::json`) cannot decode text nested 128 levels or
+deeper (`serde_json`'s recursion limit; 127 levels decode); such text is
+deeper than 64 anyway, so a request body that hits the limit answers 400
+`invalid_json` as Python's depth check (or its `RecursionError`) does
+(`ParseError::exceeds_recursion_limit`, S4a). Only malformed text whose error
+comes after the 128th level differs (D-2).
 
 `str()` conversions (P1 for JSON scalars): where Python applies `str()` to a
 JSON value — ticket `source`, `title`, `summary`, `task_ref`, `expires_at`;
@@ -1123,6 +1141,11 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   depth check rejects it in both).
   `check-db` reports stored rows Rust cannot read; production has none
   (section 1: every column `json_valid`, no non-finite numbers).
+  A request body that is malformed only after nesting 128 levels deep (say
+  `[` × 200 without the closing brackets) is no JSON for Python (its decoder
+  reaches the syntax error first; reject, cancel and claim then treat the
+  body as `{}`), while Rust stops at its recursion limit and answers 400
+  `invalid_json` (S4a).
 - **D-3 `str()` of arrays/objects.** Where Python stores the `repr` of a JSON
   array/object passed in a text field (4.6), Rust answers 400 with the field's
   code (`invalid_ticket` for `title`, `summary` and `task_ref`, at the check
@@ -1153,8 +1176,9 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   and a setting whose process-environment value is not UTF-8 →
   `SettingsError` at startup (Python accepted or failed later). Production
   values are plain.
-- **D-9 Framework responses** (unknown route 404, 405, `OPTIONS`, 500 pages)
-  differ in body and `Allow` details.
+- **D-9 Framework responses** (unknown route 404, 405, `OPTIONS`, 308
+  slash redirects, 500 pages) differ in body and `Allow` details; the
+  statuses are the same.
 - **D-10 Runner base URL** must be `http://` (production
   `http://127.0.0.1:8711`); `https://` is a startup `SettingsError`.
 - **D-11 `__PYVENV_LAUNCHER__`** (a Python launcher artefact) is no longer in
@@ -1169,6 +1193,20 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   `serve --db/--bind-host/--bind-port` (tests and shadow only). `--once` is
   accepted only after `runner` (argparse also takes `serve --once` and
   ignores it). No command still means `serve`.
+- **D-17 Form bodies.** Werkzeug also parses `multipart/form-data` bodies
+  into `request.form`; Rust reads form fields from
+  `application/x-www-form-urlencoded` bodies only, so a multipart `POST`
+  fails the UI-CSRF check ("Invalid form token") and the manual ticket form
+  sees no fields. No OpsGate form sets an `enctype`; browsers send the
+  urlencoded form (S4a).
+- **D-18 `next` values `urlsplit` cannot split.** `sanitize_next_path` calls
+  `urllib.parse.urlsplit`, which raises `ValueError` for some network
+  locations (an unbalanced `[`/`]`, a bracketed host that is no IPv6 address,
+  a non-ASCII host that changes under NFKC), e.g. `/login?next=//[x` or a
+  value whose C0 controls `urlsplit` strips before `//[x`. Python answers
+  500; Rust treats the value as no `next` (the page or the redirect without
+  it). Every such value has a network location, which the sanitising refuses
+  anyway (S4a).
 - **D-16 Faster shutdown observation**: the Rust runner's sleeps (the
   executor's 1 s poll, the post-status retry wait, the supervisor's poll
   interval) end at SIGTERM, so it is observed sooner than after Python's
@@ -1200,8 +1238,8 @@ and filesystem work in `spawn_blocking`).
 | --- | --- | --- |
 | async runtime, signals, processes | `tokio` | standard; precedents |
 | HTTP server | `axum` (+ `axum-extra` cookie-private) | tokio-native, tower middleware, mailgun-relay precedent |
-| session cookie | `cookie` private jar (AES-256-GCM) via `axum-extra`, `hkdf` + `sha2` | authenticated encryption, no server-side session store needed (generation gives revocation) |
-| templates | `minijinja` (feature `json`) | Jinja2-compatible: renders the **same template files** as Flask (`with`, `set`, `loop.index0`, `tojson(indent=2)`, `in` lists, conditional expressions); no second template dialect to keep in sync. `askama` rejected: compile-time checks, but a rewrite of five templates into another dialect and two copies during the parallel period |
+| session cookie | `cookie` private jar (AES-256-GCM; the jar `axum-extra`'s `PrivateCookieJar` wraps, used directly by the session layer), `hkdf` + `sha2`; `getrandom` + `base64` for the CSRF token (`secrets.token_urlsafe(32)`) | authenticated encryption, no server-side session store needed (generation gives revocation) |
+| templates | `minijinja` 2 (own `tojson` filter, so no `json` feature; 3.0 was a week old at S4a) | Jinja2-compatible: renders the **same template files** as Flask (`with`, `set`, `loop.index0`, `tojson(indent=2)`, `in` lists, conditional expressions); no second template dialect to keep in sync. `askama` rejected: compile-time checks, but a rewrite of five templates into another dialect and two copies during the parallel period |
 | SQLite | `rusqlite` (`bundled`) | synchronous API fits the read-check-CAS-write closures in `BEGIN IMMEDIATE`; bundled pins the SQLite version on macOS; `sqlx` rejected (async driver and compile-time DB add nothing here) |
 | JSON | `serde`, `serde_json` (`arbitrary_precision`), `ryu` | custom `Formatter` for the checksum (4.8); tokens preserved for integer/float classification |
 | password hashes | `bcrypt` | maintained; `$2a/$2b/$2y`, verify with 72-byte truncation (fixture) |
@@ -1210,7 +1248,7 @@ and filesystem work in `spawn_blocking`).
 | time | `chrono` | UTC now, microsecond formatting; the narrow ISO parser of 4.9 is ~100 lines on top |
 | CIDR | `ipnet` | |
 | host name | `gethostname` | runner default `OPSGATE_RUNNER_HOST` (`socket.gethostname()`) |
-| form bodies | `form_urlencoded` | ordered pairs, first-value semantics (Werkzeug `MultiDict.get`) |
+| form bodies, paths, `url_for` | `percent-encoding` | ordered pairs, first-value semantics (Werkzeug `MultiDict.get`); `parse_qsl`'s splitting is a few lines on top so that undecodable bytes stay percent-encoded as Werkzeug's `werkzeug.url_quote` error handler leaves them (`form_urlencoded` decodes them to U+FFFD) |
 | runner HTTP client | `reqwest` (default features off, no TLS) | async, timeouts; D-10 |
 | atomic files | `tempfile` | `NamedTempFile::new_in` (0600) + `persist` = Python's publish |
 | shell quoting | `shlex` | attach command (P2) |
@@ -1223,7 +1261,10 @@ No hand-rolled protocols. The only Python-compatibility code is small and
 fixture-pinned: the checksum formatter (4.8), Python `str.strip` whitespace,
 Python `int()` for ASCII, the ISO subset parser, waitress's header joining
 (4.4), and the non-strict path resolution of 4.12 (a port of CPython 3.14
-`posixpath.realpath(strict=False)`).
+`posixpath.realpath(strict=False)`); in the web layer (S4a, unit-tested
+against Werkzeug's results) Werkzeug's decoding of `request.path`,
+`parse_qsl` with the `werkzeug.url_quote` error handler, `url_for`'s quoting
+and MarkupSafe's escaping.
 
 ### 6.3 Templates
 
@@ -1232,7 +1273,9 @@ Python `int()` for ASCII, the ISO subset parser, waitress's header joining
 **kwargs)` (endpoint → path table from 4.3; extra kwargs → query string),
 `get_flashed_messages(with_categories=true)` (pops the session flashes),
 `csrf_token`, `ui_datetime`, `tojson` (HTML-safe, sorted keys, `indent`).
-Autoescape for `.html`. A test renders every template with representative
+Autoescape for `.html` with MarkupSafe's rules (`&<>'"`; minijinja's own
+escaping would also escape `/`), values printed as Python's `str()` (`None`,
+`True`, float `repr`) through a minijinja formatter (S4a). A test renders every template with representative
 contexts (each ticket state × archived flag, flashes, form errors) and checks
 the P1 elements of 4.11 with an HTML parser, never bytes. Template edits
 during the parallel period are made once and verified against both
@@ -1328,8 +1371,8 @@ session cookie attributes, normalised DB snapshot: ids mapped, timestamps
 masked, temp paths masked, JSON columns parsed, error `message` texts masked as
 P2). `just rs-parity-api` runs the suite against both and diffs the records
 (`compare.py`; scenarios that name a P3 divergence are reported as explained);
-CI runs it on every push (job `parity-api`: Python always; Rust once S4a
-is merged). Every scenario names the Rust slices it needs
+CI runs it on every push (job `parity-api`: Python, then since S4a the Rust
+release binary and the record diff). Every scenario names the Rust slices it needs
 (`@pytest.mark.rust(...)`); it runs against Rust once all of them are in
 `harness.RUST_SLICES_LANDED`, which each web slice extends when it merges.
 Cross-implementation DB scenarios: tickets created/approved by

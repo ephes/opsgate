@@ -1,8 +1,9 @@
 //! Process-level tests of the `opsgate` binary (PLAN.md 4.1, D-15):
 //! `--version`, the stub commands and usage errors (slice S1), `check-db`
-//! (slice S3a), `check-db --dump` (slice S3b) and `runner` (slice S6b:
+//! (slice S3a), `check-db --dump` (slice S3b), `runner` (slice S6b:
 //! configuration errors, `--once`, the P1 log line of a failed claim,
-//! SIGTERM/SIGINT).
+//! SIGTERM/SIGINT) and `serve` (slice S4a: configuration errors, the
+//! overrides, HTTP on the bound port, SIGTERM/SIGINT).
 
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
@@ -59,21 +60,7 @@ fn version_commit_is_head_of_the_source_tree() {
 #[test]
 fn unlanded_commands_are_stubs_that_exit_2() {
     for (args, name) in [
-        (&[][..], "serve"),
-        (&["serve"], "serve"),
-        (
-            &[
-                "serve",
-                "--db",
-                "/nonexistent/opsgate.sqlite3",
-                "--bind-host",
-                "127.0.0.1",
-                "--bind-port",
-                "8712",
-            ],
-            "serve",
-        ),
-        (&["check-config", "api"], "check-config"),
+        (&["check-config", "api"][..], "check-config"),
         (&["check-config", "runner"], "check-config"),
     ] {
         let output = opsgate(args);
@@ -407,4 +394,234 @@ fn runner_stops_on_sigterm_and_sigint() {
         let stderr = std::fs::read_to_string(&stderr_path).unwrap();
         assert_eq!(status.and_then(|s| s.code()), Some(0), "{signal}: {stderr}");
     }
+}
+
+// ----- serve (slice S4a) ------------------------------------------------------
+
+const SESSION_SECRET: &str = "serve-session-secret-0000000000";
+
+/// The API's env file in `root` and the process environment pointing at it.
+fn serve_env(root: &Path, extra: &[(&str, &str)]) -> Vec<(String, String)> {
+    let mut lines = vec![
+        format!(
+            "OPSGATE_DB_PATH={}",
+            root.join("env-db/opsgate.sqlite3").display()
+        ),
+        "OPSGATE_UI_USERNAME=opsgate-admin".to_owned(),
+        "OPSGATE_UI_PASSWORD_BCRYPT=$2b$04$not.a.real.hash.for.the.binary.tests.xxxxxxxxxxxxxx"
+            .to_owned(),
+        format!("OPSGATE_SESSION_SECRET={SESSION_SECRET}"),
+        format!("OPSGATE_RUNNER_TOKEN={RUNNER_TOKEN}"),
+        "OPSGATE_SUBMIT_TOKEN_NYXMON=nyxmon-token-000000000000".to_owned(),
+        "OPSGATE_SUBMIT_TOKEN_OPERATOR=operator-token-00000000000".to_owned(),
+        format!("OPSGATE_EXECUTION_DATA_DIR={}", root.join("exec").display()),
+        "OPSGATE_SERVICE_NAME=opsgate-binary-test".to_owned(),
+        "OPSGATE_BIND_HOST=192.0.2.1".to_owned(),
+        "OPSGATE_BIND_PORT=1".to_owned(),
+    ];
+    lines.extend(extra.iter().map(|(key, value)| format!("{key}={value}")));
+    let env_file = root.join("api.env");
+    std::fs::write(&env_file, lines.join("\n") + "\n").unwrap();
+    vec![(
+        "OPSGATE_ENV_FILE".to_owned(),
+        env_file.display().to_string(),
+    )]
+}
+
+/// `GET <path>` over a plain TCP connection: the status line and the body.
+fn http_get(port: u16, path: &str) -> Option<(String, String)> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    let (head, body) = response.split_once("\r\n\r\n")?;
+    Some((head.lines().next()?.to_owned(), body.to_owned()))
+}
+
+#[test]
+fn serve_configuration_errors_name_the_setting_and_exit_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.env");
+    let short_dir = dir.path().join("short");
+    let port_dir = dir.path().join("port");
+    std::fs::create_dir_all(&short_dir).unwrap();
+    std::fs::create_dir_all(&port_dir).unwrap();
+    let short = serve_env(
+        &short_dir,
+        &[("OPSGATE_SESSION_SECRET", "too-short-secret")],
+    );
+    for (env, named) in [
+        (vec![], "OPSGATE_"),
+        (
+            vec![("OPSGATE_ENV_FILE".to_owned(), missing.display().to_string())],
+            "Env file does not exist",
+        ),
+        (short, "OPSGATE_SESSION_SECRET"),
+        (
+            serve_env(&port_dir, &[("OPSGATE_BIND_PORT", "70000")]),
+            "OPSGATE_BIND_PORT",
+        ),
+    ] {
+        let output = runner_command(&["serve"], &env).output().unwrap();
+        assert_eq!(output.status.code(), Some(1), "{env:?}");
+        assert!(output.stdout.is_empty());
+        let stderr = text(&output.stderr);
+        assert_eq!(stderr.lines().count(), 1, "{stderr}");
+        assert!(
+            stderr.starts_with("opsgate serve: configuration error: "),
+            "{stderr}"
+        );
+        assert!(stderr.contains(named), "{stderr}");
+        assert!(!stderr.contains("too-short-secret"), "{stderr}");
+    }
+}
+
+/// `serve` with the overrides of D-15 answers HTTP on the given address,
+/// initialises the given database, and stops with exit 0 on SIGTERM and
+/// SIGINT. Its log names no secret.
+#[test]
+fn serve_answers_and_stops_on_signals() {
+    for signal in ["TERM", "INT"] {
+        let dir = tempfile::tempdir().unwrap();
+        let env = serve_env(dir.path(), &[]);
+        let db = dir.path().join("override/opsgate.sqlite3");
+        let port = closed_port();
+        let stderr_path = dir.path().join("serve.err");
+        let mut child = runner_command(
+            &[
+                "serve",
+                "--db",
+                db.to_str().unwrap(),
+                "--bind-host",
+                "127.0.0.1",
+                "--bind-port",
+                &port.to_string(),
+            ],
+            &env,
+        )
+        .stdout(Stdio::null())
+        .stderr(std::fs::File::create(&stderr_path).unwrap())
+        .spawn()
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let (status, body) = loop {
+            if let Some(answer) = http_get(port, "/api/v1/health") {
+                break answer;
+            }
+            assert!(Instant::now() < deadline, "serve did not answer");
+            assert!(child.try_wait().unwrap().is_none(), "serve exited");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        let health: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(health["service"], "opsgate-binary-test");
+        assert!(db.is_file());
+        assert!(!dir.path().join("env-db").exists());
+        let (status, _) = http_get(port, "/no-such-page").unwrap();
+        assert_eq!(status, "HTTP/1.1 404 Not Found");
+
+        let killed = Command::new("kill")
+            .args([&format!("-{signal}"), &child.id().to_string()])
+            .status()
+            .unwrap();
+        assert!(killed.success());
+        let status = wait_for_exit(&mut child, Duration::from_secs(10));
+        let stderr = std::fs::read_to_string(&stderr_path).unwrap();
+        assert_eq!(status.and_then(|s| s.code()), Some(0), "{signal}: {stderr}");
+        assert!(
+            stderr.contains(&format!(
+                "opsgate serve starting: version={} ({}) implementation=rust bind=127.0.0.1:{port}",
+                env!("CARGO_PKG_VERSION"),
+                env!("OPSGATE_GIT_COMMIT")
+            )),
+            "{stderr}"
+        );
+        assert!(stderr.contains("opsgate serve stopped"), "{stderr}");
+        for secret in [SESSION_SECRET, RUNNER_TOKEN, "nyxmon-token-000000000000"] {
+            assert!(!stderr.contains(secret), "{stderr}");
+        }
+    }
+}
+
+/// An address that cannot be bound is one log line and exit 1.
+#[test]
+fn serve_exits_1_when_the_address_is_taken() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = serve_env(dir.path(), &[]);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let output = runner_command(
+        &["serve", "--bind-host", "127.0.0.1", "--bind-port", &port],
+        &env,
+    )
+    .output()
+    .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains(&format!("opsgate serve: cannot listen on 127.0.0.1:{port}")),
+        "{stderr}"
+    );
+}
+
+/// A store operation blocked on a locked database cannot be cancelled; the
+/// process still exits within the grace period after SIGTERM (4.1) instead
+/// of waiting for it.
+#[test]
+fn serve_exits_within_the_grace_period_with_a_locked_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = serve_env(dir.path(), &[]);
+    let db = dir.path().join("locked/opsgate.sqlite3");
+    let port = closed_port();
+    let mut child = runner_command(
+        &[
+            "serve",
+            "--db",
+            db.to_str().unwrap(),
+            "--bind-host",
+            "127.0.0.1",
+            "--bind-port",
+            &port.to_string(),
+        ],
+        &env,
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .spawn()
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while http_get(port, "/api/v1/health").is_none() {
+        assert!(Instant::now() < deadline, "serve did not answer");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Every connection of the server now waits for the lock.
+    let lock = rusqlite::Connection::open(&db).unwrap();
+    lock.execute_batch(
+        "PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; CREATE TABLE probe_lock(x);",
+    )
+    .unwrap();
+    let request = std::thread::spawn(move || {
+        let _ = http_get(port, "/api/v1/health");
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let stopped = Instant::now();
+    let killed = Command::new("kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(killed.success());
+    let status = wait_for_exit(&mut child, Duration::from_secs(20));
+    let elapsed = stopped.elapsed();
+    assert_eq!(status.and_then(|s| s.code()), Some(0));
+    assert!(elapsed < Duration::from_secs(9), "{elapsed:?}");
+    drop(lock);
+    request.join().unwrap();
 }

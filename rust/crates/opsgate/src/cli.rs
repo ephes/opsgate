@@ -113,6 +113,7 @@ pub fn run(cli: Cli) -> ExitCode {
     match cli.into_command() {
         Command::CheckDb { db, dump } => check_db(&db, dump.as_deref()),
         Command::Runner(args) => crate::runner::run(args.once),
+        Command::Serve(args) => crate::serve::run(args),
         command => {
             eprintln!(
                 "opsgate {}: not implemented yet (rust/PLAN.md section 12)",

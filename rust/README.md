@@ -13,11 +13,16 @@ ticket creation, get/list, health, session generation and `check-db`; S3b:
 approve, reject, cancel, archive, unarchive, claim, runner status, race tests
 and `check-db --dump`), the runner (S6a: API client, tmux adapter, artifacts,
 agent commands and the ticket executor; S6b: the supervisor and the `opsgate
-runner [--once]` command), the black-box API parity harness (S7a, green
-against Python) and the black-box runner parity harness (S7b, green against
-the Python runner and, run locally, against the Rust runner). The workspace,
-CI, the fixture generator and the command-line skeleton exist; `check-db` and
-`runner` work, every other command is still a stub that exits 2. The Python
+runner [--once]` command), the web layer's shared foundations (S4a: `opsgate
+serve` with the request processing order of PLAN.md 4.4, the session cookie,
+the UI-CSRF check, the template environment, the login page and the bearer
+routes), the black-box API parity harness (S7a, green against Python and, for
+the scenarios of the landed web slices, against Rust) and the black-box runner
+parity harness (S7b, green against the Python runner and, run locally, against
+the Rust runner). `check-db`, `runner` and `serve` work (`serve` answers the
+routes of S4a; `POST /login`, logout, the approver's API actions and the
+ticket pages follow with S4b and S5); `check-config` is still a stub that
+exits 2. The Python
 package in `src/opsgate` is the production implementation and the oracle for
 the contract. Nothing deploys or runs this code yet.
 
@@ -32,7 +37,7 @@ rust/
   crates/
     opsgate-core/       pure logic: settings, JSON canon/checksum, time, validation, log preview, path containment (S2a-S2c)
     opsgate-store/      SQLite store: schema, tickets, health, session generation, check-db (S3a, S3b)
-    opsgate-web/        HTTP API and web UI (S4a, S4b, S5)
+    opsgate-web/        HTTP API and web UI: layers, session, templates, routes (S4a; S4b, S5 add routes)
     opsgate-runner/     runner (S6a, S6b)
     opsgate/            the binary: command line, build.rs (embeds the git commit)
   fixtures/
@@ -194,11 +199,50 @@ compared with `rust/parity/shadow/compare_dump.py`. Without a suitable
 `python3` it skips; with `OPSGATE_REQUIRE_PYTHON=1` (set in CI) it fails
 instead.
 
+## Web
+
+`opsgate-web` (slice S4a) is the axum application of `opsgate serve`.
+`opsgate_web::app` wraps the routes in the layers of PLAN.md 4.4, outermost
+first, around the whole router, so unknown paths (404) and wrong methods (405)
+pass through them too:
+
+| Layer | Module | Does |
+| --- | --- | --- |
+| path | `path` | Werkzeug's `request.path`: the percent-decoded path (`%2F` separates segments, invalid UTF-8 becomes U+FFFD, leading slashes collapse); the router matches it re-encoded |
+| headers | `headers` | the five security headers on every response |
+| session | `session` | the `session` cookie (JSON in the `cookie` crate's private jar, AES-256-GCM, key from `OPSGATE_SESSION_SECRET` via HKDF-SHA256; written only when the session changed, deleted when emptied) |
+| errors | `error` | `AppError` → `/api/…` JSON `{"error", "message"}`, elsewhere a flash and a 302 to the ticket page or `/tickets`; anything unhandled is a 500 without details and one log line; oversized bodies 413 |
+| gate | `gate` | the network gate (socket peer only, `/api/v1/health` exempt; JSON or `forbidden.html`) |
+| UI-CSRF | `csrf` | every non-`/api/` `POST`: `ensure_csrf_token`, then the form's `csrf_token` (urlencoded bodies only, D-17) |
+
+Routes take the store through `AppState::blocking` (SQLite on the blocking
+pool), read bodies only after their token check (`body`, at most 8 MiB, D-5)
+and parse JSON with the rules of 4.6. `session::OptionalApprover` and
+`session::Approver` are the approver extractors (`get_session_user`);
+`templates::Templates` renders the embedded files of
+`src/opsgate/templates` with `url_for`, `get_flashed_messages`, `csrf_token`,
+`ui_datetime` and `tojson`, printing values as Jinja2 does (MarkupSafe
+escaping, `None`, `True`, float `repr`, integers of any size). Later slices
+add their routes in `routes::router`, each wrapped in `routes::allow`
+(Flask's automatic `OPTIONS` and the probe behind Werkzeug's repeated-slash
+redirect: a path like `/api//v1/health` is a 308 to `/api/v1/health`), and
+get every layer.
+
+Tests (`crates/opsgate-web/tests/`) call the application in-process with
+`tower::ServiceExt::oneshot` from a chosen peer address and keep the session
+cookie in a jar (`tests/common`). `opsgate_web::testing::approver_session`
+mints a signed-in approver session (cookie and CSRF token) without
+`POST /login`, so slice S5 does not depend on S4b; `testing::session_cookie`
+writes any session content and `testing::session_from_response` reads the one
+a response set.
+
 ## CI
 
 The `parity-api` job runs the API parity harness against Python (lint,
 typecheck, scenarios; it also lints and typechecks `parity/shadow` and the
-store's Python peer); slice S4a adds the Rust leg.
+store's Python peer), then builds the release binary, runs the harness
+against Rust (the scenarios of the web slices in `RUST_SLICES_LANDED`) and
+diffs both record sets with `compare.py`.
 
 The `rust` job of `.github/workflows/ci.yml` runs on `ubuntu-latest` and
 `macos-15`: rustfmt, clippy, `cargo deny --locked check` (pinned, sha256
@@ -346,8 +390,8 @@ are never compared. A scenario that covers a P3 divergence calls
 Rust switch-on: every scenario carries `@pytest.mark.rust(<slices>)` naming the
 web slices it needs; against Rust it runs only when all of them are listed in
 `harness.RUST_SLICES_LANDED`, otherwise it is skipped with the missing slices
-as the reason. S4a, S4b and S5 each add their id there (and S4a the Rust leg
-of the CI job) when they merge. `test_cross.py` runs every scenario with the
+as the reason. S4a, S4b and S5 each add their id there when they merge; S4a
+is listed (bearer routes, health, gate, headers, routing, the login page). `test_cross.py` runs every scenario with the
 peer implementation `python` and `rust`, so a Python run covers python→python
 and python→rust.
 
@@ -373,9 +417,23 @@ opsgate --version
 ```
 
 No command (plain `opsgate`) means `serve` without overrides, as with
-`python -m opsgate`; the overrides need the `serve` command. Until their slices
-land, the commands other than `runner` print `opsgate <command>: not
-implemented yet` on stderr and exit 2; usage errors also exit 2.
+`python -m opsgate`; the overrides need the `serve` command. `check-config`
+prints `opsgate check-config: not implemented yet` on stderr and exits 2
+until its slice lands; usage errors also exit 2.
+
+`opsgate serve` reads the API settings like `python -m opsgate serve`
+(`OPSGATE_ENV_FILE`, then the variables of PLAN.md 4.2); `--db`,
+`--bind-host` and `--bind-port` replace `OPSGATE_DB_PATH`,
+`OPSGATE_BIND_HOST` and `OPSGATE_BIND_PORT` (tests and the shadow run, D-15).
+It initialises the database like `init_db` (4.10), serves HTTP on two runtime
+worker threads and stops on SIGTERM or SIGINT: no new connections, requests in
+flight get five seconds, exit 0. A configuration error is one stderr line
+naming the setting (never its value), exit 1; a database that cannot be opened
+or an address that cannot be bound is one log line, exit 1. A store operation
+still blocked when the five seconds are up (a locked database) does not keep
+the process alive. It logs an INFO
+startup line (version, `implementation=rust`, bind address, database path) and
+one line per request that fails with a 500.
 
 `opsgate runner [--once]` reads the runner settings like `python -m opsgate
 runner` (`OPSGATE_ENV_FILE`, then the variables of PLAN.md 4.2) and runs until

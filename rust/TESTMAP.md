@@ -72,14 +72,14 @@ section ("Rust-only tests") with their paths.
 | `test_runner_claim_isolates_corrupt_stored_json` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_isolates_corrupt_stored_json` (plus the D-2 cases `NaN` and `1e999`: Rust fails the ticket with `invalid_stored_json` / `invalid_json`) | S3b ✓ | A |
 | `test_runner_claim_accepts_stored_json_at_depth_limit` | `crates/opsgate-store/tests/claim.rs::test_runner_claim_accepts_stored_json_at_depth_limit` | S3b ✓ | A |
 | `test_ui_post_routes_require_csrf_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
-| `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `web::gate` (production expectation: forwarded headers ignored behind waitress, PLAN.md 4.4 step 1; the Python test bypasses waitress) | S4a | A |
+| `test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` | `crates/opsgate-web/tests/gate.rs::test_trusted_proxy_headers_restore_client_ip_for_access_and_audit` (production expectation: forwarded headers ignored behind waitress, PLAN.md 4.4 step 1; the Python test bypasses waitress) | S4a ✓ | A |
 | `test_login_ignores_external_next_path` | `web::login` | S4b | A |
 | `test_login_form_uses_autofill_friendly_fields` | `web::login` | S4b | A |
 | `test_login_head_is_side_effect_free` | `web::login` | S4b | A |
 | `test_login_ignores_protocol_relative_next_path` | `web::login` | S4b | A |
 | `test_login_ignores_javascript_next_path` | `web::login` | S4b | A |
 | `test_login_ignores_control_chars_in_next_path` | `web::login` | S4b | A |
-| `test_create_and_get_ticket_submit_token` | `web::api` | S4a | A |
+| `test_create_and_get_ticket_submit_token` | `crates/opsgate-web/tests/api.rs::test_create_and_get_ticket_submit_token` | S4a ✓ | A |
 | `test_dedupe_enforced_for_open_task_ref` | `crates/opsgate-store/tests/create.rs::test_dedupe_enforced_for_open_task_ref` (also scenario `dedupe` of fixture `store.json`) | S3a ✓ | A |
 | `test_dedupe_ignores_archived_pending_ticket` | `crates/opsgate-store/tests/transitions.rs::test_dedupe_ignores_archived_pending_ticket` | S3b ✓ | A |
 | `test_dedupe_expires_stale_pending_ticket_before_replacement_submit` | `crates/opsgate-store/tests/create.rs::test_dedupe_expires_stale_pending_ticket_before_replacement_submit` (also scenario `lazy_expiry` of fixture `store.json`) | S3a ✓ | A |
@@ -98,12 +98,12 @@ section ("Rust-only tests") with their paths.
 | `test_runner_status_rejects_runner_host_mismatch` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_runner_host_mismatch` | S3b ✓ | A |
 | `test_runner_status_rejects_invalid_event_type` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_rejects_invalid_event_type` | S3b ✓ | A |
 | `test_runner_status_accepts_step_failed_event` | `crates/opsgate-store/tests/runner_status.rs::test_runner_status_accepts_step_failed_event` | S3b ✓ | A |
-| `test_get_ticket_forbidden_for_other_submitter_source` | `web::api` | S4a | A |
-| `test_health_endpoint_reports_ok` | `crates/opsgate-store/tests/create.rs::test_health_endpoint_reports_ok` (store half) + `web::api` | S3a ✓ + S4a | A |
-| `test_health_reports_no_runner_heartbeat_before_first_poll` | `crates/opsgate-store/tests/create.rs::test_health_reports_no_runner_heartbeat_before_first_poll` (store half) + `web::api` | S3a ✓ + S4a | A |
+| `test_get_ticket_forbidden_for_other_submitter_source` | `crates/opsgate-web/tests/api.rs::test_get_ticket_forbidden_for_other_submitter_source` | S4a ✓ | A |
+| `test_health_endpoint_reports_ok` | `crates/opsgate-store/tests/create.rs::test_health_endpoint_reports_ok` (store half) + `crates/opsgate-web/tests/api.rs::test_health_endpoint_reports_ok` | S3a ✓ + S4a ✓ | A |
+| `test_health_reports_no_runner_heartbeat_before_first_poll` | `crates/opsgate-store/tests/create.rs::test_health_reports_no_runner_heartbeat_before_first_poll` (store half) + `crates/opsgate-web/tests/api.rs::test_health_reports_no_runner_heartbeat_before_first_poll` | S3a ✓ + S4a ✓ | A |
 | `test_idle_runner_claim_poll_records_heartbeat` | `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat` | S3b ✓ | A |
-| `test_runner_claim_without_token_records_no_heartbeat` | `web::api` (the 401 is the web layer's; the store records a heartbeat only when a claim reaches it, `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat`) | S4a | A |
-| `test_api_rejects_non_tailscale_source_ip` | `web::gate` | S4a | A |
+| `test_runner_claim_without_token_records_no_heartbeat` | `crates/opsgate-web/tests/api.rs::test_runner_claim_without_token_records_no_heartbeat` (the 401 is the web layer's; the store records a heartbeat only when a claim reaches it, `crates/opsgate-store/tests/claim.rs::test_idle_runner_claim_poll_records_heartbeat`) | S4a ✓ | A |
+| `test_api_rejects_non_tailscale_source_ip` | `crates/opsgate-web/tests/gate.rs::test_api_rejects_non_tailscale_source_ip` | S4a ✓ | A |
 | `test_cookie_api_action_without_csrf_header_is_rejected` | `web::csrf` | S4b | A |
 | `test_cookie_approve_with_wrong_csrf_header_is_rejected` | `web::csrf` | S4b | A |
 | `test_cookie_approve_with_csrf_header_succeeds` | `web::csrf` | S4b | A |
@@ -121,7 +121,7 @@ section ("Rust-only tests") with their paths.
 | `test_successful_login_resets_failure_count` | `web::login::throttle` | S4b | A |
 | `test_login_throttle_is_per_client_ip` | `web::login::throttle` | S4b | A |
 | `test_login_throttle_bounds_tracked_clients` | `web::login::throttle` | S4b | - |
-| `test_api_bearer_endpoints_reject_non_ascii_token` | `web::auth` | S4a | A |
+| `test_api_bearer_endpoints_reject_non_ascii_token` | `crates/opsgate-web/tests/auth.rs::test_api_bearer_endpoints_reject_non_ascii_token` | S4a ✓ | A |
 | `test_api_session_actions_reject_non_ascii_csrf_header` | `web::csrf` | S4b | A |
 | `test_ui_ticket_actions_reject_non_ascii_form_token` | `web::csrf (UI-CSRF layer from S4a)` | S5 | A |
 | `test_ui_forms_reject_non_ascii_form_token` | `web::csrf (needs S4b login/logout and S5 routes)` | S8 | A |
@@ -130,16 +130,16 @@ section ("Rust-only tests") with their paths.
 | `test_api_rejects_utc_expiry_overflow` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` (time half, S2a) + `crates/opsgate-core/tests/validation.rs::test_api_rejects_utc_expiry_overflow` (`invalid_expires_at`, S2c) | S2a ✓ + S2c ✓ | A |
 | `test_datetime_overflow_is_value_error` | `crates/opsgate-core/src/time.rs::tests::utc_overflow_is_out_of_range` | S2a | A |
 | `test_api_accepts_trimmed_plan_and_optional_expiry` | `crates/opsgate-core/tests/validation.rs::test_api_accepts_trimmed_plan_and_optional_expiry` (cases also in fixture `validation.json`) | S2c ✓ | A |
-| `test_ui_pages_cannot_be_framed` | `web::headers` | S4a | A |
-| `test_api_error_and_redirect_responses_carry_security_headers` | `web::headers` | S4a | A |
-| `test_forbidden_network_response_carries_security_headers` | `web::headers` | S4a | A |
+| `test_ui_pages_cannot_be_framed` | `crates/opsgate-web/tests/headers.rs::test_ui_pages_cannot_be_framed` (the S4a pages: login and forbidden; S5 adds the ticket list and detail pages to it) | S4a ✓ + S5 | A |
+| `test_api_error_and_redirect_responses_carry_security_headers` | `crates/opsgate-web/tests/headers.rs::test_api_error_and_redirect_responses_carry_security_headers` (the redirect is the UI-CSRF one; `GET /tickets` is S5's route) | S4a ✓ | A |
+| `test_forbidden_network_response_carries_security_headers` | `crates/opsgate-web/tests/headers.rs::test_forbidden_network_response_carries_security_headers` | S4a ✓ | A |
 | `test_wrong_username_still_runs_the_password_check` | `web::login` | S4b | A |
 | `test_non_ascii_username_is_rejected_without_error` | `web::login` | S4b | A |
-| `test_json_decode_errors_are_domain_responses` | `core::json + web::api` | S4a | A |
+| `test_json_decode_errors_are_domain_responses` | `crates/opsgate-web/tests/api.rs::test_json_decode_errors_are_domain_responses` (the bearer endpoints; the reject and cancel cases need S4b's routes) | S4a ✓ + S4b | A |
 | `test_manual_context_rejects_excessive_nesting` | `web::ui::manual_form` | S5 | A |
-| `test_real_json_nesting_limit` | `core::json + web::api` | S4a | A |
+| `test_real_json_nesting_limit` | `crates/opsgate-web/tests/api.rs::test_real_json_nesting_limit` (also depth 129, beyond `serde_json`'s recursion limit) | S4a ✓ | A |
 | `test_real_manual_context_nesting_limit` | `web::ui::manual_form` | S5 | A |
-| `test_malformed_required_json_retains_domain_response` | `core::json + web::api` | S4a | A |
+| `test_malformed_required_json_retains_domain_response` | `crates/opsgate-web/tests/api.rs::test_malformed_required_json_retains_domain_response` | S4a ✓ | A |
 | `test_runner_state_result_matrix` | `crates/opsgate-store/tests/runner_status.rs::test_runner_state_result_matrix` | S3b ✓ | A |
 | `test_ticket_duration_rejects_invalid_values` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_rejects_invalid_values` (P3 D-2 for the `Infinity` literal: Rust answers `invalid_json`) (cases also in fixture `validation.json`) | S2c ✓ | A |
 | `test_ticket_duration_accepts_boundaries` | `crates/opsgate-core/tests/validation.rs::test_ticket_duration_accepts_boundaries` (cases also in fixture `validation.json`) | S2c ✓ | A |
@@ -257,10 +257,10 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | Test | Covers | Slice |
 | --- | --- | --- |
 | `crates/opsgate/src/cli.rs::tests` | command-line parsing: default `serve`, `serve` overrides, `runner --once`, `check-config api\|runner`, `check-db --db [--dump]`, usage errors exit 2, `--version` text (4.1, D-15) | S1, S3b |
-| `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2 (`runner` no longer since S6b), usage errors exit 2, `--help` | S1 |
+| `crates/opsgate/tests/binary.rs` | the binary: `--version`/`-V` print `opsgate <version> (<commit>)` with the checked-out commit, every command is a stub exiting 2 (`runner` no longer since S6b, `serve` since S4a), usage errors exit 2, `--help` | S1 |
 | `crates/opsgate/tests/binary.rs` (runner cases) | `opsgate runner [--once]` as a process: configuration errors (one stderr line naming the setting, never its value, exit 1), `--once` with the disable file (no claim, `runner-state/` created, startup line without secrets), the P1 log line of a failed claim (4.15), SIGTERM and SIGINT during the poll-interval sleep end the runner at once with exit 0 (4.1, D-16) | S6b |
 | `crates/opsgate/tests/build_script.rs` | `build.rs`: full-commit validation, watched git paths (packed refs, nested branches, linked worktrees, detached HEAD, no git) | S1 |
-| `parity/api/` (pytest, `just rs-parity-api`) | black-box API parity harness: 520+ scenarios against a real `serve` process per scenario (Python green; Rust switched on per landed slice through `harness.RUST_SLICES_LANDED`), records and `compare.py` diff, cross-implementation databases, races over HTTP, `--target` mode for the shadow (7.3) | S7a |
+| `parity/api/` (pytest, `just rs-parity-api`) | black-box API parity harness: 520+ scenarios against a real `serve` process per scenario (Python green; Rust switched on per landed slice through `harness.RUST_SLICES_LANDED`), records and `compare.py` diff, cross-implementation databases, races over HTTP, `--target` mode for the shadow (7.3); since S4a its S4a scenarios run against Rust in CI with no unexplained difference, and the approver-action case of the routing scenario is its own S4b scenario `test_gate.py::test_routing_wrong_method_on_approver_action` | S7a, S4a |
 | `tests/test_rust_fixtures.py` | fixture drift: committed fixtures equal a fresh render byte for byte, every fixture has a generator, a hand-edited or missing fixture is detected, `generate.py --check` exits 1 on drift, `schema.sql` runs and yields the Python schema's objects (7.2, 4.10) | S1 |
 | `crates/opsgate-core/tests/settings_fixture.rs` | `settings.json`: 490 environment sets (every variable and rule of 4.2, check order, env-file override, D-8/D-10 cases) and 21 env-file parsing cases; coverage of every 4.2 variable; the merged environment children get (4.13.8) | S2b |
 | `crates/opsgate-core/tests/log_preview_fixture.rs` | `log_preview.json`: preview and step log for 31 contents (window and line cuts, CR/LF forms, invalid UTF-8 replacement, 2 MiB boundary) (4.12) | S2b |
@@ -303,3 +303,9 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `crates/opsgate-runner/src/{commands,artifacts,executor,values}.rs::tests` | slugs and names, shell quoting round trips, the step script text, artifact JSON text, `_load_summary` rules, SHA-256, Python path joining, session-entry upsert, exit-code parsing, Python `str()`/truthiness/`int()` of ticket values | S6a |
 | `crates/opsgate-runner/tests/supervisor.rs` (Rust-only cases) | supervisor against a fake API with several tickets and a scripted tmux on paused time (4.13.6): `--once` (claims, waits for the workers, removes their state files; disable file; empty and failed claims), a claimed ticket without id, claims up to `max_parallel_jobs` with state files and the shutdown that interrupts the steps and removes the state files, recovery at the worker limit and with live workers, the first pass over the artifact directories (symlinks followed, once per process), the `_run_worker` `finally` (terminal ticket after an outage, cleanup verified), a failing state-file write ending the supervisor | S6b |
 | `crates/opsgate-runner/src/supervisor.rs::tests` | the ticket-id and tmux-session patterns as Python's `re` (`$` before a final newline, Unicode `\d`), `tmux ls` line splitting, state-file reading (hidden files, invalid files deleted, non-UTF-8 and directories are errors, a missing directory has none) | S6b |
+| `crates/opsgate-web/src/{path,client,form,urls,error,session,body,templates}.rs` unit tests, `routes/login.rs` unit tests | Werkzeug's `request.path` decoding and the re-encoding for the router; bearer parsing and latin-1 headers; `parse_qsl` with `werkzeug.url_quote`; `url_for` rules and quoting; the error-redirect patterns; cookie encryption, tampering, change tracking, flashes, the timeout comparison; JSON content types, depth and falsy bodies, the runner host; `ui_datetime`, `tojson`, value printing (MarkupSafe, `None`, float `repr`); `sanitize_next_path` (4.3–4.6, 6.3) | S4a |
+| `crates/opsgate-web/tests/{api,auth,gate,headers}.rs` (other tests) | over HTTP in-process: get-ticket check order (401, 404, 403; runner token and approver session), runner host derivation and falsy/D-4 claim bodies, claim and status with audit address and latin-1 user agent, JSON content types and BOM, the body limit after the token check (D-5), unreadable stored rows → 500, routing (405, 404, `%2F`, leading slashes, `OPTIONS` on every route, Werkzeug's repeated-slash 308 and its 405/404 cases), every path gated but health, IPv6 and IPv4-mapped peers, the gate switched off, bearer rules, openclaw without token | S4a |
+| `crates/opsgate-web/tests/{session,csrf,login}.rs` | the session cookie (attributes, `Secure`, written only on change, unusable cookies, every clearing case of `get_session_user`, revocation, Python's `timedelta` limit), the UI-CSRF layer (flash and redirect targets, first value, non-ASCII, JSON/query/multipart bodies (D-17), `/api/` and other methods exempt, 413), the login page (form, `next` sanitising and escaping, `HEAD`, no side effect but the CSRF token, flashes shown once) | S4a |
+| `crates/opsgate-web/tests/templates.rs` | every template renders through the S4a environment with the context of `app.py` for each ticket state with and without the archived flag (action forms by state, escaping, `tojson(indent=2)`, `url_for`) | S4a |
+| `crates/opsgate/tests/binary.rs` (serve cases) | `opsgate serve`: configuration errors (one stderr line naming the setting, exit 1), the overrides `--db`/`--bind-host`/`--bind-port`, HTTP on the bound port, SIGTERM/SIGINT → exit 0, startup line without secrets, an address in use → exit 1, exit within the grace period while a store operation waits on a locked database | S4a |
+| `crates/opsgate-core/src/json.rs::tests::depth_counts_containers_from_the_root` (S4a part) | `ParseError::exceeds_recursion_limit`: 127 levels decode, 128 hit the limit, malformed shallower text does not | S4a |

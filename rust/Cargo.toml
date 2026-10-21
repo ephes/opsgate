@@ -57,6 +57,18 @@ regex = "1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 subtle = "2"
 uuid = { version = "1", default-features = false, features = ["std", "v4"] }
+# Web (PLAN.md 6.2, 6.3; slice S4a): the session cookie (the `cookie` crate's
+# private jar, AES-256-GCM, keyed through HKDF-SHA256), the Jinja templates
+# shared with Python, percent-encoding for paths, forms and `url_for`, and
+# random CSRF tokens (`secrets.token_urlsafe(32)`).
+base64 = "0.22"
+cookie = { version = "0.18", default-features = false, features = ["private"] }
+getrandom = "0.4"
+hkdf = "0.13"
+http-body-util = "0.1"
+minijinja = { version = "2", default-features = false, features = ["builtins", "serde", "std_collections"] }
+percent-encoding = "2"
+tower = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

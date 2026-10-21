@@ -1,7 +1,8 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
-Status: plan, not yet implemented. Campaign "Rust-Ports Runde 2", stream
-`rust-opsgate` (umbrella work item `rust-ports-campaign`).
+Status: plan, not yet implemented; owner questions decided 2026-10-21
+(section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
+work item `rust-ports-campaign`).
 
 This document is the contract for the implementers and reviewers of the
 slices in section 12. It ports both long-running Python processes of OpsGate
@@ -946,7 +947,8 @@ The tmux server for the socket label is started by the runner's first
 `new-session` when none runs and inherits the runner's environment: the
 launchd variables after the `bash -lc` login shell (`path_helper` PATH,
 `SHELL`, `USER`, `TMPDIR`, …) **plus every key of the runner env file**
-(4.2), including `OPSGATE_RUNNER_TOKEN` (pre-existing exposure, Q6). The Rust
+(4.2), including `OPSGATE_RUNNER_TOKEN` (pre-existing exposure, kept
+unchanged by the port, Q6; hardening is item `opsgate-runner-token-hardening`). The Rust
 runner keeps the same launch wrapper (10.1) and the same env-file application,
 so agents see the same environment (minus `__PYVENV_LAUNCHER__`, D-11).
 
@@ -1323,9 +1325,9 @@ Deploy with both impls `python` and the release pinned: binary at
 `/usr/local/libexec/opsgate-rs/0.3.0/`, check-config/check-db pass, plists
 unchanged, no unit restarted unless Python source or lock changed on `main`.
 
-### 11.2 Shadow on studio (S12, owner approval Q3)
+### 11.2 Shadow on studio (S12, owner approval Q3, given 2026-10-21)
 
-Root SSH session in tmux, no production unit touched:
+About 2 h, root SSH session in tmux, no production unit touched:
 
 1. **Data parity on a copy**: SQLite online backup of the production DB into
    `/usr/local/var/opsgate/shadow/` (0700, `control_service_user`); as
@@ -1369,8 +1371,9 @@ Root SSH session in tmux, no production unit touched:
 
 Preconditions: S12 report accepted; window agreed with the coordinator (no
 other deploy on macstudio or macmini Traefik in progress; the production
-Traefik ACME move is on `production`, not affected); owner available for the
-re-login.
+Traefik ACME move is on `production`, not affected; never in the same window
+as the campaign's `echoport-command-guard` cutover, which runs last and alone);
+owner available for the re-login (accepted, Q1).
 
 1. Under the lock: `opsgate_api_impl: rust`, deploy. Record T1.
 2. Verify: pid → versioned binary; `GET /api/v1/health` ok locally and via
@@ -1387,7 +1390,8 @@ re-login.
 
 ### 11.4 Runner cutover (S14)
 
-Preconditions: S13 soaked ≥ 24 h (Q2).
+Preconditions: S13 soaked ≥ 24 h (Q2); window agreed with the coordinator
+as in 11.3; owner available to approve the real ticket of step 2.
 
 Claims are paused with the existing kill switch for the whole switch, so the
 old runner cannot claim between the drain check and its restart: the API's
@@ -1402,15 +1406,19 @@ claim returns `null` and the runner loop skips claiming while
    errors in the err log, health reachable. Remove the disable file; verify the
    heartbeat advances again (idle claims record heartbeats only without the
    disable file).
-2. Real execution (Q4): the owner approves one operator ticket with a single
-   `investigator` step, agent `claude`, prompt "Report hostname, uptime and
+2. Real execution (Q4): exactly one real ticket, approved by the owner in the
+   OpsGate UI at that time (the 2026-10-21 decision permits it; the approval
+   of the concrete ticket is still the owner's): an operator ticket with a single
+   read-only `investigator` step, agent `claude`, prompt "Report hostname, uptime and
    the tmux version. Do not change anything." → state `succeeded`, artifacts
    with the expected names and modes, UI preview and step log, attach command
    shown.
 3. **Rollback drill** with the same pause procedure each way: disable file,
    drain, flip to `python`, deploy, verify the Python pid, remove the disable
-   file, verify the heartbeat and (optional, owner) a second test ticket; then
-   disable, drain, flip back to `rust`, deploy, re-enable, re-verify.
+   file, verify the heartbeat and the claim path without a real agent ticket
+   (the decision covers one real ticket, step 2; any further real ticket needs
+   a new owner approval); then disable, drain, flip back to `rust`, deploy,
+   re-enable, re-verify.
 4. Memory +1 h / +24 h.
 5. If any step fails, the disable file stays until the runner is verified (a
    paused runner only delays tickets; it never runs one twice).
@@ -1422,12 +1430,16 @@ unchanged (no crash loop), err logs, nyxmon ticket submissions accepted (nyxmon
 journal shows no `OpsGate ticket submit returned status=5xx`), memory trend.
 Roll back the affected component immediately on any of these failing or on a
 security-relevant misbehaviour (auth bypass, CSRF, a step started twice).
-Acceptance report in `docs/OPSGATE_RUST.md` and the coordinator item.
+Acceptance report in `docs/OPSGATE_RUST.md` and the coordinator item. After
+S15 the coordinator opens the separate item `opsgate-runner-token-hardening`
+(Q6); it is not a slice of this plan.
 
 ### 11.6 Python retirement (S16, ≥ 30 days after S14, Q5)
 
 Removes the Python implementation from role, inventory and repository and
-deletes the venvs/app dirs on studio (production change, owner approval).
+deletes the venvs/app dirs on studio (production change; approved by the owner
+on 2026-10-21 as S16a → S16b → S16c, no earlier than 30 days after the S14
+runner cutover, and only after S15 was accepted without a rollback still open).
 Order is strict, because the deployed role keeps syncing the opsgate checkout
 and running `uv sync` for both users until it is retired:
 
@@ -1452,13 +1464,24 @@ and running `uv sync` for both users until it is retired:
 Rules: one branch per slice (`rust-opsgate/<id>-<name>`) in its own worktree,
 reviewed by `gpt-6.1-sol` at **high** reasoning through the codex review loop
 (this PLAN.md and the slice's Python sources go along as context), merged to
-the default branch and pushed. Every slice keeps the Python checks
+the default branch and pushed. A slice gets at most three review rounds
+(owner rule 2026-10-21): round 1 over the slice, rounds 2 and 3 over the
+repair delta; if round 3 is not clean, the worker stops and reports to the
+coordinator instead of merging. A failing review harness is retried once and
+never replaced by another reviewer. Every slice keeps the Python checks
 (`just check`) and the Rust checks green, updates `rust/TESTMAP.md`, lists the
 Python functions it ports, and stays ≤ ~2.5k changed lines excluding
 generated fixtures. Production steps run under the deploy lock (section 2).
 ops-library slices put changelog entries under "Unreleased" and never bump
-`galaxy.yml`; the ops-library release that S11 asserts is made by the
-coordinator/owner.
+`galaxy.yml`; the ops-library releases that S11 and S16b assert are collection
+release commits (`galaxy.yml` bump + CHANGELOG heading) that the coordinator
+makes on ops-library `main` right before the production deploy that needs
+them (owner decision 2026-10-21). This stream's Rust code lives in the opsgate
+repository and its role keeps its own install task (10.1), so no slice depends
+on the ops-library Rust foundation slices F1–F4 of
+`ops-library/rust/PLAN-foundation.md`; ops-library's new `rust.yml` CI covers
+only `rust/` there and does not test the `opsgate_deploy` changes (their tests
+run with `just test` as today).
 
 | ID | Slice | Repo | Depends on | Parallel | h | Prod |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1479,13 +1502,13 @@ coordinator/owner.
 | S8 | Integration: both harnesses green for Rust and all mixed combinations, fixes, TESTMAP complete, docs (README runtime/config sections incl. the timeout variable name, `rust/README.md`, CHANGELOG) | opsgate | S4b, S5, S6b, S7a, S7b | no | 3 | no |
 | S9 | Release pipeline (section 9) + `release_checks.py` and tests; tag `rs-v0.3.0` after S8 | opsgate | S1 (workflow), S8 (tag) | yes (from W1) | 3 | no |
 | S10 | Role switch (10.1) incl. Python-plist copy for emergencies, tests, README, CHANGELOG | ops-library | S1o; archive format of section 9 | yes (from W1) | 4 | no |
-| S11 | ops-control wiring (10.2) + install deploy (11.1) under the lock | ops-control | S9 tag, S10 in an ops-library release | no | 2 | yes (no switch) |
+| S11 | ops-control wiring (10.2) + install deploy (11.1) under the lock | ops-control | S9 tag, S10 (and S1o) in a coordinator ops-library release | no | 2 | yes (no switch) |
 | S12 | Shadow on studio (11.2) and report | ops-control docs | S11 | no | 3 | host only, not the service |
 | S13 | API cutover + rollback drill (11.3) | ops-control | S12 | no | 2 | yes |
 | S14 | Runner cutover + rollback drill (11.4) | ops-control | S13 + 24 h | no | 2 | yes |
 | S15 | Soak 7 days and acceptance (11.5) | ops-control docs | S14 | no | 1 | read-only |
 | S16a | Retire Python in the role (no source sync/uv sync with both impls rust, working directories moved, guarded app-dir removal, `python` impl removed) | ops-library | S15 + 30 days | no | 2 | no |
-| S16b | Retire in ops-control (vars, playbook source resolution, docs) + deploy of the S16a release removing venvs/app dirs (owner approval) | ops-control | S16a in an ops-library release | no | 2 | yes |
+| S16b | Retire in ops-control (vars, playbook source resolution, docs) + deploy of the S16a release removing venvs/app dirs (owner-approved 2026-10-21, Q5) | ops-control | S16a in a coordinator ops-library release | no | 2 | yes |
 | S16c | Retire in the repository: templates into `rust/`, Python package/tests removed, fixtures frozen (generator and drift test removed), CI/README/AGENTS updated | opsgate | S16b verified in production | no | 2 | no |
 
 Parallel waves (maximum concurrency):
@@ -1548,7 +1571,8 @@ Acceptance criteria (beyond green checks and a clean review):
   harness results, runner scenarios, memory.
 - **S13/S14:** all checks of 11.3/11.4 recorded with times, rollback drills
   done, memory within section 8.
-- **S15:** 7-day report; owner acceptance.
+- **S15:** 7-day report; owner acceptance; item
+  `opsgate-runner-token-hardening` opened (Q6).
 - **S16:** no Python process, venv or app dir for OpsGate on studio; docs
   state Rust is the only implementation.
 
@@ -1572,9 +1596,11 @@ Acceptance criteria (beyond green checks and a clean review):
   agent test in S14.
 - **R5 macOS specifics** (code signature after strip, `tmux` from Homebrew on
   PATH, bash 3.2). Mitigation: macOS CI, release checks, S12 on the host.
-- **R6 Session cutover friction** (D-1): one re-login per switch; documented.
+- **R6 Session cutover friction** (D-1): one re-login per switch; documented
+  and accepted by the owner (Q1).
 - **R7 Pre-existing exposure**: agent steps can read the runner token
-  (environment and group-readable env file). Kept as-is by the port (Q6).
+  (environment and group-readable env file). Kept as-is by the port (Q6);
+  hardening is the separate item `opsgate-runner-token-hardening` after S15.
 - **R8 Supply chain**: Cargo.lock, `--locked`, cargo-deny, pinned actions,
   sha256 pinned in the inventory, root-owned install directory.
 - **R9 Coordination**: ops-control CI red for unrelated reasons may hide new
@@ -1587,30 +1613,51 @@ Acceptance criteria (beyond green checks and a clean review):
 
 ---
 
-## 14. Owner questions (with recommendations)
+## 14. Owner decisions (2026-10-21)
 
-- **Q1 Re-login on every API switch (D-1).** Accept that approvers sign in
-  again after the API cutover and after each rollback? *Recommended: yes* —
-  one approver, rare switches; re-implementing Flask's cookie format contradicts
-  the "no Python library re-implementations" rule.
-- **Q2 Cutover order.** API first (S13), runner at least 24 h later (S14), each
-  with its own rollback drill? *Recommended: yes* — the proven Python runner
-  then validates the Rust API's claim/status contract in production first, and
-  each step can be rolled back alone.
-- **Q3 Shadow run on studio (S12).** Approve a ~2 h shadow: a DB copy, a second
-  API on `127.0.0.1:8712` with throwaway credentials, a shadow runner as `ops`
-  with separate directories, socket label and fake agents, all removed
-  afterwards? *Recommended: yes.*
-- **Q4 Real agent execution during S14.** Approve one operator ticket with a
-  single read-only `investigator` step (`claude`) to prove the full path, plus
-  optionally one during the rollback drill? *Recommended: yes* (alternative:
-  wait for the next natural ticket, which can take weeks).
-- **Q5 Python retirement.** Retire the Python implementation (and delete the
-  venvs/app dirs on studio) 30 days after the runner cutover, as its own
-  slices? *Recommended: yes*, matching the mailgun-relay rollback window
-  practice.
-- **Q6 Runner token visible to agent steps (pre-existing).** Keep exact parity
-  in the port and track hardening (not exporting `OPSGATE_RUNNER_TOKEN` to
-  steps *and* tightening `/etc/opsgate/opsgate-runner.env` access) as a
-  separate item after S15? *Recommended: yes* — changing it during the port
-  would mix a security change into a parity migration.
+The owner answered the questions below on 2026-10-21 (given in chat to the
+campaign coordinator) and accepted the recommendation every time. The
+original question and recommendation are kept after each decision.
+
+- **Q1 Re-login on every API switch (D-1): decided yes.** Approvers sign in
+  again after the API cutover (S13) and after each API rollback, including
+  the S13 rollback drill. *Question:* accept the re-login instead of
+  re-implementing Flask's cookie format (one approver, rare switches; the
+  re-implementation contradicts the "no Python library re-implementations"
+  rule)?
+- **Q2 Cutover order: decided as recommended.** API first (S13), runner at
+  least 24 h later (S14), each with its own rollback drill (11.3 step 3,
+  11.4 step 3). *Reason:* the proven Python runner validates the Rust API's
+  claim/status contract in production first, and each step can be rolled
+  back alone.
+- **Q3 Shadow run on studio (S12): approved.** About 2 h: a DB copy in a
+  0700 directory, a second API on `127.0.0.1:8712` with throwaway credentials,
+  a shadow runner as `ops` with separate directories, socket label and fake
+  agents, all removed afterwards (11.2); no production unit is touched.
+- **Q4 Real agent execution during S14: approved, one ticket.** One real
+  operator ticket with a single read-only `investigator` step (`claude`)
+  during the runner cutover (11.4 step 2), approved by the owner in the UI at
+  that time. The rollback drill uses no further real ticket unless the owner
+  approves another one then. (Rejected alternative: waiting for the next
+  natural ticket, which can take weeks.)
+- **Q5 Python retirement: approved.** The Python implementation, including
+  the venvs and app dirs on studio, is retired 30 days after the S14 runner
+  cutover as its own slices in the strict order S16a → S16b → S16c (11.6),
+  matching the mailgun-relay rollback window practice.
+- **Q6 Runner token visible to agent steps (pre-existing): decided
+  unchanged.** The port keeps exact parity (4.13.8, R7). Hardening (not
+  exporting `OPSGATE_RUNNER_TOKEN` to steps *and* tightening
+  `/etc/opsgate/opsgate-runner.env` access) is the separate item
+  `opsgate-runner-token-hardening` after S15, so no security change is mixed
+  into the parity migration.
+- **Review rule (owner, 2026-10-21, applies to the plan and every slice).**
+  A slice or this plan may get a third review round over the repair delta;
+  if round 3 is not clean, the work stops and is reported to the coordinator
+  (section 12 rules).
+
+Campaign decisions of the same day that constrain this stream: ops-library
+collection releases are made by the coordinator right before the production
+deploy that needs them, never by a worker (section 12); the
+`echoport-command-guard` cutover runs last in the campaign and never alongside
+another production or staging change, so S11–S14 and S16b are not scheduled in
+its window (11.3).

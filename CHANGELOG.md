@@ -6,7 +6,9 @@
 
 - Add the Rust port plan (`rust/PLAN.md`) and its test map (`rust/TESTMAP.md`): contract,
   divergences, slices, release, role switch, shadow run, cutover and rollback for replacing the
-  Python API/UI and runner processes. No runtime change.
+  Python API/UI and runner processes, with the owner decisions of 2026-10-21 (re-login per API
+  switch, API before runner, studio shadow run, one real read-only cutover ticket, Python retirement
+  after 30 days, runner-token hardening as a separate item). No runtime change.
 
 ### Security
 

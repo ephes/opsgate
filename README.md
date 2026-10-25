@@ -315,8 +315,10 @@ Default UI routes:
 A Rust port of the API/UI and the runner lives in `rust/` (one `opsgate` binary: `opsgate serve`,
 `opsgate runner [--once]`, plus `opsgate check-config api|runner`, `opsgate check-db --db <path>` and
 `opsgate --version`; plan `rust/PLAN.md`, test map `rust/TESTMAP.md`). It reads the same environment
-variables and env files as the Python processes (see Configuration). It is complete but not deployed yet;
-the Python package stays the production implementation and the rollback target. Its checks run with
+variables and env files as the Python processes (see Configuration). Both production units on studio
+now run Rust 0.3.0 after their cutover and rollback drills. The runner soak started on 2026-10-25 at
+06:16:29 UTC; the next new nyxmon ticket with owner UI approval and the +1 h/+24 h memory checks remain
+open. The Python package stays the rollback target and contract oracle. Its checks run with
 `just rs-check` (rustup needed) and in the `rust` CI job on Linux and macOS; the drift test of its
 Python-generated fixtures (`tests/test_rust_fixtures.py`) is part of `just test`. The black-box parity
 harnesses (`just rs-parity-api`, `just rs-parity-runner`; CI jobs `parity-api` and `parity-runner`) run

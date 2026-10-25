@@ -1,19 +1,15 @@
 # Rust port of OpsGate (API/UI and runner) — implementation plan
 
-Status: plan; implementation in progress (S1 foundations, S2a core
-JSON/time/str, S2b core settings/files, S2c core validation, S3a store I, S3b
-store II, S4a web I (`opsgate serve` with the bearer routes, health and the
-login page; the API parity harness runs its S4a scenarios against Rust in CI),
-S4b web II (`POST /login`, logout, the throttle, API-CSRF and the approver's
-API actions; the S4b scenarios of both parity harnesses run against Rust), S5
-web III (the ticket pages, the manual ticket form and the approver's form
-actions; with S4b the UI scenarios of the API parity harness and the runner
-harness's mixed stacks with a Rust API run against Rust), S6a
-runner I, S6b runner II (`opsgate runner` works; the runner
-parity harness is green against it locally) and the S7b runner parity harness
-landed; the ops-library role switch S10 landed in `opsgate_deploy`); owner
-questions decided 2026-10-21 (section 14). Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella
-work item `rust-ports-campaign`).
+Status (2026-10-25): S1–S10 landed; release 0.3.0 is installed (S11),
+S12 shadow passed, and the API cutover/rollback drill passed (S13). The S14
+runner cutover and Rust → Python → Rust drill passed on 2026-10-25; both
+production units now run Rust 0.3.0. Runner soak starts at **06:16:29 UTC**
+on 2026-10-25. The next new nyxmon ticket after that switch, with the owner's
+concrete UI approval, and +1 h/+24 h memory samples remain open. Deployment
+pids, checks, memory and S13 follow-up are recorded in ops-control
+`docs/OPSGATE_RUST.md`. Owner decisions and later overrides are in section
+14. Campaign "Rust-Ports Runde 2", stream `rust-opsgate` (umbrella work item
+`rust-ports-campaign`).
 
 This document is the contract for the implementers and reviewers of the
 slices in section 12. It ports both long-running Python processes of OpsGate
@@ -1757,8 +1753,9 @@ owner available for the re-login (accepted, Q1).
 
 ### 11.4 Runner cutover (S14)
 
-Preconditions: S13 soaked ≥ 24 h (Q2); window agreed with the coordinator
-as in 11.3; owner available to approve the real ticket of step 2.
+Preconditions: S13 soaked ≥ 24 h (Q2); deploy lock available and no concurrent
+deploy; owner available to approve the real ticket of step 3. The owner
+withdrew the time-of-day deploy bans on 2026-10-25 (section 14).
 
 Claims are paused with the existing kill switch for the whole switch, so the
 old runner cannot claim between the drain check and its restart: the API's
@@ -1773,19 +1770,21 @@ claim returns `null` and the runner loop skips claiming while
    errors in the err log, health reachable. Remove the disable file; verify the
    heartbeat advances again (idle claims record heartbeats only without the
    disable file).
-2. Real execution (Q4): exactly one real ticket, approved by the owner in the
-   OpsGate UI at that time (the 2026-10-21 decision permits it; the approval
-   of the concrete ticket is still the owner's): an operator ticket with a single
-   read-only `investigator` step, agent `claude`, prompt "Report hostname, uptime and
-   the tmux version. Do not change anything." → state `succeeded`, artifacts
-   with the expected names and modes, UI preview and step log, attach command
-   shown.
-3. **Rollback drill** with the same pause procedure each way: disable file,
-   drain, flip to `python`, deploy, verify the Python pid, remove the disable
-   file, verify the heartbeat and the claim path without a real agent ticket
-   (the decision covers one real ticket, step 2; any further real ticket needs
-   a new owner approval); then disable, drain, flip back to `rust`, deploy,
-   re-enable, re-verify.
+2. **Rollback drill** with the same pause procedure each way: disable file,
+   drain, flip to `python`, deploy, verify the Python pid and byte equality
+   with the emergency Python plist; remove the disable file and verify the
+   heartbeat and empty claim path without a real agent ticket. Then disable,
+   drain, flip back to `rust`, deploy, re-enable and re-verify. Check
+   `.previous-runner`; the final Rust start is the runner soak start.
+3. Real execution (Q4, revised by the owner's S14 instructions): use only the
+   next new nyxmon ticket created after the final Rust switch. Show its id
+   prefix, source, every step and agent, and verify every step is read-only.
+   Ask the owner to approve that concrete ticket in the UI; never create,
+   approve or reject a ticket yourself and never use an older pending one.
+   Verify Rust claims it, state `succeeded`, artifact names/modes, UI preview,
+   step log and attach command. No further real ticket without new owner
+   approval. Record this as open if the owner stops before a suitable ticket
+   arrives.
 4. Memory +1 h / +24 h.
 5. If any step fails, the disable file stays until the runner is verified (a
    paused runner only delays tickets; it never runs one twice).
@@ -2015,6 +2014,12 @@ original question and recommendation are kept after each decision.
   that time. The rollback drill uses no further real ticket unless the owner
   approves another one then. (Rejected alternative: waiting for the next
   natural ticket, which can take weeks.)
+- **S14 follow-up decisions (2026-10-25).** The owner's slice instructions
+  supersede Q4's original operator-ticket procedure: finish the rollback drill
+  first, then use the next newly created nyxmon ticket after the final Rust
+  switch, with every step read-only and concrete UI approval by the owner.
+  The owner also withdrew time-of-day deploy bans, including Daybook and
+  backup windows; lock, pause/drain and verification guards remain required.
 - **Q5 Python retirement: approved.** The Python implementation, including
   the venvs and app dirs on studio, is retired 30 days after the S14 runner
   cutover as its own slices in the strict order S16a → S16b → S16c (11.6),

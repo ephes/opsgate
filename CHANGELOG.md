@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Documentation
+
+- Record the Rust 0.3.0 production rollout and runner rollback drill, the
+  2026-10-25 06:16:29 UTC runner soak start, and the outstanding real-ticket
+  and memory checks. Align the S14 procedure with the owner's updated
+  nyxmon-ticket and deployment-scheduling decisions.
+
 ### Development
 
 - Rust port slice S9 (release pipeline): `.github/workflows/rust-release.yml` builds the `opsgate`

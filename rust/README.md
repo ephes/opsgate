@@ -26,10 +26,13 @@ integration (S8): every command works (`serve`, `runner`, `check-config`,
 parity harnesses run every scenario against both implementations in CI with
 no unexplained difference — including cross-implementation databases and
 restarts and all four API/runner stacks (Python/Rust × Python/Rust). The
-Python package in `src/opsgate` is the production implementation and the
-oracle for the contract. The release pipeline (S9, section "Release" below)
-publishes the binary as GitHub releases `rs-v<version>`; nothing deploys or
-runs it yet, the role switch (S10) comes next.
+Python package in `src/opsgate` remains the rollback target and contract
+oracle. The release pipeline (S9, section "Release" below) publishes the
+binary as GitHub releases `rs-v<version>`, and the deployment role (S10)
+selects Python or Rust independently per unit. Both production units on
+studio now run Rust 0.3.0 after the API and runner cutover/rollback drills.
+Runner soak started on 2026-10-25 at 06:16:29 UTC; the next new nyxmon ticket
+with owner UI approval and the +1 h/+24 h memory checks remain open.
 
 ## Layout
 

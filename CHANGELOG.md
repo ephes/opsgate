@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Security
+
+- Rust port (`rust/`): bump the locked `tokio` from 1.54.0 to 1.54.1 for
+  RUSTSEC-2026-0384 (race condition in `tokio::time::Interval`) and `ctutils`
+  from 0.4.3 to 0.4.4 for RUSTSEC-2026-0385 (non-constant-time mask
+  generation and `u128` comparisons; pulled in by `digest` via `sha2` and
+  `hmac`). Both turned the `cargo deny` supply-chain check red. Lockfile only,
+  no code change. The deployed binary keeps the old versions until a new
+  `rs-v` release is built and rolled out.
+
 ### Documentation
 
 - Record the Rust 0.3.0 production rollout and runner rollback drill, the

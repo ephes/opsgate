@@ -696,21 +696,26 @@ def test_resume_fails_closed_on_unreadable_metadata(tmp_path: Path, monkeypatch,
     elif failure == "invalid_utf8":
         step_paths.metadata_path.write_bytes(b"\xff\xfe{")
     else:
-        original_read_text = Path.read_text
-        metadata_path = step_paths.metadata_path
+        import os
 
-        def _read_text(self: Path, *args: Any, **kwargs: Any) -> str:
-            if self == metadata_path:
+        original_open = os.open
+        injected = []
+
+        def _open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            if path == step_paths.metadata_path:
+                injected.append(True)
                 raise PermissionError("denied")
-            return original_read_text(self, *args, **kwargs)
+            return original_open(path, flags, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "read_text", _read_text)
+        monkeypatch.setattr("opsgate.runner.os.open", _open)
 
     executor.run(initial_ticket=ticket)
 
     assert executor.launched_sessions == []
     assert ticket["state"] == "failed"
     assert ticket["result_detail"] == "step_1_interrupted"
+    if failure == "read_error":
+        assert injected == [True]
 
 
 def test_resume_adopts_exit_code_written_during_session_probe(tmp_path: Path) -> None:
@@ -1013,3 +1018,116 @@ def test_cleanup_verifies_sessions_are_gone(tmp_path: Path, monkeypatch) -> None
     assert [command[3:] for command in calls] == [
         ["ls"], ["kill-session", "-t", "job-ticket-01-investigator"], ["ls"],
     ]
+
+
+@pytest.mark.parametrize("bad_bytes", [b"\xff", b"{", b"[]", b'{"ticket_id":"../../invented"}'])
+def test_recovery_isolates_corrupt_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_bytes: bytes) -> None:
+    ticket_id = "11111111-1111-4111-8111-111111111111"
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    bad = runner.state_dir / "000-corrupt.json"
+    bad.write_bytes(bad_bytes)
+    runner._write_state_file(ticket_id)
+    looked_up, started = [], []
+
+    def get_ticket(identity: str) -> dict[str, Any]:
+        looked_up.append(identity)
+        assert identity == ticket_id
+        return {"id": identity, "state": "running"}
+
+    monkeypatch.setattr(runner.api, "get_ticket", get_ticket)
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: set())
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_artifacts", lambda: set())
+    monkeypatch.setattr(runner, "_start_worker", lambda **kw: started.append(kw["ticket_id"]))
+    runner._recover_inflight_tickets(include_artifacts=True)
+    assert looked_up == started == [ticket_id]
+    assert bad.read_bytes() == bad_bytes
+
+
+@pytest.mark.parametrize("artifact", ["summary_path", "metadata_path"])
+@pytest.mark.parametrize(
+    "content",
+    [b"\xff", b'{"status":"succeeded","padding":"' + b"x" * (8 * 1024 * 1024) + b'"}'],
+    ids=["utf8", "oversize"],
+)
+def test_rejected_artifact_never_relaunches_or_skips_step(tmp_path: Path, artifact: str, content: bytes) -> None:
+    ticket_id = "11111111-1111-4111-8111-111111111111"
+    plan = [{"role": "investigator", "agent": "codex", "prompt_markdown": "synthetic"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path),
+        api=FakeApi(ticket),
+        stop_event=threading.Event(),
+        ticket_id=ticket_id,
+        has_session=False,
+        auto_complete_exit_code=0,
+    )
+    paths = executor._prepare_step_paths(0, plan[0])
+    paths.step_dir.mkdir(parents=True)
+    path = getattr(paths, artifact)
+    path.write_bytes(content)
+    executor.run(initial_ticket=ticket)
+    assert executor.launched_sessions == []
+    assert ticket["state"] == "failed"
+    assert ticket["result_detail"] == "step_1_interrupted"
+    assert path.read_bytes() == content
+
+
+def test_artifact_reader_bounds_bytes_and_rejects_special_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+    from types import SimpleNamespace
+
+    from opsgate.runner import ARTIFACT_MAX_BYTES, _load_json_object
+
+    path = tmp_path / "artifact.json"
+    path.write_bytes(b"{}" + b" " * (ARTIFACT_MAX_BYTES - 2))
+    assert _load_json_object(path) == {}
+    with path.open("ab") as stream:
+        stream.write(b" ")
+    assert _load_json_object(path) is None
+    path.write_bytes(b"{}")
+    original_open = os.open
+    opened = []
+
+    def open_nonblocking(candidate: Any, flags: int) -> int:
+        assert flags & os.O_NONBLOCK
+        opened.append(candidate)
+        return original_open(candidate, flags)
+
+    monkeypatch.setattr("opsgate.runner.os.open", open_nonblocking)
+    # Model a FIFO descriptor without depending on platform FIFO creation/permissions.
+    monkeypatch.setattr("opsgate.runner.os.fstat", lambda _fd: SimpleNamespace(st_mode=0o010000))
+    assert _load_json_object(path) is None
+    assert opened == [path]
+    assert path.read_bytes() == b"{}"
+
+
+def test_recovery_isolates_read_error_and_still_discovers_tickets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    ticket_id = "11111111-1111-4111-8111-111111111111"
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    bad = runner.state_dir / "000-unreadable.json"
+    bad.write_bytes(b"retained synthetic evidence")
+    runner._write_state_file(ticket_id)
+    original_open = os.open
+    injected, started = [], []
+
+    def open_file(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if path == bad:
+            injected.append(True)
+            raise OSError("synthetic unreadable file")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr("opsgate.runner.os.open", open_file)
+    monkeypatch.setattr(runner.api, "get_ticket", lambda identity: {"id": identity, "state": "running"})
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: {ticket_id})
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_artifacts", lambda: set())
+    monkeypatch.setattr(runner, "_start_worker", lambda **kw: started.append(kw["ticket_id"]))
+    runner._recover_inflight_tickets(include_artifacts=True)
+    assert injected == [True]
+    assert started == [ticket_id]
+    assert bad.read_bytes() == b"retained synthetic evidence"

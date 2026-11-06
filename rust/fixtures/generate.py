@@ -252,7 +252,9 @@ def _settings_corpus() -> list[dict[str, Any]]:
                 # Out-of-range ASCII integers for the duration default fail its
                 # bounds check in both implementations (same message); every
                 # other D-8 input is accepted by Python only.
-                overflow_bounded = name == "OPSGATE_MAX_DURATION_SECONDS_DEFAULT" and value.isascii()
+                overflow_bounded = name in {
+                    "OPSGATE_MAX_DURATION_SECONDS_DEFAULT", "OPSGATE_UI_SESSION_TIMEOUT_SECONDS"
+                } and value.isascii()
                 if divergence is not None and not overflow_bounded:
                     extra = {"divergence": divergence, "rust_error": f"{name} must be an integer"}
                 label = value if len(value) < 40 else f"{len(value)} digits"
@@ -261,6 +263,8 @@ def _settings_corpus() -> list[dict[str, Any]]:
         for loader in ("api", "runner"):
             label = value if len(value) < 40 else f"{len(value)} digits"
             add(_case(f"{loader} duration default {label}", loader, {"OPSGATE_MAX_DURATION_SECONDS_DEFAULT": value}))
+    for value in ("0", "-1", "1", "28800", "86399999999999", "86400000000000", "1" + "0" * 100):
+        add(_case(f"api session lifetime {value}", "api", {"OPSGATE_UI_SESSION_TIMEOUT_SECONDS": value}))
     # Strings and paths.
     add(_case("api strings stripped", "api", {
         "OPSGATE_SERVICE_NAME": " svc\u2003", "OPSGATE_BIND_HOST": " 127.0.0.1 ", "OPSGATE_DB_PATH": " /x/db.sqlite3 ",
@@ -2638,10 +2642,18 @@ def _throttle_scenario(
         limit=limit, window_seconds=window_seconds, max_tracked_clients=max_tracked_clients, clock=clock
     )
     steps = []
+    pending: dict[str, list[object]] = {}
     for op, key, now in ops:
         clock.now = now
         result: bool | None = None
-        if op == "fail":
+        if op == "reserve":
+            attempt = throttle.reserve(key)
+            result = attempt is not None
+            if attempt is not None:
+                pending.setdefault(key, []).append(attempt)
+        elif op in {"success", "failure", "error"}:
+            throttle.settle(key, pending[key].pop(0), success={"success": True, "failure": False, "error": None}[op])
+        elif op == "fail":
             throttle.record_failure(key)
         elif op == "locked":
             result = throttle.is_locked(key)
@@ -2669,6 +2681,16 @@ def build_throttle() -> str:
     """``throttle.json``: event sequences against ``LoginThrottle`` with a fake
     clock → each result and the tracked failures."""
     scenarios = [
+        _throttle_scenario("reservations, success and failure", 2, 60.0, 2, [
+            ("reserve", "a", 0.0), ("reserve", "a", 0.0), ("reserve", "a", 0.0),
+            ("success", "a", 1.0), ("reserve", "a", 1.0), ("reserve", "a", 1.0),
+            ("failure", "a", 2.0), ("error", "a", 2.0), ("reserve", "a", 2.0),
+        ]),
+        _throttle_scenario("expired reservations cannot settle new work", 1, 60.0, 1, [
+            ("reserve", "a", 0.0), ("reserve", "b", 1.0), ("reserve", "a", 60.0),
+            ("failure", "a", 61.0), ("reserve", "a", 61.0), ("error", "a", 61.0),
+            ("reserve", "b", 62.0),
+        ]),
         _throttle_scenario("defaults: five failures lock for 15 minutes", 5, 15 * 60.0, 10_000, [
             *[("fail", "100.64.0.1", 1000.0 + step) for step in range(4)],
             ("locked", "100.64.0.1", 1004.0),

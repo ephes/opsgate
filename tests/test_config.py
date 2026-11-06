@@ -299,3 +299,26 @@ def test_duration_default_validates_supported_bounds(
     else:
         with pytest.raises(SettingsError, match="OPSGATE_MAX_DURATION_SECONDS_DEFAULT"):
             loader()
+
+
+@pytest.mark.parametrize("value", [0, -1, 86400000000000, 10**100])
+def test_invalid_session_lifetime_fails_at_load(boolean_env: None, monkeypatch: pytest.MonkeyPatch, value: int) -> None:
+    monkeypatch.setenv("OPSGATE_UI_SESSION_TIMEOUT_SECONDS", str(value))
+    with pytest.raises(SettingsError, match="OPSGATE_UI_SESSION_TIMEOUT_SECONDS"):
+        load_settings()
+
+
+@pytest.mark.parametrize("value", [0, -1, 86400000000000, 10**100, True, 1.5])
+def test_invalid_session_lifetime_fails_at_construction(boolean_env: None, value: int) -> None:
+    from dataclasses import replace
+
+    with pytest.raises(SettingsError, match="OPSGATE_UI_SESSION_TIMEOUT_SECONDS"):
+        replace(load_settings(), session_timeout_seconds=value)
+
+
+@pytest.mark.parametrize("value", [1, 28800, 86399999999999])
+def test_valid_session_lifetime(boolean_env: None, monkeypatch: pytest.MonkeyPatch, value: int) -> None:
+    from datetime import timedelta
+
+    monkeypatch.setenv("OPSGATE_UI_SESSION_TIMEOUT_SECONDS", str(value))
+    assert timedelta(seconds=load_settings().session_timeout_seconds).total_seconds() >= value

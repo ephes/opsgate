@@ -619,12 +619,7 @@ fn session_names(stdout: &str) -> impl Iterator<Item = &str> {
         .map(|line| pytext::strip(line.split(':').next().unwrap_or("")))
 }
 
-/// The ticket ids of the state files (`runner-state/*.json`, hidden files
-/// included, as `Path.glob`). A file that is not JSON (a BOM included), not
-/// an object or has no non-blank `ticket_id` is deleted. A directory that
-/// cannot be listed has no files (`glob` ignores the error); a file that
-/// cannot be read or is not UTF-8 is an error (Python: `OSError`,
-/// `UnicodeDecodeError`, not caught).
+/// Recover only matching UUID filenames/identities; isolate bad files and retain evidence.
 fn state_file_ids(state_dir: &Path) -> io::Result<Vec<String>> {
     use std::os::unix::ffi::OsStrExt;
 
@@ -640,20 +635,20 @@ fn state_file_ids(state_dir: &Path) -> io::Result<Vec<String>> {
 
     let mut ids = Vec::new();
     for path in files {
-        let text = String::from_utf8(std::fs::read(&path)?).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "runner state file is not UTF-8")
-        })?;
-        let ticket_id = match opsgate_core::json::parse(&text) {
-            Ok(Value::Object(state)) => pytext::strip(&text_or(&state, "ticket_id", "")).to_owned(),
-            _ => String::new(),
-        };
-        if ticket_id.is_empty() {
-            match std::fs::remove_file(&path) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-                _ => {}
-            }
+        let state = artifacts::load_json_object(&path);
+        let ticket_id = state
+            .as_ref()
+            .and_then(|state| state.get("ticket_id"))
+            .and_then(Value::as_str);
+        let Some(ticket_id) = ticket_id.filter(|id| {
+            id.len() == 36
+                && TICKET_ID_RE.is_match(id)
+                && path.file_stem().and_then(|name| name.to_str()) == Some(id)
+        }) else {
+            tracing::warn!("Ignoring unavailable or invalid runner state file; evidence retained");
             continue;
-        }
+        };
+        let ticket_id = ticket_id.to_owned();
         ids.push(ticket_id);
     }
     Ok(ids)
@@ -738,50 +733,30 @@ mod tests {
     }
 
     #[test]
-    fn state_file_ids_delete_invalid_files() {
+    fn state_file_ids_retain_invalid_files_and_recover_valid_siblings() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path();
-        let write = |name: &str, text: &[u8]| std::fs::write(state.join(name), text).unwrap();
-        write("a.json", br#"{"ticket_id": " id-a "}"#);
-        write(".hidden.json", br#"{"ticket_id": "id-hidden"}"#);
-        write("number.json", br#"{"ticket_id": 7}"#);
-        write("not-json.json", b"{");
-        write("bom.json", "\u{feff}{\"ticket_id\": \"x\"}".as_bytes());
-        write("array.json", b"[]");
-        write("blank.json", br#"{"ticket_id": "  "}"#);
-        write("missing.json", br#"{"id": "x"}"#);
-        write("other.txt", br#"{"ticket_id": "id-txt"}"#);
-        write("tmpabc", b"{");
-        let mut ids = state_file_ids(state).unwrap();
-        ids.sort();
-        assert_eq!(ids, ["7", "id-a", "id-hidden"]);
-        let mut left: Vec<String> = std::fs::read_dir(state)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-        left.sort();
-        assert_eq!(
-            left,
-            [
-                ".hidden.json",
-                "a.json",
-                "number.json",
-                "other.txt",
-                "tmpabc"
-            ]
-        );
-
-        // Not UTF-8, and a directory named like a state file: errors.
-        write("z.json", b"\xff");
-        assert_eq!(
-            state_file_ids(state).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
-        );
-        std::fs::remove_file(state.join("z.json")).unwrap();
-        std::fs::create_dir(state.join("dir.json")).unwrap();
-        assert!(state_file_ids(state).is_err());
-
-        // A missing directory has no state files.
+        let id = "11111111-1111-4111-8111-111111111111";
+        std::fs::write(
+            state.join(format!("{id}.json")),
+            format!(r#"{{"ticket_id":"{id}"}}"#),
+        )
+        .unwrap();
+        for (name, bytes) in [
+            ("a.json", b"\xff".as_slice()),
+            ("b.json", b"{"),
+            ("c.json", br#"{"ticket_id":"../../invented"}"#),
+            (
+                "d.json",
+                br#"{"ticket_id":"11111111-1111-4111-8111-111111111111"}"#,
+            ),
+        ] {
+            std::fs::write(state.join(name), bytes).unwrap();
+        }
+        std::fs::create_dir(state.join("unreadable.json")).unwrap();
+        assert_eq!(state_file_ids(state).unwrap(), [id]);
+        assert_eq!(std::fs::read(state.join("a.json")).unwrap(), b"\xff");
+        assert_eq!(std::fs::read_dir(state).unwrap().count(), 6);
         assert!(state_file_ids(&state.join("missing")).unwrap().is_empty());
     }
 }

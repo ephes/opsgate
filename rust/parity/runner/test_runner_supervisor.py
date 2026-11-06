@@ -61,6 +61,8 @@ def test_recovery_housekeeping(rig: Rig) -> None:
         (state_dir / name).write_text(text, encoding="utf-8")
 
     state_file("broken.json", "{not json")
+    (state_dir / "invalid-utf8.json").write_bytes(b"\xff")
+    state_file("mismatched.json", {"ticket_id": running})
     state_file("list.json", [1])
     state_file("no-id.json", {"runner_host": "x"})
     state_file("ignored.txt", "not a state file")
@@ -77,7 +79,17 @@ def test_recovery_housekeeping(rig: Rig) -> None:
     runner = rig.runner(once=True)
     assert runner.wait(60) == 0
 
-    assert sorted(p.name for p in state_dir.iterdir()) == sorted(["ignored.txt", f"{unknown}.json"])
+    assert sorted(p.name for p in state_dir.iterdir()) == sorted(
+        [
+            "broken.json",
+            "list.json",
+            "no-id.json",
+            "invalid-utf8.json",
+            "mismatched.json",
+            "ignored.txt",
+            f"{unknown}.json",
+        ]
+    )
     # The running ticket's finished session stays (remain-on-exit) because --once exits first.
     assert rig.ws.sessions() == sorted([f"job-{unknown}-01-old", BOGUS, "unrelated", f"job-{running}-01-investigator"])
     # The running ticket without artifacts starts fresh (nothing says a step was ever started).

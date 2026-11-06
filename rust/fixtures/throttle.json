@@ -2,6 +2,155 @@
  "generated_by": "rust/fixtures/generate.py",
  "scenarios": [
   {
+   "limit": 2,
+   "max_tracked_clients": 2,
+   "name": "reservations, success and failure",
+   "steps": [
+    {
+     "failures": [],
+     "key": "a",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 0.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 1.0,
+     "op": "success",
+     "result": null
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 1.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 1.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [
+      [
+       "a",
+       [
+        2.0
+       ]
+      ]
+     ],
+     "key": "a",
+     "now": 2.0,
+     "op": "failure",
+     "result": null
+    },
+    {
+     "failures": [
+      [
+       "a",
+       [
+        2.0
+       ]
+      ]
+     ],
+     "key": "a",
+     "now": 2.0,
+     "op": "error",
+     "result": null
+    },
+    {
+     "failures": [
+      [
+       "a",
+       [
+        2.0
+       ]
+      ]
+     ],
+     "key": "a",
+     "now": 2.0,
+     "op": "reserve",
+     "result": true
+    }
+   ],
+   "window_seconds": 60.0
+  },
+  {
+   "limit": 1,
+   "max_tracked_clients": 1,
+   "name": "expired reservations cannot settle new work",
+   "steps": [
+    {
+     "failures": [],
+     "key": "a",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "b",
+     "now": 1.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 60.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 61.0,
+     "op": "failure",
+     "result": null
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 61.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [],
+     "key": "a",
+     "now": 61.0,
+     "op": "error",
+     "result": null
+    },
+    {
+     "failures": [],
+     "key": "b",
+     "now": 62.0,
+     "op": "reserve",
+     "result": true
+    }
+   ],
+   "window_seconds": 60.0
+  },
+  {
    "limit": 5,
    "max_tracked_clients": 10000,
    "name": "defaults: five failures lock for 15 minutes",

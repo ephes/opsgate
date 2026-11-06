@@ -117,29 +117,30 @@ pub async fn login_submit(
         client_ip
     };
 
-    if state.login_throttle().is_locked(&throttle_key) {
+    let Some(reservation) = state.login_throttle().reserve(&throttle_key) else {
         session.flash("Too many failed login attempts. Try again later.", "error");
         return login_page_response(&state, &session, next_path, StatusCode::TOO_MANY_REQUESTS);
-    }
+    };
 
     let configured_username = state.settings().ui_username.clone();
     let password_bcrypt = state.settings().ui_password_bcrypt.clone();
     let checked_username = username.clone();
     // bcrypt is CPU work: off the async workers, as the store's calls.
-    let matches = tokio::task::spawn_blocking(move || {
-        credentials_match(
+    let (matches, reservation) = tokio::task::spawn_blocking(move || {
+        let matches = credentials_match(
             &checked_username,
             &password,
             &configured_username,
             &password_bcrypt,
             checkpw,
-        )
+        );
+        (matches, reservation)
     })
     .await
     .map_err(|error| AppError::Internal(format!("password check task: {error}")))?;
 
     if !matches {
-        state.login_throttle().record_failure(&throttle_key);
+        reservation.settle(false);
         session.flash("Invalid username or password", "error");
         let next = next_path.map_or(UrlArg::None, UrlArg::Text);
         let target = url_for("ui_login", &[("next", next)])
@@ -158,7 +159,7 @@ pub async fn login_submit(
             "session_state_missing",
         ));
     };
-    state.login_throttle().reset(&throttle_key);
+    reservation.settle(true);
     let fresh = signed_in(&username, generation)?;
     session.update(|data| *data = fresh);
     Ok(redirect(

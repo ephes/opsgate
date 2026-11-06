@@ -30,6 +30,7 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 gethostname = "1"
 ipnet = "2"
 tempfile = "3"
+rustix = { version = "1", features = ["fs"] }
 # JSON with number tokens preserved (PLAN.md 4.8, 6.2): the checksum formatter
 # classifies and re-renders every token itself and sorts object keys itself,
 # so a crate that enables serde_json's `preserve_order` cannot change it.

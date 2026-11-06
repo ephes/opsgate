@@ -103,10 +103,31 @@ fn throttle_sequences_match_python() {
             usize::try_from(scenario["max_tracked_clients"].as_u64().unwrap()).unwrap(),
             Arc::new(move || *reading.0.lock().unwrap()),
         );
+        let mut pending: std::collections::HashMap<
+            String,
+            std::collections::VecDeque<opsgate_web::throttle::Reservation>,
+        > = std::collections::HashMap::new();
         for (index, step) in scenario["steps"].as_array().unwrap().iter().enumerate() {
             clock.set(step["now"].as_f64().unwrap());
             let key = step["key"].as_str().unwrap();
             let result = match step["op"].as_str().unwrap() {
+                "reserve" => {
+                    let slot = throttle.reserve(key);
+                    let admitted = slot.is_some();
+                    if let Some(slot) = slot {
+                        pending.entry(key.to_owned()).or_default().push_back(slot);
+                    }
+                    Value::Bool(admitted)
+                }
+                "success" | "failure" | "error" => {
+                    let slot = pending.get_mut(key).unwrap().pop_front().unwrap();
+                    match step["op"].as_str().unwrap() {
+                        "success" => slot.settle(true),
+                        "failure" => slot.settle(false),
+                        _ => drop(slot),
+                    }
+                    Value::Null
+                }
                 "fail" => {
                     throttle.record_failure(key);
                     Value::Null

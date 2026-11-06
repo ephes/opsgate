@@ -984,6 +984,7 @@ dependencies = [
  "opsgate-core",
  "regex",
  "reqwest",
+ "rustix",
  "serde_json",
  "sha2",
  "shlex",

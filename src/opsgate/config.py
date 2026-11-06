@@ -7,6 +7,7 @@ from ipaddress import ip_network
 from pathlib import Path
 
 MAX_DURATION_SECONDS = 31_536_000
+MAX_SESSION_TIMEOUT_SECONDS = 86_399_999_999_999
 
 DEFAULT_ALLOWED_CIDRS = (
     "127.0.0.1/32",
@@ -46,6 +47,13 @@ class OpsGateSettings:
 
     def __post_init__(self) -> None:
         validate_duration_default(self.max_duration_seconds_default)
+        if (
+            type(self.session_timeout_seconds) is not int
+            or not 1 <= self.session_timeout_seconds <= MAX_SESSION_TIMEOUT_SECONDS
+        ):
+            raise SettingsError(
+                f"OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to {MAX_SESSION_TIMEOUT_SECONDS}"
+            )
 
 
 @dataclass(frozen=True)

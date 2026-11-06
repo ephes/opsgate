@@ -216,3 +216,34 @@ async fn the_key_is_the_socket_peer() {
         .await;
     assert_eq!(other.status, StatusCode::FOUND);
 }
+
+#[test]
+fn reservations_bound_concurrent_checks_and_release_on_unwind() {
+    let throttle = Arc::new(LoginThrottle::new(2, 60.0, 2, Arc::new(|| 0.0)));
+    let barrier = Arc::new(std::sync::Barrier::new(9));
+    let admitted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            let (throttle, barrier, admitted) =
+                (throttle.clone(), barrier.clone(), admitted.clone());
+            scope.spawn(move || {
+                let slot = throttle.reserve("a");
+                if slot.is_some() {
+                    admitted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                barrier.wait();
+                barrier.wait();
+                drop(slot);
+            });
+        }
+        barrier.wait();
+        assert_eq!(admitted.load(std::sync::atomic::Ordering::SeqCst), 2);
+        barrier.wait();
+    });
+    let slot = throttle.reserve("a").unwrap();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _slot = slot;
+        panic!("synthetic verifier failure");
+    }));
+    assert!(throttle.reserve("a").is_some());
+}

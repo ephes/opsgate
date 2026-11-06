@@ -3115,3 +3115,87 @@ def test_ticket_creation_metadata_rejects_unpaired_surrogates(client: Any, field
     expected_field = "created_by" if field == "creator" else field
     assert str(caught.value) == f"{expected_field} must be valid UTF-8 text"
     assert database_snapshot(client) == before
+
+
+def test_login_reserves_before_password_check(settings: OpsGateSettings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    throttle = LoginThrottle(limit=1)
+    app = create_app(settings, login_throttle=throttle)
+    app.config.update(TESTING=True)
+    entered, release = Event(), Event()
+    calls = []
+
+    def verify(*_args: Any) -> bool:
+        calls.append(True)
+        entered.set()
+        assert release.wait(5)
+        return False
+
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", verify)
+
+    def attempt() -> int:
+        with app.test_client() as browser:
+            browser.get("/login")
+            return browser.post(
+                "/login",
+                data={
+                    "username": settings.ui_username,
+                    "password": "wrong",
+                    "csrf_token": session_csrf_token(browser),
+                },
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(attempt)
+        assert entered.wait(5)
+        second = pool.submit(attempt)
+        try:
+            # The second request must return while the verifier is still blocked.
+            assert second.result(timeout=2) == 429
+        finally:
+            release.set()
+        assert first.result(timeout=5) == 302
+    assert len(calls) == 1
+
+
+def test_login_verifier_exception_releases_reservation(
+    settings: OpsGateSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    throttle = LoginThrottle(limit=1)
+    client = _client_for(settings, throttle=throttle)
+    client.get("/login")
+
+    def broken(*_args: Any) -> bool:
+        raise RuntimeError("synthetic verifier failure")
+
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", broken)
+    with pytest.raises(RuntimeError, match="synthetic"):
+        client.post(
+            "/login",
+            data={"username": settings.ui_username, "password": "wrong", "csrf_token": session_csrf_token(client)},
+        )
+    attempt = throttle.reserve("127.0.0.1")
+    assert attempt is not None
+    throttle.settle("127.0.0.1", attempt, success=None)
+
+
+def test_login_reservation_expiry_and_success_preserve_other_work() -> None:
+    clock = FakeClock()
+    throttle = LoginThrottle(limit=2, window_seconds=60, max_tracked_clients=1, clock=clock)
+    first, second = throttle.reserve("a"), throttle.reserve("a")
+    assert first is not None and second is not None
+    assert throttle.reserve("a") is None
+    assert throttle.reserve("b") is None
+    throttle.settle("a", first, success=True)
+    third = throttle.reserve("a")
+    assert third is not None
+    assert throttle.reserve("a") is None
+    clock.now += 60
+    fresh = throttle.reserve("a")
+    assert fresh is not None
+    throttle.settle("a", second, success=False)
+    throttle.settle("a", third, success=True)
+    assert throttle.reserve("a") is not None
+    assert throttle.reserve("a") is None

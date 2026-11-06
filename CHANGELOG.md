@@ -4,6 +4,17 @@
 
 ### Security
 
+- Reserve login capacity before bcrypt in Python and Rust, including pending checks;
+  release reservations on success/errors without holding the throttle lock while hashing.
+- Reject nonpositive or unrepresentable approver session lifetimes at startup.
+- Bound state/summary/metadata reads to 8 MiB on regular nonblocking file descriptors;
+  preserve rejected evidence and fail interrupted steps without relaunching them.
+
+### Fixed
+
+- Isolate corrupt/unreadable recovery state files, retain their evidence and validate
+  ticket identities against UUID filenames before looking up tickets.
+
 - Bound every tmux client operation to five seconds in both runners. Timed-out
   clients are killed and reaped; unverified session cleanup retains recovery state.
 

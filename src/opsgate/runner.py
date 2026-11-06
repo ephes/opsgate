@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shlex
 import signal
 import socket
+import stat
 import subprocess
 import threading
 import time
@@ -26,11 +28,28 @@ from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_d
 logger = logging.getLogger(__name__)
 
 TICKET_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+ARTIFACT_MAX_BYTES = 8 * 1024 * 1024
 API_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
 API_REQUEST_TIMEOUT_SECONDS = 15.0
 TMUX_COMMAND_TIMEOUT_SECONDS = 5.0
 
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
+
+
+def _load_json_object(path: Path) -> dict[str, Any] | None:
+    """Bound bytes on the opened regular file, including files growing during reads."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return None
+            raw = stream.read(ARTIFACT_MAX_BYTES + 1)
+        if len(raw) > ARTIFACT_MAX_BYTES:
+            return None
+        loaded = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 class RunnerApiError(RuntimeError):
@@ -349,6 +368,7 @@ class TicketExecutor:
                 tmux_sessions=tmux_sessions,
                 deadline=deadline,
                 step_paths=step_paths,
+                invalid_summary=existing_summary is None and step_paths.summary_path.exists(),
             )
 
             if step_outcome.kind == "succeeded":
@@ -421,6 +441,7 @@ class TicketExecutor:
         tmux_sessions: list[dict[str, Any]],
         deadline,
         step_paths: StepPaths,
+        invalid_summary: bool = False,
     ) -> StepOutcome:
         step_paths.step_dir.mkdir(parents=True, exist_ok=True)
         self._ticket_root.mkdir(parents=True, exist_ok=True)
@@ -446,6 +467,21 @@ class TicketExecutor:
         # step was started, so it fails closed instead of relaunching.
         metadata_present = step_paths.metadata_path.exists()
         previous_meta = self._load_summary(step_paths.metadata_path) if metadata_present else None
+        if invalid_summary or (metadata_present and previous_meta is None):
+            # Retain invalid evidence, stop any owned execution and fail closed.
+            if self._tmux_has_session(session_name):
+                self._tmux_kill_session(session_name)
+                if self._tmux_has_session(session_name):
+                    raise RuntimeError("Interrupted step session cleanup could not be verified")
+            self._upsert_tmux_session(
+                tmux_sessions,
+                {
+                    "step_index": step_index,
+                    "session_name": session_name,
+                    "status": "interrupted",
+                },
+            )
+            return StepOutcome(kind="failed", detail=f"step_{step_index + 1}_interrupted")
         exit_code_present = step_paths.exit_code_path.exists()
         session_alive = False if exit_code_present else self._tmux_has_session(session_name)
         if not exit_code_present and not session_alive:
@@ -678,17 +714,7 @@ class TicketExecutor:
         return tmux_sessions[-1]
 
     def _load_summary(self, summary_path: Path) -> dict[str, Any] | None:
-        if not summary_path.exists():
-            return None
-        try:
-            loaded = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            # Unreadable, undecodable or malformed JSON (JSONDecodeError and
-            # UnicodeDecodeError are ValueErrors) is treated as unavailable.
-            return None
-        if not isinstance(loaded, dict):
-            return None
-        return loaded
+        return _load_json_object(summary_path)
 
     def _kill_running_sessions(self, tmux_sessions: list[dict[str, Any]]) -> None:
         for entry in tmux_sessions:
@@ -858,17 +884,10 @@ class OpsGateRunner:
     def _recover_inflight_tickets(self, *, include_artifacts: bool) -> None:
         candidate_ticket_ids: set[str] = set()
         for state_file in sorted(self.state_dir.glob("*.json")):
-            try:
-                parsed = json.loads(state_file.read_text(encoding="utf-8"))
-            except json.JSONDecodeError:
-                state_file.unlink(missing_ok=True)
-                continue
-            if not isinstance(parsed, dict):
-                state_file.unlink(missing_ok=True)
-                continue
-            ticket_id = str(parsed.get("ticket_id", "")).strip()
-            if not ticket_id:
-                state_file.unlink(missing_ok=True)
+            parsed = _load_json_object(state_file)
+            ticket_id = parsed.get("ticket_id") if isinstance(parsed, dict) else None
+            if not isinstance(ticket_id, str) or not TICKET_ID_RE.fullmatch(ticket_id) or state_file.stem != ticket_id:
+                logger.warning("Ignoring invalid runner state identity; evidence retained")
                 continue
             candidate_ticket_ids.add(ticket_id)
 

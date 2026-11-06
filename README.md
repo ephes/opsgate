@@ -92,6 +92,12 @@ privileged step twice.
 
 Status reports retry server failures up to three attempts, one second apart. If reporting remains
 unavailable, the worker leaves its state and session artifacts for recovery to adopt the existing execution.
+Both runners stream API success and error bodies with an 8 MiB maximum (inclusive).
+An oversized body is closed and reported as `503 transport_error`, without body or token text.
+Requests have a 15-second budget; Python uses remaining socket timeouts plus a shutdown
+watchdog covering headers, chunk framing and trailers, and Rust retains its total request deadline.
+Truncated Content-Length bodies also report a transport error. API calls connect directly without
+proxy variables or redirects (including the Python rollback runner).
 Transport failures and invalid JSON responses are normalized to safe runner API errors; recovery skips
 unavailable tickets and continues with independent tickets. API error diagnostics omit raw bodies and
 transport exception text. A genuine executor exception is reported as terminal failure only after owned
@@ -99,6 +105,13 @@ tmux sessions have been stopped and their absence verified. If cleanup cannot be
 state file remains for retry; operators should inspect the retained session artifacts. Permanent API
 rejections follow this same cleanup-and-failure path rather than outage recovery. Swallowed reporting
 and claim errors log only their safe HTTP status and error category.
+
+Every tmux client operation (launch, probe, list and kill) has a five-second deadline,
+independent of the ticket execution timeout. On expiry the owned client is killed and reaped
+and returns `tmux command timed out` (`TmuxError::Timeout` in Rust,
+`TmuxCommandTimeout` in Python). Killing the client does not prove that its tmux session stopped;
+if cleanup cannot verify session absence, runner state and artifacts stay available for recovery.
+Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
 
 Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
 files. Failed serialization, writes or replacement leave the previous destination intact and remove the

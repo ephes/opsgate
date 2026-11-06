@@ -202,6 +202,19 @@ section ("Rust-only tests") with their paths.
 | `test_cleanup_refusal_preserves_publication_error` | `crates/opsgate-runner/src/artifacts.rs::tests::cleanup_refusal_preserves_publication_error` | S6a ✓ | - |
 | `test_success_does_not_unlink_released_temp_name` | `crates/opsgate-runner/src/artifacts.rs::tests::success_does_not_unlink_released_temp_name` | S6a ✓ | - |
 
+### `tests/test_runner_io.py`
+
+| Python test | Rust test | Slice | Harness |
+| --- | --- | --- | --- |
+| `test_api_response_byte_cap` | `crates/opsgate-runner/tests/api_client.rs::response_byte_cap_without_content_length` | bounded runner I/O ✓ | - |
+| `test_api_watchdog_preserves_ssl_wrapper`, `test_api_https_watchdog_normalizes_interrupted_handshake` | Python-only HTTPS watchdog; Rust supports plain HTTP only (D-10) | bounded runner I/O ✓ | - |
+| `test_api_accepts_connection_close_body` | `crates/opsgate-runner/tests/api_client.rs::requests_carry_token_and_json_bodies` (normal decoding) | bounded runner I/O ✓ | - |
+| `test_api_rejects_truncated_content_length`, `test_api_hard_deadline_covers_http_framing` | `crates/opsgate-runner/tests/api_client.rs::http_framing_deadline_and_truncated_length` | bounded runner I/O ✓ | - |
+| `test_tmux_deadline_does_not_wait_for_inherited_pipes` | `crates/opsgate-runner/tests/tmux_deadline.rs::every_tmux_operation_kills_and_reaps_on_deadline` (inherited-pipes case) | bounded runner I/O ✓ | - |
+| `test_worker_tmux_cleanup_timeout_retains_recovery_state` | `crates/opsgate-runner/tests/supervisor.rs::worker_tmux_cleanup_timeout_retains_recovery_state` | bounded runner I/O ✓ | - |
+| `test_tmux_deadline_kills_and_reaps_owned_client` | `crates/opsgate-runner/tests/tmux_deadline.rs::every_tmux_operation_kills_and_reaps_on_deadline` | bounded runner I/O ✓ | - |
+| `test_api_body_elapsed_deadline` | `crates/opsgate-runner/tests/api_client.rs::body_streaming_retains_total_deadline` | bounded runner I/O ✓ | - |
+
 ### `tests/test_runner.py`
 
 `R` rows are covered by the runner parity harness (S7b, `rust/parity/runner`):

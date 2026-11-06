@@ -389,7 +389,7 @@ def test_discover_ticket_ids_from_tmux_handles_missing_binary(tmp_path: Path, mo
     def _raise_file_not_found(*_: Any, **__: Any) -> Any:
         raise FileNotFoundError("tmux")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", _raise_file_not_found)
+    monkeypatch.setattr("opsgate.runner._run_tmux", _raise_file_not_found)
     assert runner._discover_ticket_ids_from_tmux() == set()
 
 
@@ -845,18 +845,39 @@ def test_status_outage_retries_and_retains_execution(tmp_path: Path, monkeypatch
 @pytest.mark.parametrize("failure", ["url", "timeout", "json", "unicode", "shape"])
 def test_api_normalizes_transport_and_response_errors(tmp_path: Path, monkeypatch, failure: str) -> None:
     from io import BytesIO
-    from urllib.error import URLError
 
     from opsgate.runner import RunnerApiClient
 
     def open_response(*args: Any, **kwargs: Any) -> BytesIO:
         if failure == "url":
-            raise URLError("secret diagnostic")
+            raise OSError("secret diagnostic")
         if failure == "timeout":
             raise TimeoutError("secret diagnostic")
         return BytesIO({"json": b"secret malformed body", "unicode": b"\xff", "shape": b"[]"}[failure])
 
-    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    class Connection:
+        sock = type("Socket", (), {"settimeout": lambda *args: None})()
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def connect(self) -> None:
+            pass
+
+        def request(self, *args: Any) -> None:
+            pass
+
+        def getresponse(self) -> Any:
+            response: Any = open_response()
+            response.status = 200
+            response.length = None
+            response.isclosed = lambda: False
+            return response
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("opsgate.runner.HTTPConnection", Connection)
     with pytest.raises(RunnerApiError) as caught:
         RunnerApiClient(_runner_settings(tmp_path)).get_ticket("ticket")
     assert caught.value.error_code == ("transport_error" if failure in {"url", "timeout"} else "invalid_response")
@@ -864,7 +885,6 @@ def test_api_normalizes_transport_and_response_errors(tmp_path: Path, monkeypatc
 
 
 def test_recovery_transport_outage_isolated_and_state_retained(tmp_path: Path, monkeypatch) -> None:
-    from urllib.error import URLError
 
     runner = OpsGateRunner(_runner_settings(tmp_path))
     ids = ["aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222"]
@@ -873,10 +893,10 @@ def test_recovery_transport_outage_isolated_and_state_retained(tmp_path: Path, m
     calls = []
 
     def open_response(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args[0].full_url)
-        raise URLError("offline")
+        calls.append(True)
+        raise OSError("offline")
 
-    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    monkeypatch.setattr("opsgate.runner.HTTPConnection.connect", open_response)
     monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: set())
     runner._recover_inflight_tickets(include_artifacts=False)
     assert len(calls) == 2
@@ -955,7 +975,7 @@ def test_cleanup_accepts_absent_tmux_server(tmp_path: Path, monkeypatch, diagnos
 
     runner = OpsGateRunner(_runner_settings(tmp_path))
     monkeypatch.setattr(
-        "opsgate.runner.subprocess.run", lambda *a, **kw: subprocess.CompletedProcess([], 1, "", diagnostic),
+        "opsgate.runner._run_tmux", lambda *a, **kw: subprocess.CompletedProcess([], 1, "", diagnostic),
     )
     runner._kill_tmux_sessions_for_ticket("ticket")
 
@@ -971,7 +991,7 @@ def test_cleanup_rejects_unverifiable_tmux(tmp_path: Path, monkeypatch, missing_
             raise FileNotFoundError("tmux missing")
         return subprocess.CompletedProcess([], 1, "", "Permission denied")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    monkeypatch.setattr("opsgate.runner._run_tmux", run)
     with pytest.raises(RuntimeError):
         runner._kill_tmux_sessions_for_ticket("ticket")
 
@@ -987,7 +1007,7 @@ def test_cleanup_verifies_sessions_are_gone(tmp_path: Path, monkeypatch) -> None
         sessions = "job-ticket-01-investigator: 1 windows\njob-other-01-reviewer: 1 windows\n"
         return subprocess.CompletedProcess(command, 0, sessions, "")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    monkeypatch.setattr("opsgate.runner._run_tmux", run)
     with pytest.raises(RuntimeError, match="remain"):
         runner._kill_tmux_sessions_for_ticket("ticket")
     assert [command[3:] for command in calls] == [

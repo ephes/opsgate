@@ -17,7 +17,7 @@ regex.workspace = true
 sha2.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["process", "rt", "signal", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt", "signal", "sync", "time", "macros"] }
 tokio-util.workspace = true
 tracing.workspace = true
 

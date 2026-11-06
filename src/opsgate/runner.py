@@ -6,18 +6,18 @@ import logging
 import re
 import shlex
 import signal
+import socket
 import subprocess
 import threading
 import time
 import traceback
 from dataclasses import dataclass
 from datetime import timedelta
-from http.client import HTTPException
+from http.client import HTTPConnection, HTTPException, HTTPResponse, HTTPSConnection
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from .config import RunnerSettings, load_runner_settings
 from .log_preview import read_tail_lines
@@ -26,6 +26,10 @@ from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_d
 logger = logging.getLogger(__name__)
 
 TICKET_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+API_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
+API_REQUEST_TIMEOUT_SECONDS = 15.0
+TMUX_COMMAND_TIMEOUT_SECONDS = 5.0
+
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
 
 
@@ -34,6 +38,26 @@ class RunnerApiError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+
+
+class TmuxCommandTimeout(RuntimeError):
+    """The owned tmux client exceeded its deadline and was killed/reaped."""
+
+
+def _run_tmux(command: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=TMUX_COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            # Do not communicate again: a tmux server/descendant could retain
+            # a pipe after its client dies. Reap only the owned client.
+            child.kill()
+            child.wait()
+            raise TmuxCommandTimeout("tmux command timed out") from None
+        returncode = child.wait()
+        if check and returncode:
+            raise subprocess.CalledProcessError(returncode, command, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
 
 
 @dataclass(frozen=True)
@@ -56,6 +80,40 @@ class StepOutcome:
     summary: dict[str, Any] | None = None
 
 
+def _remaining_api_time(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("API request deadline")
+    return remaining
+
+
+def _shutdown_api_socket(sock: socket.socket) -> None:
+    # A socket timeout is per recv. Shutdown also interrupts a parser stuck
+    # inside a single read1/getresponse on trickled HTTP framing or trailers.
+    try:
+        # Bypass SSLSocket.shutdown: it discards the TLS wrapper and races
+        # with concurrent SSL reads/writes. Only interrupt the raw transport.
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
+    except OSError:
+        pass  # The request may already have closed the connection.
+
+
+def _read_api_body(response: HTTPResponse, sock: socket.socket, deadline: float) -> bytes:
+    body = bytearray()
+    while not response.isclosed():
+        sock.settimeout(_remaining_api_time(deadline))
+        chunk = response.read1(min(64 * 1024, API_RESPONSE_MAX_BYTES + 1 - len(body)))
+        _remaining_api_time(deadline)
+        if len(body) + len(chunk) > API_RESPONSE_MAX_BYTES:
+            raise OSError("API response byte limit")
+        body.extend(chunk)
+        if not chunk:
+            break
+    if response.length:
+        raise OSError("Incomplete API response")
+    return bytes(body)
+
+
 class RunnerApiClient:
     def __init__(self, settings: RunnerSettings) -> None:
         self._settings = settings
@@ -70,10 +128,38 @@ class RunnerApiClient:
             headers["Content-Type"] = "application/json"
             data = json.dumps(payload, sort_keys=True).encode("utf-8")
 
-        request = Request(url=url, method=method, headers=headers, data=data)
+        # Own the connection so each read can use the remaining elapsed budget
+        # through the public socket API, including Connection: close responses.
+        target = urlsplit(url)
+        connection_type = HTTPSConnection if target.scheme == "https" else HTTPConnection
+        connection = connection_type(target.hostname or "", target.port, timeout=API_REQUEST_TIMEOUT_SECONDS)
+        deadline = time.monotonic() + API_REQUEST_TIMEOUT_SECONDS
+        watchdog: threading.Timer | None = None
         try:
-            with urlopen(request, timeout=15) as response:
-                response_bytes = response.read()
+            connection.connect()
+            sock = connection.sock
+            if sock is None:
+                raise OSError("No API connection")
+            watchdog = threading.Timer(_remaining_api_time(deadline), _shutdown_api_socket, args=(sock,))
+            watchdog.start()
+            sock.settimeout(_remaining_api_time(deadline))
+            connection.request(method, target.path + (f"?{target.query}" if target.query else ""), data, headers)
+            sock.settimeout(_remaining_api_time(deadline))
+            with connection.getresponse() as response:
+                response_bytes = _read_api_body(response, sock, deadline)
+                if not 200 <= response.status < 300:
+                    error_code = "http_error"
+                    try:
+                        body = json.loads(response_bytes.decode("utf-8"))
+                        if isinstance(body, dict) and body.get("error") in (
+                            "invalid_state", "state_changed", "runner_host_mismatch",
+                        ):
+                            error_code = body["error"]
+                    except ValueError:
+                        pass
+                    raise RunnerApiError(
+                        "Runner API HTTP error", status_code=response.status, error_code=error_code,
+                    )
                 try:
                     raw = response_bytes.decode("utf-8") or "{}"
                     parsed = json.loads(raw)
@@ -84,25 +170,17 @@ class RunnerApiClient:
                 if not isinstance(parsed, dict):
                     raise RunnerApiError("Invalid JSON response", status_code=500, error_code="invalid_response")
                 return parsed
-        except HTTPError as error:
-            # Only known protocol codes are exposed; bodies and exception text may
-            # contain credentials or arbitrary server diagnostics.
-            error_code = "http_error"
-            try:
-                body = json.loads(error.read().decode("utf-8"))
-                if isinstance(body, dict) and isinstance(body.get("error"), str) and body["error"] in {
-                    "invalid_state", "state_changed", "runner_host_mismatch",
-                }:
-                    error_code = body["error"]
-            except (OSError, ValueError, HTTPException):
-                pass
-            raise RunnerApiError(
-                "Runner API HTTP error", status_code=error.code, error_code=error_code,
-            ) from None
-        except (URLError, OSError, HTTPException):
+        except (OSError, HTTPException, ValueError, AttributeError) as error:
+            if isinstance(error, ValueError | AttributeError) and time.monotonic() < deadline:
+                raise
             raise RunnerApiError(
                 "Runner API transport failure", status_code=503, error_code="transport_error",
             ) from None
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+                watchdog.join()
+            connection.close()
 
     def claim_ticket(self, runner_host: str) -> dict[str, Any] | None:
         payload = {"runner_host": runner_host}
@@ -623,28 +701,20 @@ class TicketExecutor:
         return ["tmux", "-L", self.settings.tmux_socket_label, *args]
 
     def _tmux_has_session(self, session_name: str) -> bool:
-        result = subprocess.run(
+        result = _run_tmux(
             self._tmux_command("has-session", "-t", session_name),
-            capture_output=True,
-            text=True,
-            check=False,
         )
         return result.returncode == 0
 
     def _tmux_new_session(self, *, session_name: str, script_path: Path) -> None:
-        subprocess.run(
+        _run_tmux(
             self._tmux_command("new-session", "-d", "-s", session_name, f"/bin/bash {shlex.quote(str(script_path))}"),
-            capture_output=True,
-            text=True,
             check=True,
         )
 
     def _tmux_kill_session(self, session_name: str) -> None:
-        subprocess.run(
+        _run_tmux(
             self._tmux_command("kill-session", "-t", session_name),
-            capture_output=True,
-            text=True,
-            check=False,
         )
 
 
@@ -838,11 +908,8 @@ class OpsGateRunner:
 
     def _discover_ticket_ids_from_tmux(self) -> set[str]:
         try:
-            result = subprocess.run(
+            result = _run_tmux(
                 self._tmux_command("ls"),
-                capture_output=True,
-                text=True,
-                check=False,
             )
         except FileNotFoundError:
             return set()
@@ -874,11 +941,8 @@ class OpsGateRunner:
 
     def _tmux_sessions_for_ticket(self, ticket_id: str) -> list[str]:
         try:
-            result = subprocess.run(
+            result = _run_tmux(
                 self._tmux_command("ls"),
-                capture_output=True,
-                text=True,
-                check=False,
             )
         except FileNotFoundError:
             raise RuntimeError("Cannot verify tmux cleanup") from None
@@ -899,11 +963,8 @@ class OpsGateRunner:
 
     def _kill_tmux_sessions_for_ticket(self, ticket_id: str) -> None:
         for session_name in self._tmux_sessions_for_ticket(ticket_id):
-            subprocess.run(
+            _run_tmux(
                 self._tmux_command("kill-session", "-t", session_name),
-                capture_output=True,
-                text=True,
-                check=False,
             )
 
         if self._tmux_sessions_for_ticket(ticket_id):

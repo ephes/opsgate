@@ -744,3 +744,17 @@ async fn failing_state_file_write_is_fatal() {
     ));
     assert_eq!(f.supervisor.active_worker_count(), 0);
 }
+
+#[tokio::test(start_paused = true)]
+async fn worker_tmux_cleanup_timeout_retains_recovery_state() {
+    let f = Fixture::new(FakeTmux::default().with_sessions(&[&session(A)]));
+    *f.tmux.listing.lock().unwrap() = Listing::Timeout;
+    f.api.insert(ticket(A, "running"));
+    f.supervisor.write_state_file(A).await.unwrap();
+    f.supervisor.run_worker(A, Some(unrunnable(A))).await;
+    assert!(f.state_exists(A));
+    assert_eq!(f.supervisor.cleanup_mark(A), Some(false));
+    assert!(f.api.updates().is_empty());
+    assert_eq!(f.api.state(A), "running");
+    assert_eq!(f.tmux.sessions(), [session(A)]);
+}

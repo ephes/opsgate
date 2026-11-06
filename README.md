@@ -106,6 +106,13 @@ state file remains for retry; operators should inspect the retained session arti
 rejections follow this same cleanup-and-failure path rather than outage recovery. Swallowed reporting
 and claim errors log only their safe HTTP status and error category.
 
+Every tmux client operation (launch, probe, list and kill) has a five-second deadline,
+independent of the ticket execution timeout. On expiry the owned client is killed and reaped
+and returns `tmux command timed out` (`TmuxError::Timeout` in Rust,
+`TmuxCommandTimeout` in Python). Killing the client does not prove that its tmux session stopped;
+if cleanup cannot verify session absence, runner state and artifacts stay available for recovery.
+Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
+
 Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
 files. Failed serialization, writes or replacement leave the previous destination intact and remove the
 owned temporary file. If the filesystem also refuses cleanup, the original publication error is preserved

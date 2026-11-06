@@ -15,9 +15,14 @@ use std::io;
 use std::path::Path;
 use std::process::{ExitStatus, Output, Stdio};
 use std::sync::Arc;
+use std::time::Duration;
 
 use opsgate_core::settings::Environment;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+/// Deadline for each owned tmux client, independent of ticket duration.
+pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 
 use crate::commands;
 
@@ -30,6 +35,8 @@ pub enum TmuxError {
     Failed(ExitStatus),
     /// An argument contains a NUL character (cannot reach a shell word).
     InvalidArgument,
+    /// The owned client exceeded its deadline and was killed/reaped.
+    Timeout,
 }
 
 impl std::fmt::Display for TmuxError {
@@ -37,6 +44,7 @@ impl std::fmt::Display for TmuxError {
         match self {
             Self::Spawn(error) => write!(f, "tmux could not be started: {error}"),
             Self::Failed(status) => write!(f, "tmux new-session failed: {status}"),
+            Self::Timeout => f.write_str("tmux command timed out"),
             Self::InvalidArgument => f.write_str("tmux argument contains a NUL character"),
         }
     }
@@ -117,14 +125,25 @@ impl<T: Tmux> Tmux for Arc<T> {
 pub struct TmuxCli {
     socket_label: String,
     environment: Arc<Environment>,
+    timeout: Duration,
 }
 
 impl TmuxCli {
     /// tmux on `socket_label`, children started with `environment`.
     pub fn new(socket_label: impl Into<String>, environment: Arc<Environment>) -> Self {
+        Self::with_timeout(socket_label, environment, COMMAND_TIMEOUT)
+    }
+
+    /// tmux with an explicit per-client deadline (also used by synthetic tests).
+    pub fn with_timeout(
+        socket_label: impl Into<String>,
+        environment: Arc<Environment>,
+        timeout: Duration,
+    ) -> Self {
         Self {
             socket_label: socket_label.into(),
             environment,
+            timeout,
         }
     }
 
@@ -135,7 +154,7 @@ impl TmuxCli {
 
     /// `subprocess.run(["tmux", "-L", label, *args], capture_output=True)`.
     pub async fn run(&self, args: &[&str]) -> Result<Output, TmuxError> {
-        Command::new("tmux")
+        let mut child = Command::new("tmux")
             .arg("-L")
             .arg(&self.socket_label)
             .args(args)
@@ -144,9 +163,34 @@ impl TmuxCli {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(TmuxError::Spawn)
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(TmuxError::Spawn)?;
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let mut stderr = child.stderr.take().expect("piped stderr");
+        let mut out = Vec::new();
+        let mut err = Vec::new();
+        // Drain both pipes while waiting; keep ownership of Child so expiry can
+        // explicitly kill and reap it rather than relying on drop cleanup.
+        let collect = async {
+            let (status, _, _) = tokio::try_join!(
+                child.wait(),
+                stdout.read_to_end(&mut out),
+                stderr.read_to_end(&mut err),
+            )?;
+            Ok(Output {
+                status,
+                stdout: out,
+                stderr: err,
+            })
+        };
+        match tokio::time::timeout(self.timeout, collect).await {
+            Ok(result) => result.map_err(TmuxError::Spawn),
+            Err(_) => {
+                child.kill().await.map_err(TmuxError::Spawn)?;
+                Err(TmuxError::Timeout)
+            }
+        }
     }
 }
 

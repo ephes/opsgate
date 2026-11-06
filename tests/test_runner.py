@@ -389,7 +389,7 @@ def test_discover_ticket_ids_from_tmux_handles_missing_binary(tmp_path: Path, mo
     def _raise_file_not_found(*_: Any, **__: Any) -> Any:
         raise FileNotFoundError("tmux")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", _raise_file_not_found)
+    monkeypatch.setattr("opsgate.runner._run_tmux", _raise_file_not_found)
     assert runner._discover_ticket_ids_from_tmux() == set()
 
 
@@ -975,7 +975,7 @@ def test_cleanup_accepts_absent_tmux_server(tmp_path: Path, monkeypatch, diagnos
 
     runner = OpsGateRunner(_runner_settings(tmp_path))
     monkeypatch.setattr(
-        "opsgate.runner.subprocess.run", lambda *a, **kw: subprocess.CompletedProcess([], 1, "", diagnostic),
+        "opsgate.runner._run_tmux", lambda *a, **kw: subprocess.CompletedProcess([], 1, "", diagnostic),
     )
     runner._kill_tmux_sessions_for_ticket("ticket")
 
@@ -991,7 +991,7 @@ def test_cleanup_rejects_unverifiable_tmux(tmp_path: Path, monkeypatch, missing_
             raise FileNotFoundError("tmux missing")
         return subprocess.CompletedProcess([], 1, "", "Permission denied")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    monkeypatch.setattr("opsgate.runner._run_tmux", run)
     with pytest.raises(RuntimeError):
         runner._kill_tmux_sessions_for_ticket("ticket")
 
@@ -1007,7 +1007,7 @@ def test_cleanup_verifies_sessions_are_gone(tmp_path: Path, monkeypatch) -> None
         sessions = "job-ticket-01-investigator: 1 windows\njob-other-01-reviewer: 1 windows\n"
         return subprocess.CompletedProcess(command, 0, sessions, "")
 
-    monkeypatch.setattr("opsgate.runner.subprocess.run", run)
+    monkeypatch.setattr("opsgate.runner._run_tmux", run)
     with pytest.raises(RuntimeError, match="remain"):
         runner._kill_tmux_sessions_for_ticket("ticket")
     assert [command[3:] for command in calls] == [

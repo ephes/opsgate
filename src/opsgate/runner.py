@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 TICKET_ID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 API_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
 API_REQUEST_TIMEOUT_SECONDS = 15.0
+TMUX_COMMAND_TIMEOUT_SECONDS = 5.0
 
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
 
@@ -37,6 +38,26 @@ class RunnerApiError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+
+
+class TmuxCommandTimeout(RuntimeError):
+    """The owned tmux client exceeded its deadline and was killed/reaped."""
+
+
+def _run_tmux(command: list[str], *, check: bool = False) -> subprocess.CompletedProcess[str]:
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+        try:
+            stdout, stderr = child.communicate(timeout=TMUX_COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            # Do not communicate again: a tmux server/descendant could retain
+            # a pipe after its client dies. Reap only the owned client.
+            child.kill()
+            child.wait()
+            raise TmuxCommandTimeout("tmux command timed out") from None
+        returncode = child.wait()
+        if check and returncode:
+            raise subprocess.CalledProcessError(returncode, command, output=stdout, stderr=stderr)
+        return subprocess.CompletedProcess(command, returncode, stdout, stderr)
 
 
 @dataclass(frozen=True)
@@ -680,28 +701,20 @@ class TicketExecutor:
         return ["tmux", "-L", self.settings.tmux_socket_label, *args]
 
     def _tmux_has_session(self, session_name: str) -> bool:
-        result = subprocess.run(
+        result = _run_tmux(
             self._tmux_command("has-session", "-t", session_name),
-            capture_output=True,
-            text=True,
-            check=False,
         )
         return result.returncode == 0
 
     def _tmux_new_session(self, *, session_name: str, script_path: Path) -> None:
-        subprocess.run(
+        _run_tmux(
             self._tmux_command("new-session", "-d", "-s", session_name, f"/bin/bash {shlex.quote(str(script_path))}"),
-            capture_output=True,
-            text=True,
             check=True,
         )
 
     def _tmux_kill_session(self, session_name: str) -> None:
-        subprocess.run(
+        _run_tmux(
             self._tmux_command("kill-session", "-t", session_name),
-            capture_output=True,
-            text=True,
-            check=False,
         )
 
 
@@ -895,11 +908,8 @@ class OpsGateRunner:
 
     def _discover_ticket_ids_from_tmux(self) -> set[str]:
         try:
-            result = subprocess.run(
+            result = _run_tmux(
                 self._tmux_command("ls"),
-                capture_output=True,
-                text=True,
-                check=False,
             )
         except FileNotFoundError:
             return set()
@@ -931,11 +941,8 @@ class OpsGateRunner:
 
     def _tmux_sessions_for_ticket(self, ticket_id: str) -> list[str]:
         try:
-            result = subprocess.run(
+            result = _run_tmux(
                 self._tmux_command("ls"),
-                capture_output=True,
-                text=True,
-                check=False,
             )
         except FileNotFoundError:
             raise RuntimeError("Cannot verify tmux cleanup") from None
@@ -956,11 +963,8 @@ class OpsGateRunner:
 
     def _kill_tmux_sessions_for_ticket(self, ticket_id: str) -> None:
         for session_name in self._tmux_sessions_for_ticket(ticket_id):
-            subprocess.run(
+            _run_tmux(
                 self._tmux_command("kill-session", "-t", session_name),
-                capture_output=True,
-                text=True,
-                check=False,
             )
 
         if self._tmux_sessions_for_ticket(ticket_id):

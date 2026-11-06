@@ -981,6 +981,12 @@ APIs; it also supports HTTPS (D-10). The API answers runner routes directly.
 
 #### 4.13.3 Agent commands and step script (P1, security-relevant)
 
+All tmux client calls (launch, probe, list, kill) have a five-second deadline.
+Expiry kills and reaps the owned client and returns `TmuxError::Timeout`
+(Python: `TmuxCommandTimeout`), with a fixed diagnostic. A timed-out client
+may have already changed its session: existing metadata and state remain for
+recovery whenever cleanup cannot verify session absence.
+
 - `codex` → `codex exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox - < <prompt>`;
   `claude` → `claude -p --dangerously-skip-permissions < <prompt>`; other →
   step fails `unsupported_agent_<slug>` (`_build_agent_command`). Agents are

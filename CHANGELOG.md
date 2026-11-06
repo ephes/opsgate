@@ -4,6 +4,9 @@
 
 ### Security
 
+- Bound every tmux client operation to five seconds in both runners. Timed-out
+  clients are killed and reaped; unverified session cleanup retains recovery state.
+
 - Bound runner API success and error responses to 8 MiB while streaming in both
   implementations; over-budget bodies close with a safe transport error. The
   Python rollback runner enforces a 15-second deadline (including HTTP framing),

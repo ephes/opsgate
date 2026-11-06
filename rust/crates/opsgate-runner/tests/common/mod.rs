@@ -202,6 +202,8 @@ pub enum Listing {
     MissingBinary,
     /// `tmux` cannot be started for another reason.
     SpawnFails,
+    /// Client exceeded its deadline; session state is unknown.
+    Timeout,
     /// Exits 1 with this diagnostic on stderr.
     Fails(&'static str),
 }
@@ -338,6 +340,7 @@ impl Tmux for FakeTmux {
             Listing::SpawnFails => Err(TmuxError::Spawn(std::io::Error::from(
                 std::io::ErrorKind::PermissionDenied,
             ))),
+            Listing::Timeout => Err(TmuxError::Timeout),
             Listing::Fails(diagnostic) => Ok(SessionListing {
                 success: false,
                 stdout: String::new(),

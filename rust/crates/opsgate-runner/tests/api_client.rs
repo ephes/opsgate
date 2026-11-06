@@ -320,3 +320,178 @@ fn debug_output_redacts_the_token() {
         HttpApiClient::with_timeout("http://127.0.0.1:1", TOKEN, Duration::from_secs(1)).unwrap();
     assert!(!format!("{client:?}").contains(TOKEN));
 }
+
+/// A chunked body without Content-Length, left open after the over-budget
+/// byte: rejection must close the connection before the server sends EOF.
+#[tokio::test]
+async fn response_byte_cap_without_content_length() {
+    use opsgate_runner::api::RESPONSE_MAX_BYTES;
+    use std::io::{Read, Write};
+    for status in [200, 503] {
+        for extra in [0, 1] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut peer, _) = listener.accept().unwrap();
+                peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut request = [0; 65536];
+                assert!(peer.read(&mut request).unwrap() > 0);
+                write!(
+                    peer,
+                    "HTTP/1.1 {status} Test\r\nTransfer-Encoding: chunked\r\n\r\n"
+                )
+                .unwrap();
+                let body = format!(
+                    "{{\"context\":\"{}\"}}",
+                    "x".repeat(RESPONSE_MAX_BYTES - 14 + extra)
+                );
+                assert_eq!(body.len(), RESPONSE_MAX_BYTES + extra);
+                for chunk in body.as_bytes().chunks(65536) {
+                    if write!(peer, "{:x}\r\n", chunk.len())
+                        .and_then(|()| peer.write_all(chunk))
+                        .and_then(|()| peer.write_all(b"\r\n"))
+                        .is_err()
+                    {
+                        assert_eq!(extra, 1);
+                        return;
+                    }
+                }
+                if extra == 0 {
+                    peer.write_all(b"0\r\n\r\n").unwrap();
+                } else {
+                    let result = peer.read(&mut [0]);
+                    assert!(
+                        matches!(result, Ok(0))
+                            || result
+                                .is_err_and(|e| e.kind() == std::io::ErrorKind::ConnectionReset)
+                    );
+                }
+            });
+            let client = HttpApiClient::with_timeout(
+                &format!("http://{address}"),
+                TOKEN,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+            let started = std::time::Instant::now();
+            let result = client.get_ticket("synthetic").await;
+            assert!(started.elapsed() < Duration::from_secs(2));
+            if extra == 1 {
+                assert_error(&result.unwrap_err(), 503, "transport_error");
+            } else if status == 503 {
+                assert_error(&result.unwrap_err(), 503, "http_error");
+            } else {
+                assert_eq!(
+                    result.unwrap()["context"].as_str().unwrap().len(),
+                    RESPONSE_MAX_BYTES - 14
+                );
+            }
+            tokio::task::spawn_blocking(move || server.join().unwrap())
+                .await
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn body_streaming_retains_total_deadline() {
+    use std::io::{Read, Write};
+    for status in [200, 503] {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut peer, _) = listener.accept().unwrap();
+            let mut request = [0; 65536];
+            assert!(peer.read(&mut request).unwrap() > 0);
+            write!(peer, "HTTP/1.1 {status} Test\r\nConnection: close\r\n\r\n").unwrap();
+            let started = std::time::Instant::now();
+            while peer.write_all(b" ").is_ok() {
+                assert!(started.elapsed() < Duration::from_secs(5));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let client = HttpApiClient::with_timeout(
+            &format!("http://{address}"),
+            TOKEN,
+            Duration::from_millis(150),
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        assert_error(
+            &client.get_ticket("synthetic").await.unwrap_err(),
+            503,
+            "transport_error",
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        tokio::task::spawn_blocking(move || server.join().unwrap())
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn http_framing_deadline_and_truncated_length() {
+    use std::io::{Read, Write};
+    for status in [200, 409] {
+        for framing in ["length", "headers", "chunk-extension", "trailers"] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut peer, _) = listener.accept().unwrap();
+                let mut request = [0; 65536];
+                assert!(peer.read(&mut request).unwrap() > 0);
+                if framing == "length" {
+                    write!(
+                        peer,
+                        "HTTP/1.1 {status} Test\r\nContent-Length: 100\r\n\r\n{{}}"
+                    )
+                    .unwrap();
+                    return;
+                }
+                if framing == "headers" {
+                    write!(peer, "HTTP/1.1 {status} Test\r\nX-Synthetic: ").unwrap();
+                } else {
+                    write!(
+                        peer,
+                        "HTTP/1.1 {status} Test\r\nTransfer-Encoding: chunked\r\n\r\n"
+                    )
+                    .unwrap();
+                    peer.write_all(if framing == "trailers" {
+                        b"2\r\n{}\r\n0\r\n"
+                    } else {
+                        b"1;"
+                    })
+                    .unwrap();
+                }
+                for _ in 0..100 {
+                    let bytes: &[u8] = if framing == "trailers" {
+                        b"X-Synthetic: x\r\n"
+                    } else {
+                        b"x"
+                    };
+                    if peer.write_all(bytes).is_err() {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                panic!("client did not close on deadline");
+            });
+            let client = HttpApiClient::with_timeout(
+                &format!("http://{address}"),
+                TOKEN,
+                Duration::from_millis(150),
+            )
+            .unwrap();
+            let started = std::time::Instant::now();
+            assert_error(
+                &client.get_ticket("synthetic").await.unwrap_err(),
+                503,
+                "transport_error",
+            );
+            assert!(started.elapsed() < Duration::from_secs(1));
+            tokio::task::spawn_blocking(move || server.join().unwrap())
+                .await
+                .unwrap();
+        }
+    }
+}

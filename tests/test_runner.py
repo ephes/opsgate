@@ -845,18 +845,39 @@ def test_status_outage_retries_and_retains_execution(tmp_path: Path, monkeypatch
 @pytest.mark.parametrize("failure", ["url", "timeout", "json", "unicode", "shape"])
 def test_api_normalizes_transport_and_response_errors(tmp_path: Path, monkeypatch, failure: str) -> None:
     from io import BytesIO
-    from urllib.error import URLError
 
     from opsgate.runner import RunnerApiClient
 
     def open_response(*args: Any, **kwargs: Any) -> BytesIO:
         if failure == "url":
-            raise URLError("secret diagnostic")
+            raise OSError("secret diagnostic")
         if failure == "timeout":
             raise TimeoutError("secret diagnostic")
         return BytesIO({"json": b"secret malformed body", "unicode": b"\xff", "shape": b"[]"}[failure])
 
-    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    class Connection:
+        sock = type("Socket", (), {"settimeout": lambda *args: None})()
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def connect(self) -> None:
+            pass
+
+        def request(self, *args: Any) -> None:
+            pass
+
+        def getresponse(self) -> Any:
+            response: Any = open_response()
+            response.status = 200
+            response.length = None
+            response.isclosed = lambda: False
+            return response
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("opsgate.runner.HTTPConnection", Connection)
     with pytest.raises(RunnerApiError) as caught:
         RunnerApiClient(_runner_settings(tmp_path)).get_ticket("ticket")
     assert caught.value.error_code == ("transport_error" if failure in {"url", "timeout"} else "invalid_response")
@@ -864,7 +885,6 @@ def test_api_normalizes_transport_and_response_errors(tmp_path: Path, monkeypatc
 
 
 def test_recovery_transport_outage_isolated_and_state_retained(tmp_path: Path, monkeypatch) -> None:
-    from urllib.error import URLError
 
     runner = OpsGateRunner(_runner_settings(tmp_path))
     ids = ["aaaaaaaa-1111-4111-8111-111111111111", "bbbbbbbb-2222-4222-8222-222222222222"]
@@ -873,10 +893,10 @@ def test_recovery_transport_outage_isolated_and_state_retained(tmp_path: Path, m
     calls = []
 
     def open_response(*args: Any, **kwargs: Any) -> Any:
-        calls.append(args[0].full_url)
-        raise URLError("offline")
+        calls.append(True)
+        raise OSError("offline")
 
-    monkeypatch.setattr("opsgate.runner.urlopen", open_response)
+    monkeypatch.setattr("opsgate.runner.HTTPConnection.connect", open_response)
     monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: set())
     runner._recover_inflight_tickets(include_artifacts=False)
     assert len(calls) == 2

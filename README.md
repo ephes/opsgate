@@ -92,6 +92,12 @@ privileged step twice.
 
 Status reports retry server failures up to three attempts, one second apart. If reporting remains
 unavailable, the worker leaves its state and session artifacts for recovery to adopt the existing execution.
+Both runners stream API success and error bodies with an 8 MiB maximum (inclusive).
+An oversized body is closed and reported as `503 transport_error`, without body or token text.
+Requests have a 15-second budget; Python uses remaining socket timeouts plus a shutdown
+watchdog covering headers, chunk framing and trailers, and Rust retains its total request deadline.
+Truncated Content-Length bodies also report a transport error. API calls connect directly without
+proxy variables or redirects (including the Python rollback runner).
 Transport failures and invalid JSON responses are normalized to safe runner API errors; recovery skips
 unavailable tickets and continues with independent tickets. API error diagnostics omit raw bodies and
 transport exception text. A genuine executor exception is reported as terminal failure only after owned

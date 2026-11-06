@@ -946,7 +946,11 @@ rendered (section 6.3).
 #### 4.13.1 API client (`RunnerApiClient._request`)
 
 `Authorization: Bearer <runner token>`; JSON body (`Content-Type:
-application/json`) for claim/status; 15 s timeout. Responses: 2xx body decoded
+application/json`) for claim/status; 15 s request budget. Both clients stream
+success and error bodies with an inclusive 8 MiB cap; over-budget or unreadable
+bodies (including incomplete Content-Length bodies) close with `(503, transport_error)`.
+Python uses remaining socket timeouts plus a shutdown watchdog covering headers,
+chunk framing and trailers; Rust retains its total deadline. Responses: 2xx body decoded
 (empty → `{}`); undecodable → error `(502, invalid_response)`; non-object →
 `(500, invalid_response)`. HTTP error → `(status, code)` where code is the
 body's `error` only if it is one of `invalid_state`, `state_changed`,
@@ -954,10 +958,9 @@ body's `error` only if it is one of `invalid_state`, `state_changed`,
 timeout, protocol) → `(503, transport_error)`. Error texts never contain
 response bodies or exception text. Claim body `{"runner_host": <host>}`; a
 `ticket` that is neither null nor an object → `(500, invalid_ticket)`.
-Plain HTTP only (D-10). The Rust client follows no redirects and ignores
-proxy variables (`urlopen` would follow a `GET` redirect and use
-`http_proxy`); the API answers the runner routes on loopback without
-either, so this changes no call.
+Plain HTTP only (D-10). Both clients follow no redirects and ignore proxy variables. Python uses
+`http.client` to own the connection and update its socket timeout through public
+APIs; it also supports HTTPS (D-10). The API answers runner routes directly.
 
 #### 4.13.2 Paths and names (P1)
 

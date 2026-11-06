@@ -12,8 +12,7 @@
 //!
 //! Plain HTTP only (D-10). Redirects are not followed and proxy variables
 //! are ignored: the API answers its runner routes directly on loopback
-//! (Python's `urlopen` would follow a `GET` redirect and honour `http_proxy`;
-//! neither occurs in production).
+//! (the Python rollback client also connects directly).
 
 use std::future::Future;
 use std::sync::Arc;
@@ -28,7 +27,10 @@ use serde_json::{Map, Value};
 /// artifacts (a Python `dict`).
 pub type JsonObject = Map<String, Value>;
 
-/// `urlopen(request, timeout=15)`.
+/// Inclusive cap on streamed success and error response bodies.
+pub const RESPONSE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// Total request deadline.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// The API error codes the client passes on; every other code is
@@ -192,24 +194,30 @@ impl HttpApiClient {
             let body = serde_json::to_vec(payload).map_err(|_| RunnerApiError::transport())?;
             request = request.header(CONTENT_TYPE, "application/json").body(body);
         }
-        let response = request
+        let mut response = request
             .send()
             .await
             .map_err(|_| RunnerApiError::transport())?;
         let status = response.status();
-        let body = response.bytes().await;
+        let mut body = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| RunnerApiError::transport())?
+        {
+            if chunk.len() > RESPONSE_MAX_BYTES - body.len() {
+                return Err(RunnerApiError::transport());
+            }
+            body.extend_from_slice(&chunk);
+        }
         if !status.is_success() {
-            let code = body
-                .ok()
-                .and_then(|body| exposed_error_code(&body))
-                .unwrap_or("http_error");
+            let code = exposed_error_code(&body).unwrap_or("http_error");
             return Err(RunnerApiError::new(
                 "Runner API HTTP error",
                 status.as_u16(),
                 code,
             ));
         }
-        let body = body.map_err(|_| RunnerApiError::transport())?;
         decode_object(&body)
     }
 }

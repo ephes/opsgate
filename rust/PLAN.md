@@ -339,7 +339,8 @@ else that differs is a bug.
   started workers finished, or without waiting for claimed work if nothing
   was claimed or the disable file exists (`run_forever`); workers that the
   recovery pass started are waited for in every case (`_wait_for_workers`
-  after the loop).
+  after the loop). In both implementations a failed claim returns nonzero after
+  waiting for owned workers; empty/disabled rounds return zero.
 
 ### 4.2 Configuration (`config.py`)
 
@@ -1077,7 +1078,9 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   while active workers < `max_parallel_jobs` (claim error → log
   `Runner claim failed: status=<s> category=<c>`, stop claiming this round;
   null → stop; missing id → skip), write state file, start worker; sleep poll
-  interval.
+  interval. With `--once`, any claim error becomes a nonzero exit after workers finish.
+  Rust running-step polls log each failed status/category once per step outage and one recovery
+  event on the next successful poll; they continue owned work through observation outages.
 - Recovery (`_recover_inflight_tickets`): candidates = ids from state files
   (`runner-state/*.json`, hidden files included; invalid JSON/non-object/no
   id → file deleted; a file that cannot be read or is not UTF-8, e.g. a

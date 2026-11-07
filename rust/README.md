@@ -573,3 +573,8 @@ repair or remove the named file in `runner-state`; restarting also retries all f
 use a single regular-file descriptor opened nonblocking and cap bytes at 8 MiB before
 decoding, then apply the shared 64-level JSON depth limit. Invalid step artifacts fail as interrupted, retain the original evidence,
 and never authorize a skip or relaunch. Runner restart parity covers these boundaries.
+
+Runner outage contract: `runner --once` returns nonzero on claim failure after waiting for
+owned workers (also in Python); empty/disabled rounds succeed. Continuous polling retries.
+Running-step poll failures in Rust log each safe status/category once per step outage plus recovery
+with the ticket id, while leaving owned sessions running.

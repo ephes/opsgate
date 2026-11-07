@@ -105,6 +105,11 @@ tmux sessions have been stopped and their absence verified. If cleanup cannot be
 state file remains for retry; operators should inspect the retained session artifacts. Permanent API
 rejections follow this same cleanup-and-failure path rather than outage recovery. Swallowed reporting
 and claim errors log only their safe HTTP status and error category.
+Both runners return nonzero from `runner --once` if any claim fails, after waiting for owned
+workers; an empty queue or disable file still succeeds. Continuous mode keeps retrying.
+The Rust runner logs each running-ticket poll outage status/category once per step until a successful
+poll, then logs recovery, with the ticket id and no transport exception text. Work continues
+through poll outages; cancellation/revocation cannot be observed until polling recovers.
 
 Every tmux client operation (launch, probe, list and kill) has a five-second deadline,
 independent of the ticket execution timeout. On expiry the owned client is killed and reaped

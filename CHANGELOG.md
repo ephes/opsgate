@@ -29,6 +29,10 @@
 
 ### Fixed
 
+- Return nonzero from both one-shot runners after claim failures and owned-worker completion.
+- Diagnose Rust running-ticket poll outages and recovery without repeated identical warnings within a step
+  or transport exception text; owned work continues while observation is unavailable.
+
 - Isolate corrupt/unreadable recovery state files, retain their evidence and validate
   ticket identities against UUID filenames before looking up tickets. Unchanged rejected
   files are read and warned about once per process, retried after changes.

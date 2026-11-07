@@ -23,6 +23,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+tracing-subscriber.workspace = true
 axum = { workspace = true, features = ["tokio", "http1"] }
 tokio = { workspace = true, features = ["process", "rt", "rt-multi-thread", "sync", "time", "macros", "net", "test-util"] }
 

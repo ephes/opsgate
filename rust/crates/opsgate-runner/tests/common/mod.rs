@@ -221,6 +221,8 @@ type LaunchHook = Box<dyn Fn(&FakeTmux, &Path) + Send + Sync>;
 #[derive(Default)]
 pub struct FakeTmux {
     pub has_session: AtomicBool,
+    pub kill_failures: Mutex<Vec<String>>,
+    pub named_probes: AtomicBool,
     pub auto_exit_code: Option<i32>,
     pub launched: Mutex<Vec<String>>,
     pub scripts: Mutex<Vec<PathBuf>>,
@@ -283,10 +285,13 @@ impl FakeTmux {
 }
 
 impl Tmux for FakeTmux {
-    async fn has_session(&self, _session_name: &str) -> Result<bool, TmuxError> {
+    async fn has_session(&self, session_name: &str) -> Result<bool, TmuxError> {
         self.probes.fetch_add(1, Ordering::SeqCst);
         if let Some(hook) = &self.on_probe {
             hook(self);
+        }
+        if self.named_probes.load(Ordering::SeqCst) {
+            return Ok(self.sessions().iter().any(|name| name == session_name));
         }
         Ok(self.has_session.load(Ordering::SeqCst))
     }
@@ -312,6 +317,17 @@ impl Tmux for FakeTmux {
             .lock()
             .unwrap()
             .push(format!("kill-session {session_name}"));
+        if self
+            .kill_failures
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|name| name == session_name)
+        {
+            return Err(TmuxError::Spawn(std::io::Error::other(
+                "synthetic-cleanup-secret",
+            )));
+        }
         if !self.sticky.load(Ordering::SeqCst) {
             self.sessions
                 .lock()

@@ -832,6 +832,10 @@
        "db": "ok",
        "runner_host": null,
        "runner_last_heartbeat": null,
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "unavailable"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {
@@ -2340,6 +2344,10 @@
        "db": "ok",
        "runner_host": null,
        "runner_last_heartbeat": null,
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "unavailable"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {
@@ -3446,6 +3454,10 @@
        "db": "ok",
        "runner_host": null,
        "runner_last_heartbeat": null,
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "unavailable"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {}
@@ -4991,6 +5003,10 @@
        "db": "ok",
        "runner_host": "127.0.0.1",
        "runner_last_heartbeat": "2026-10-18T09:00:00Z",
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "stale"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {
@@ -8912,6 +8928,10 @@
        "db": "ok",
        "runner_host": "runner-idle",
        "runner_last_heartbeat": "<timestamp>",
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "fresh"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {}
@@ -11280,6 +11300,10 @@
        "db": "ok",
        "runner_host": "runner-d",
        "runner_last_heartbeat": "<timestamp>",
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "fresh"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {
@@ -12667,6 +12691,10 @@
        "db": "ok",
        "runner_host": "runner-z",
        "runner_last_heartbeat": "<timestamp>",
+       "runner_readiness": {
+        "freshness_threshold_seconds": 120,
+        "status": "fresh"
+       },
        "service": "opsgate",
        "status": "ok",
        "ticket_counters": {

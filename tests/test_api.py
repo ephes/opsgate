@@ -3199,3 +3199,25 @@ def test_login_reservation_expiry_and_success_preserve_other_work() -> None:
     throttle.settle("a", third, success=True)
     assert throttle.reserve("a") is not None
     assert throttle.reserve("a") is None
+
+
+@pytest.mark.parametrize(
+    ("age", "expected"),
+    [(None, "unavailable"), (0, "fresh"), (120, "fresh"), (121, "stale"), (-5, "fresh"), (-6, "clock_invalid")],
+)
+def test_runner_readiness_health_contract(
+    client: Any, monkeypatch: pytest.MonkeyPatch, age: int | None, expected: str
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr("opsgate.service.utc_now", lambda: now)
+    if age is not None:
+        stamp = (now - timedelta(seconds=age)).isoformat()
+        with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+            conn.execute("INSERT INTO runner_heartbeats VALUES ('synthetic-private-runner', ?, ?)", (stamp, stamp))
+    response = client.get("/api/v1/health")
+    assert response.status_code == 200
+    health = response.get_json()
+    assert health["status"] == "ok"
+    assert health["runner_readiness"] == {"status": expected, "freshness_threshold_seconds": 120}

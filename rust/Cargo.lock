@@ -999,6 +999,7 @@ dependencies = [
 name = "opsgate-store"
 version = "0.3.0"
 dependencies = [
+ "chrono",
  "opsgate-core",
  "regex",
  "rusqlite",

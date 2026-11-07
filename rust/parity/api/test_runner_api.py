@@ -221,6 +221,7 @@ def test_idle_runner_claim_poll_records_heartbeat(anon: Browser, db: Database) -
     first = anon.get("/api/v1/health").json()
     assert first["runner_host"] == "runner-idle" and first["runner_last_heartbeat"] is not None
     assert first["ticket_counters"] == {"pending_approval": 1}
+    assert first["runner_readiness"] == {"status": "fresh", "freshness_threshold_seconds": 120}
     assert claim(anon, "runner-idle").status == 200
     second = anon.get("/api/v1/health").json()
     assert second["runner_last_heartbeat"] >= first["runner_last_heartbeat"]
@@ -490,3 +491,19 @@ def test_runner_status_container_values(
         "result_detail": None if impl == "python" else "invalid_json",
     }[field]
     assert resp.error == expected
+
+
+@S4A
+@pytest.mark.parametrize(
+    ("stamp", "expected"),
+    [("2000-01-01T00:00:00Z", "stale"), ("9999-01-01T00:00:00Z", "clock_invalid"), ("invalid", "clock_invalid")],
+)
+def test_runner_readiness_rejects_invalid_or_old_evidence(
+    anon: Browser, db: Database, stamp: str, expected: str
+) -> None:
+    db.execute("INSERT INTO runner_heartbeats VALUES ('synthetic-private-runner', ?, ?)", (stamp, stamp))
+    response = anon.get("/api/v1/health")
+    assert response.status == 200
+    health = response.json()
+    assert health["status"] == "ok"
+    assert health["runner_readiness"] == {"status": expected, "freshness_threshold_seconds": 120}

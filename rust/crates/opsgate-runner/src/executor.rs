@@ -78,6 +78,8 @@ pub enum ExecutorError {
     /// The ticket from the API cannot be executed as given (`ValueError`,
     /// `TypeError`, `AttributeError`, `OverflowError` in Python).
     InvalidTicket(&'static str),
+    /// Bulk session cleanup failed or absence could not be verified.
+    CleanupUnverified,
 }
 
 impl ExecutorError {
@@ -88,6 +90,7 @@ impl ExecutorError {
             Self::Io(_) => "IoError",
             Self::Tmux(_) => "TmuxError",
             Self::InvalidTicket(_) => "InvalidTicket",
+            Self::CleanupUnverified => "CleanupError",
         }
     }
 
@@ -107,6 +110,7 @@ impl std::fmt::Display for ExecutorError {
             Self::Io(error) => write!(f, "artifact I/O failed: {error}"),
             Self::Tmux(error) => error.fmt(f),
             Self::InvalidTicket(what) => write!(f, "ticket cannot be executed: {what}"),
+            Self::CleanupUnverified => f.write_str("Session cleanup could not be verified"),
         }
     }
 }
@@ -822,17 +826,41 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
     /// `_kill_running_sessions`: kill the session of every entry whose status
     /// is `running`.
     async fn kill_running_sessions(&self, tmux_sessions: &[Value]) -> Result<(), ExecutorError> {
+        let mut failed = false;
+        let mut sessions = Vec::new();
         for entry in tmux_sessions {
-            let entry = entry.as_object().ok_or(ExecutorError::InvalidTicket(
-                "tmux session entry is not an object",
-            ))?;
+            let Some(entry) = entry.as_object() else {
+                failed = true;
+                continue;
+            };
             if pytext::py_lower(&text_or(entry, "status", "")) == "running" {
-                let session_name = text_or(entry, "session_name", "");
-                let session_name = pytext::strip(&session_name);
-                if !session_name.is_empty() {
-                    self.tmux.kill_session(session_name).await?;
+                let name = text_or(entry, "session_name", "");
+                let name = pytext::strip(&name);
+                if !name.is_empty() {
+                    sessions.push(name.to_owned());
                 }
             }
+        }
+        for session_name in &sessions {
+            if self.tmux.kill_session(session_name).await.is_err() {
+                failed = true;
+                tracing::warn!(
+                    "Runner session cleanup failed: ticket_id={} session={session_name} category=kill_error",
+                    self.ticket_id
+                );
+            }
+        }
+        for session_name in &sessions {
+            if !matches!(self.tmux.has_session(session_name).await, Ok(false)) {
+                failed = true;
+                tracing::warn!(
+                    "Runner session cleanup failed: ticket_id={} session={session_name} category=unverified",
+                    self.ticket_id
+                );
+            }
+        }
+        if failed {
+            return Err(ExecutorError::CleanupUnverified);
         }
         Ok(())
     }

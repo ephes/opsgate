@@ -56,6 +56,7 @@ def test_health_reports_no_runner_heartbeat_before_first_poll(anon: Browser) -> 
         "db": "ok",
         "runner_last_heartbeat": None,
         "runner_host": None,
+        "runner_readiness": {"status": "unavailable", "freshness_threshold_seconds": 120},
         "ticket_counters": {},
     }
 

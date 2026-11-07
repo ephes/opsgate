@@ -29,6 +29,11 @@
 
 ### Fixed
 
+- Attempt every identified owned session during Rust bulk cleanup, then verify absence; retain recovery
+  evidence on failed kills, remaining sessions or failed verification without replacing the worker error.
+- Add runner readiness to both health APIs with a 120-second freshness threshold and five-second
+  future skew tolerance, preserving control-plane liveness responses and existing heartbeat fields.
+
 - Return nonzero from both one-shot runners after claim failures and owned-worker completion.
 - Diagnose Rust running-ticket poll outages and recovery without repeated identical warnings within a step
   or transport exception text; owned work continues while observation is unavailable.

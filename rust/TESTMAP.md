@@ -358,3 +358,13 @@ Round 58 runner outages: `supervisor::once_claim_failure_waits_for_claimed_worke
 runner parity `test_once_claim_failure_exits_nonzero` covers transport/503 failures in both CLIs.
 `poll_diagnostics::running_poll_outage_and_recovery_are_observable` covers repeated/changed poll errors,
 recovery, privacy and continued execution using fake API/tmux and paused time.
+
+Round 58 cleanup/readiness: `supervisor::cleanup_attempts_every_session_and_verifies_after_kill_error`
+exercises the production worker failure path, verifying retained recovery state and all kill attempts;
+`executor::terminal_cleanup_attempts_all_entries_and_verifies_survivors` covers executor cleanup.
+`create::runner_readiness_classifies_absent_stale_future_invalid_and_idle` and the fixed-clock health
+unit test cover readiness and skew boundaries. Python `test_runner_readiness_health_contract` and the
+API parity health scenarios cover the additive liveness/readiness contract; store fixtures are regenerated.
+
+`executor::running_step_heartbeats_outlive_the_readiness_threshold` pins busy-step heartbeats
+at 30, 60, 90 and 120 seconds during one step lasting beyond the readiness threshold.

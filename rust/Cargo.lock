@@ -1018,6 +1018,7 @@ dependencies = [
  "bcrypt",
  "chrono",
  "cookie",
+ "futures-core",
  "getrandom 0.4.3",
  "hkdf",
  "html5gum",

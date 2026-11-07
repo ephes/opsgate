@@ -617,7 +617,9 @@ Endpoints that require an object answer 400 `invalid_json` ("JSON object
 required") for no JSON or a non-object; nesting deeper than 64 object/array
 levels (root counts) → 400 `invalid_json` before any mutation
 (`check_json_depth`). Bodies are read after the route's token check (a 401
-never reads the body) and are at most 8 MiB (D-5). Reject/cancel/claim treat a falsy body (`null`, `{}`,
+never reads the body) and are at most 8 MiB (D-5). Rust also bounds complete
+body collection to 15 elapsed seconds, including trickled frames (408 on timeout,
+D-20), before ticket mutation. Reject/cancel/claim treat a falsy body (`null`, `{}`,
 `[]`, `0`, `""`, `false`) as `{}` (D-4 for truthy non-objects). A UTF-8 BOM is
 accepted; integer tokens longer than 4300 digits are undecodable (CPython
 limit). Rust (`opsgate_core::json`) cannot decode text nested 128 levels or
@@ -1286,6 +1288,15 @@ these logs (checked: ops-control/ops-library reference them only in runbooks).
   4.13.4). HTTP requests of the executor are not cancelled (a cancelled
   request would turn into an API error and skip the shutdown actions); they
   finish within the 15 s timeout as in Python.
+
+- **D-20 Request-body elapsed deadline.** Rust wraps complete body collection in
+  Tokio's public timeout API with a fixed 15-second budget. Pending and trickling
+  under-limit bodies return 408 Request Timeout without ticket mutation; the
+  independent 8 MiB limit still returns 413. Bearer authentication precedes API body
+  polling. UI form bodies use the same deadline during CSRF parsing, before
+  approver authentication, including login and ticket-action forms; they also
+  return HTML 408 on timeout. Python/waitress retains its existing body policy. This is intentional
+  Rust hardening, verified with paused-time synthetic streams through the router.
 
 ---
 

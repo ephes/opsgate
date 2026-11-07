@@ -10,11 +10,6 @@
 - Bound state/summary/metadata reads to 8 MiB on regular nonblocking file descriptors;
   preserve rejected evidence and fail interrupted steps without relaunching them.
 
-### Fixed
-
-- Isolate corrupt/unreadable recovery state files, retain their evidence and validate
-  ticket identities against UUID filenames before looking up tickets.
-
 - Bound every tmux client operation to five seconds in both runners. Timed-out
   clients are killed and reaped; unverified session cleanup retains recovery state.
 
@@ -31,6 +26,14 @@
   `hmac`). Both turned the `cargo deny` supply-chain check red. Lockfile only,
   no code change. The deployed binary keeps the old versions until a new
   `rs-v` release is built and rolled out.
+
+### Fixed
+
+- Isolate corrupt/unreadable recovery state files, retain their evidence and validate
+  ticket identities against UUID filenames before looking up tickets. Unchanged rejected
+  files are read and warned about once per process, retried after changes.
+- Isolate excessive JSON nesting in recovery artifacts, including Python 3.11 decoder
+  recursion failures, with the shared 64-level JSON depth limit.
 
 ### Documentation
 

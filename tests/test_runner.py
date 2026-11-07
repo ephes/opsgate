@@ -1020,7 +1020,11 @@ def test_cleanup_verifies_sessions_are_gone(tmp_path: Path, monkeypatch) -> None
     ]
 
 
-@pytest.mark.parametrize("bad_bytes", [b"\xff", b"{", b"[]", b'{"ticket_id":"../../invented"}'])
+@pytest.mark.parametrize(
+    "bad_bytes",
+    [b"\xff", b"{", b"[]", b'{"ticket_id":"../../invented"}', b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}"],
+    ids=["utf8", "json", "shape", "identity", "deep"],
+)
 def test_recovery_isolates_corrupt_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad_bytes: bytes) -> None:
     ticket_id = "11111111-1111-4111-8111-111111111111"
     runner = OpsGateRunner(_runner_settings(tmp_path))
@@ -1046,8 +1050,12 @@ def test_recovery_isolates_corrupt_state(tmp_path: Path, monkeypatch: pytest.Mon
 @pytest.mark.parametrize("artifact", ["summary_path", "metadata_path"])
 @pytest.mark.parametrize(
     "content",
-    [b"\xff", b'{"status":"succeeded","padding":"' + b"x" * (8 * 1024 * 1024) + b'"}'],
-    ids=["utf8", "oversize"],
+    [
+        b"\xff",
+        b'{"status":"succeeded","padding":"' + b"x" * (8 * 1024 * 1024) + b'"}',
+        b'{"nested":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}",
+    ],
+    ids=["utf8", "oversize", "deep"],
 )
 def test_rejected_artifact_never_relaunches_or_skips_step(tmp_path: Path, artifact: str, content: bytes) -> None:
     ticket_id = "11111111-1111-4111-8111-111111111111"
@@ -1131,3 +1139,34 @@ def test_recovery_isolates_read_error_and_still_discovers_tickets(
     assert injected == [True]
     assert started == [ticket_id]
     assert bad.read_bytes() == b"retained synthetic evidence"
+
+
+def test_recovery_skips_unchanged_rejected_state_and_retries_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import opsgate.runner as runner_module
+
+    ticket_id = "11111111-1111-4111-8111-111111111111"
+    runner = OpsGateRunner(_runner_settings(tmp_path))
+    bad = runner.state_dir / f"{ticket_id}.json"
+    bad.write_bytes(b"{")
+    original_load = runner_module._load_json_object
+    reads: list[Path] = []
+
+    def load(path: Path) -> dict[str, Any] | None:
+        reads.append(path)
+        return original_load(path)
+
+    monkeypatch.setattr(runner_module, "_load_json_object", load)
+    monkeypatch.setattr(runner, "_discover_ticket_ids_from_tmux", lambda: set())
+    monkeypatch.setattr(runner.api, "get_ticket", lambda identity: {"id": identity, "state": "running"})
+    started: list[str] = []
+    monkeypatch.setattr(runner, "_start_worker", lambda **kw: started.append(kw["ticket_id"]))
+    runner._recover_inflight_tickets(include_artifacts=False)
+    runner._recover_inflight_tickets(include_artifacts=False)
+    assert reads == [bad]
+    assert len(caplog.records) == 1 and bad.name in caplog.text
+    assert bad.read_bytes() == b"{"
+    bad.write_text(json.dumps({"ticket_id": ticket_id}))
+    runner._recover_inflight_tickets(include_artifacts=False)
+    assert reads == [bad, bad] and started == [ticket_id]

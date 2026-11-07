@@ -23,7 +23,15 @@ from urllib.parse import urlsplit
 
 from .config import RunnerSettings, load_runner_settings
 from .log_preview import read_tail_lines
-from .service import SUPPORTED_AGENTS, TERMINAL_STATES, isoformat_z, parse_iso_datetime, utc_now
+from .service import (
+    SUPPORTED_AGENTS,
+    TERMINAL_STATES,
+    ServiceError,
+    check_json_depth,
+    isoformat_z,
+    parse_iso_datetime,
+    utc_now,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +55,8 @@ def _load_json_object(path: Path) -> dict[str, Any] | None:
         if len(raw) > ARTIFACT_MAX_BYTES:
             return None
         loaded = json.loads(raw.decode("utf-8"))
-    except (OSError, ValueError):
+        check_json_depth(loaded, code="invalid_artifact")
+    except (OSError, ValueError, RecursionError, ServiceError):
         return None
     return loaded if isinstance(loaded, dict) else None
 
@@ -755,6 +764,7 @@ class OpsGateRunner:
         self._worker_cleanup: dict[str, bool] = {}
         self._lock = threading.Lock()
         self._artifacts_bootstrap_scanned = False
+        self._rejected_state: dict[Path, tuple[int, int, int, int, int] | None] = {}
 
     def install_signal_handlers(self) -> None:
         def _handle_signal(_: int, __) -> None:
@@ -883,11 +893,23 @@ class OpsGateRunner:
 
     def _recover_inflight_tickets(self, *, include_artifacts: bool) -> None:
         candidate_ticket_ids: set[str] = set()
-        for state_file in sorted(self.state_dir.glob("*.json")):
+        state_files = sorted(self.state_dir.glob("*.json"))
+        state_file_set = set(state_files)
+        self._rejected_state = {path: stamp for path, stamp in self._rejected_state.items() if path in state_file_set}
+        for state_file in state_files:
+            try:
+                metadata = state_file.stat()
+                stamp = (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+            except OSError:
+                stamp = None
+            if state_file in self._rejected_state and self._rejected_state[state_file] == stamp:
+                continue
+            self._rejected_state.pop(state_file, None)
             parsed = _load_json_object(state_file)
             ticket_id = parsed.get("ticket_id") if isinstance(parsed, dict) else None
             if not isinstance(ticket_id, str) or not TICKET_ID_RE.fullmatch(ticket_id) or state_file.stem != ticket_id:
-                logger.warning("Ignoring invalid runner state identity; evidence retained")
+                self._rejected_state[state_file] = stamp
+                logger.warning("Ignoring invalid runner state file %r; evidence retained", state_file.name)
                 continue
             candidate_ticket_ids.add(ticket_id)
 

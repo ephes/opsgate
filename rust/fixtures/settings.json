@@ -15741,6 +15741,59 @@
   },
   {
    "env": {
+    "OPSGATE_RUNNER_TOKEN": "short",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_RUNNER_TOKEN is required and must be at least 20 characters",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_RUNNER_TOKEN before session bounds"
+  },
+  {
+   "env": {
+    "OPSGATE_ALLOWED_CIDRS": " , ,",
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_ALLOWED_CIDRS must contain at least one CIDR",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_ALLOWED_CIDRS before session bounds"
+  },
+  {
+   "env": {
+    "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "0",
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_MAX_DURATION_SECONDS_DEFAULT must be an integer from 1 to 31536000",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_MAX_DURATION_SECONDS_DEFAULT before session bounds"
+  },
+  {
+   "env": {
     "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000"
    },
    "loader": "runner",

@@ -669,15 +669,6 @@ pub fn load_api_settings(environment: &mut Environment) -> Result<ApiSettings, S
         "OPSGATE_UI_SESSION_TIMEOUT_SECONDS",
     )?;
 
-    let session_timeout_seconds = match session_timeout_seconds {
-        PyInt::Value(value) if (1..=MAX_SESSION_TIMEOUT_SECONDS).contains(&value) => value,
-        _ => {
-            return Err(SettingsError::new(format!(
-                "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to {MAX_SESSION_TIMEOUT_SECONDS}"
-            )));
-        }
-    };
-
     let runner_token = env.stripped_or("OPSGATE_RUNNER_TOKEN", "")?;
     require_secret(
         &runner_token,
@@ -765,13 +756,22 @@ pub fn load_api_settings(environment: &mut Environment) -> Result<ApiSettings, S
     }
 
     // Python validates the CIDRs while building the settings object and the
-    // duration bounds in its `__post_init__`, so these two come last.
+    // duration/session bounds in its `__post_init__`, so those checks come last.
     let allowed_networks = allowed_cidrs
         .iter()
         .map(|cidr| parse_network(cidr))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| SettingsError::new("OPSGATE_ALLOWED_CIDRS contains an invalid network"))?;
     let max_duration_seconds_default = validate_duration_default(max_duration_default)?;
+
+    let session_timeout_seconds = match session_timeout_seconds {
+        PyInt::Value(value) if (1..=MAX_SESSION_TIMEOUT_SECONDS).contains(&value) => value,
+        _ => {
+            return Err(SettingsError::new(format!(
+                "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to {MAX_SESSION_TIMEOUT_SECONDS}"
+            )));
+        }
+    };
 
     Ok(ApiSettings {
         service_name,

@@ -312,6 +312,14 @@ def _settings_corpus() -> list[dict[str, Any]]:
               rust_error="OPSGATE_ALLOWED_CIDRS contains an invalid network"))
     add(_case("api order: session timeout parse before runner token", "api",
               {"OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "x", "OPSGATE_RUNNER_TOKEN": None}))
+    for setting, value in (
+        ("OPSGATE_RUNNER_TOKEN", "short"),
+        ("OPSGATE_ALLOWED_CIDRS", " , ,"),
+        ("OPSGATE_MAX_DURATION_SECONDS_DEFAULT", "0"),
+    ):
+        add(_case(f"api order: {setting} before session bounds", "api", {
+            "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0", setting: value,
+        }))
     # Runner settings.
     add(_case("runner host from the system", "runner", {"OPSGATE_RUNNER_HOST": None}))
     add(_case("runner blank host from the system", "runner", {"OPSGATE_RUNNER_HOST": "  "}))

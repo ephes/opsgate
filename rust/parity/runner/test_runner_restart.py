@@ -165,8 +165,14 @@ def test_sigkill_in_later_step_skips_finished_steps(rig: Rig, runners: tuple[str
 
 @pytest.mark.parametrize(
     "content",
-    ["{broken", "[]", "\udcff", " " * (8 * 1024 * 1024) + "{}"],
-    ids=["invalid-json", "not-an-object", "undecodable", "oversize"],
+    [
+        "{broken",
+        "[]",
+        "\udcff",
+        " " * (8 * 1024 * 1024) + "{}",
+        '{"status":"succeeded","nested":' + "[" * 65 + "0" + "]" * 65 + "}",
+    ],
+    ids=["invalid-json", "not-an-object", "undecodable", "oversize", "deep"],
 )
 @pytest.mark.parametrize("artifact", ["session_metadata.json", "summary.json"])
 def test_unreadable_metadata_fails_closed(rig: Rig, content: str, artifact: str) -> None:

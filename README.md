@@ -116,8 +116,11 @@ Inspect them before retrying a ticket; the restart rules above still prevent a s
 Recovery reads each state file independently; invalid/unreadable files are retained with a bounded diagnostic
 and do not prevent tmux/artifact discovery or other tickets from recovering. A state file must contain a
 string UUID ticket identity matching its filename. Recovery never derives an identity from corrupt content.
+Diagnostics name the rejected file; unchanged rejected files are not read or warned about again in the same
+process. Changes to file identity, size or timestamps trigger a retry. After inspecting retained evidence,
+repair or remove the named file from `runner-state`; a restart also retries all files.
 Both runners read state, step summaries and metadata from a single nonblocking regular-file descriptor,
-with an inclusive 8 MiB byte limit before UTF-8/JSON decoding. Special files, oversized files and invalid
+with an inclusive 8 MiB byte limit before UTF-8/JSON decoding and a 64-level JSON depth limit. Special files, oversized files and invalid
 artifacts are unavailable. Invalid summary/metadata evidence is retained; the step fails as interrupted,
 after stopping and verifying absence of any owned session, without skipping it or launching it again.
 

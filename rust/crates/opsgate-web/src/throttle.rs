@@ -1,17 +1,12 @@
 //! The login throttle (`LoginThrottle`, PLAN.md 4.5.3): failed/pending sign-ins per
 //! client, in memory, on a monotonic clock, lost on restart.
 //!
-//! A client (its address, or `unknown`) is locked while it has at least
-//! `limit` failures newer than `window_seconds`. A failure keeps the last
-//! `limit` stamps; a successful sign-in resets the client. At most
-//! `max_tracked_clients` clients are tracked: when a failure goes beyond
-//! that, the clients without a recent failure are dropped first, then the
-//! ones whose newest failure is oldest (ties in the order the clients were
-//! first tracked, as Python's stable sort over its dictionary). Times are
 //! Production admission reserves under the mutex before hashing and settles via
-//! a guard. Pending checks expire after the same window, survive sibling success,
-//! and count with failures. A full client table denies new clients. Times are
-//! seconds as `f64`, compared as Python compares its floats
+//! a guard. Pending checks expire after the failure window, survive sibling success,
+//! and count with failures. A full client table denies new clients.
+//! The legacy failure-counter helpers prune expired entries and evict the oldest
+//! failures past the client limit (ties in insertion order, matching Python).
+//! Times are seconds as `f64`, compared as Python compares its floats
 //! (`fixtures/throttle.json`).
 
 use std::collections::HashMap;

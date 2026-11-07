@@ -346,3 +346,9 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `test_config.py` session lifetime load/construction bounds | `settings_fixture.rs`, `session.rs::maximum_session_timeout_is_usable` | generated `settings.json` invalid and valid lifetime boundaries |
 | `test_runner.py` corrupt-state/read-error isolation | supervisor state-file tests | restart parity corrupt-state sibling recovery |
 | `test_runner.py` bounded/special descriptor and rejected-artifact tests | artifact FIFO/bounds tests, executor rejected-artifact tests | restart parity unreadable/oversized metadata and summaries |
+
+Round-50 review regressions: `test_recovery_skips_unchanged_rejected_state_and_retries_repair`
+and Rust `state_file_ids_retain_invalid_files_and_recover_valid_siblings` cover unchanged
+rejected-state caching and repair retries. Corrupt-state and rejected-artifact Python
+tests include excessive nesting (including decoder recursion on Python 3.11); runner
+parity `test_unreadable_metadata_fails_closed[deep]` covers both implementations.

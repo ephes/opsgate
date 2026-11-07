@@ -567,7 +567,9 @@ Session lifetimes are validated at settings construction within 1..=863999999999
 seconds (`settings.json` includes the bounds); Rust exposes a read-only accessor.
 
 Recovery state files require a matching UUID filename and string identity; invalid
-or unavailable siblings are retained and skipped. State, summary and metadata readers
+or unavailable siblings are retained and skipped. Unchanged rejected files are read and warned
+about once per process; file identity, size or timestamp changes trigger a retry. Inspect and
+repair or remove the named file in `runner-state`; restarting also retries all files. State, summary and metadata readers
 use a single regular-file descriptor opened nonblocking and cap bytes at 8 MiB before
-decoding. Invalid step artifacts fail as interrupted, retain the original evidence,
+decoding, then apply the shared 64-level JSON depth limit. Invalid step artifacts fail as interrupted, retain the original evidence,
 and never authorize a skip or relaunch. Runner restart parity covers these boundaries.

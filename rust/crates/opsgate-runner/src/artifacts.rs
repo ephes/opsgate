@@ -131,7 +131,7 @@ pub fn load_json_object(path: &Path) -> Option<JsonObject> {
         return None;
     }
     let text = String::from_utf8(data).ok()?;
-    match opsgate_core::json::parse(&text) {
+    match opsgate_core::json::parse_stored(&text) {
         Ok(Value::Object(object)) => Some(object),
         _ => None,
     }
@@ -331,6 +331,25 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn artifact_depth_limit_includes_the_root_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact.json");
+        for (arrays, accepted) in [(63, true), (64, false), (65, false)] {
+            let text = format!(
+                r#"{{"status":"succeeded","nested":{}0{}}}"#,
+                "[".repeat(arrays),
+                "]".repeat(arrays),
+            );
+            fs::write(&path, text).unwrap();
+            assert_eq!(
+                load_json_object(&path).is_some(),
+                accepted,
+                "{arrays} arrays"
+            );
+        }
     }
 
     #[test]

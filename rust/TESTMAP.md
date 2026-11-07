@@ -383,3 +383,9 @@ generation of a barrier-started unchanged-hash startup/logout pair through indep
 Store instances. The start barrier does not force a specific internal read/write order.
 `crates/opsgate-web/tests/session.rs::a_cookie_issued_before_concurrent_revocations_is_rejected`
 covers cookie rejection and subsequent healthy authentication.
+
+Round 74 dump evidence: `crates/opsgate-store/tests/dump.rs` injects second-record
+write and final-flush failures, checks owned file cleanup and destination/source
+preservation, and gates a WAL writer after the first serialized record. Exact
+pre-mutation records/checksum counters remain in that export; the next export sees
+the changed, deleted and newly inserted tickets with matching counters.

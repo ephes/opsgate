@@ -133,7 +133,13 @@ from the stored fields (or the error code, `unhandled` for a 500), the stored
 `approved_payload_checksum` and whether both match. The file is created new
 with mode 0600 (it holds prompts and contexts; an existing file is never
 overwritten, a failed dump is removed) and only when the schema matches; a
-summary line follows the report. On the database copy of the shadow run:
+summary line follows the report. Records and checksum counters describe one SQLite
+read snapshot; concurrent WAL writers can commit without entering that dump. A
+subsequent dump sees their committed changes. Write and flush errors return no
+success summary; file-level failures remove only the output created by that call,
+preserving existing destinations and the read-only source.
+
+On the database copy of the shadow run:
 
 ```bash
 opsgate check-db --db COPY.sqlite3 --dump rust.jsonl
@@ -223,6 +229,11 @@ barrier-started unchanged-hash startup/logout pair retains the final increment; 
 test does not prescribe which operation acquires SQLite's write lock first. Web tests also
 reject an old cookie after concurrent revocations and accept a newly issued cookie.
 These cases do not define a policy for intentionally different concurrent hashes.
+
+`tests/dump.rs` includes a writer that fails on the second record or final flush,
+file-error cleanup with an existing-destination sentinel, and a WAL writer gated
+after the first exported record. The concurrent test changes/deletes later rows
+and inserts a new row, then checks exact records and counters for both snapshots.
 
 ## Web
 

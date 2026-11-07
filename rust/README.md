@@ -216,6 +216,14 @@ and replacement), approval, cancellation, archival and runner completion. The tr
 error must be observed, and removing it permits one clean operation with no phantom
 event. These regressions pin rollback separately from concurrent-writer protection.
 
+`tests/session.rs` races independent Store instances with barriers: eight committed
+revocations produce eight unique consecutive generations; unknown users change no
+rows. Concurrent startups with one replacement hash converge on one bump, and an
+barrier-started unchanged-hash startup/logout pair retains the final increment; the
+test does not prescribe which operation acquires SQLite's write lock first. Web tests also
+reject an old cookie after concurrent revocations and accept a newly issued cookie.
+These cases do not define a policy for intentionally different concurrent hashes.
+
 ## Web
 
 `opsgate-web` (slice S4a) is the axum application of `opsgate serve`.

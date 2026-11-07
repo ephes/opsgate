@@ -4,6 +4,9 @@
 
 ### Tests
 
+- Cover concurrent Rust session revocations and password-state startup synchronization,
+  including exact generations and rejection of cookies issued before revocation.
+
 - Pin Rust audited-create, expiry/replacement, approver-transition and runner-completion
   rollback with real SQLite audit INSERT failures and successful retries.
 

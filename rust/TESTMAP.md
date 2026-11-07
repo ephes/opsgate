@@ -376,3 +376,10 @@ new-ticket creation, predecessor expiry/replacement, approve/cancel/archive and
 runner completion mutations (success, failure, timeout and cancellation). Exact
 all-table snapshots include approval checksums, completion fields, audit events
 and runner heartbeats; removing each trigger proves the operation can succeed.
+
+Round 74 session concurrency: `crates/opsgate-store/tests/session.rs` covers exact
+generation counts, unknown-user no-op, same-hash startup convergence and the final
+generation of a barrier-started unchanged-hash startup/logout pair through independent
+Store instances. The start barrier does not force a specific internal read/write order.
+`crates/opsgate-web/tests/session.rs::a_cookie_issued_before_concurrent_revocations_is_rejected`
+covers cookie rejection and subsequent healthy authentication.

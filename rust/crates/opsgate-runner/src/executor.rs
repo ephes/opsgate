@@ -13,6 +13,7 @@
 //! (stop-aware sleeps, D-16). HTTP requests are not cancelled, so a request
 //! in flight finishes (≤ 15 s) before the shutdown actions run, as in Python.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -573,6 +574,7 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
 
         // An exit code that already exists (adopted on resume) skips the poll.
         if !exit_code_present {
+            let mut poll_failures = BTreeSet::new();
             loop {
                 if self.stop.is_cancelled() {
                     if self.exists(&paths.exit_code_path).await? {
@@ -594,9 +596,29 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                 }
 
                 let latest_state = match self.api.get_ticket(&self.ticket_id).await {
-                    Ok(latest) => text_or(&latest, "state", ""),
-                    // An unreachable API never stops a running step.
-                    Err(_) => "running".to_owned(),
+                    Ok(latest) => {
+                        if !poll_failures.is_empty() {
+                            tracing::info!(
+                                "Runner ticket poll recovered: ticket_id={}",
+                                self.ticket_id
+                            );
+                            poll_failures.clear();
+                        }
+                        text_or(&latest, "state", "")
+                    }
+                    // An unreachable API never stops a running step. Log each
+                    // safe status/category once until observation recovers.
+                    Err(error) => {
+                        if poll_failures.insert((error.status_code, error.error_code.clone())) {
+                            tracing::warn!(
+                                "Runner ticket poll failed: ticket_id={} status={} category={}",
+                                self.ticket_id,
+                                error.status_code,
+                                error.error_code
+                            );
+                        }
+                        "running".to_owned()
+                    }
                 };
                 if latest_state == "canceled" {
                     self.tmux.kill_session(&session_name).await?;

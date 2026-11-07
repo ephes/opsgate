@@ -778,6 +778,7 @@ class OpsGateRunner:
         self._recover_inflight_tickets(include_artifacts=not self._artifacts_bootstrap_scanned)
         self._artifacts_bootstrap_scanned = True
 
+        claim_failed = False
         while not self.stop_event.is_set():
             self._reap_finished_workers()
             self._recover_inflight_tickets(include_artifacts=False)
@@ -793,6 +794,7 @@ class OpsGateRunner:
                 try:
                     claimed_ticket = self.api.claim_ticket(self.settings.runner_host)
                 except RunnerApiError as error:
+                    claim_failed = True
                     logger.warning("Runner claim failed: status=%s category=%s", error.status_code, error.error_code)
                     break
                 if claimed_ticket is None:
@@ -814,6 +816,8 @@ class OpsGateRunner:
             time.sleep(self.settings.runner_poll_interval_seconds)
 
         self._wait_for_workers()
+        if once and claim_failed:
+            raise RuntimeError("Runner one-shot claim failed")
 
     def _worker_state_path(self, ticket_id: str) -> Path:
         return self.state_dir / f"{ticket_id}.json"

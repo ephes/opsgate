@@ -78,6 +78,8 @@ pub enum SupervisorError {
     /// `tmux ls` could not be started for another reason than a missing
     /// binary during discovery (`OSError`).
     Tmux(TmuxError),
+    /// A claim failed during one-shot mode; owned workers have been handled.
+    ClaimFailed,
 }
 
 impl std::fmt::Display for SupervisorError {
@@ -85,6 +87,7 @@ impl std::fmt::Display for SupervisorError {
         match self {
             Self::Io(error) => write!(f, "runner state I/O failed: {error}"),
             Self::Tmux(error) => error.fmt(f),
+            Self::ClaimFailed => f.write_str("Runner one-shot claim failed"),
         }
     }
 }
@@ -208,6 +211,7 @@ where
         let poll_interval = seconds(settings.runner_poll_interval_seconds);
         let max_parallel_jobs = usize::try_from(settings.max_parallel_jobs).unwrap_or(usize::MAX);
 
+        let mut claim_failed = false;
         while !self.inner.stop.is_cancelled() {
             self.reap_finished_workers().await?;
             self.recover_inflight_tickets(false).await?;
@@ -227,6 +231,7 @@ where
                 let claimed = match self.inner.api.claim_ticket(&settings.runner_host).await {
                     Ok(claimed) => claimed,
                     Err(error) => {
+                        claim_failed = true;
                         tracing::warn!(
                             "Runner claim failed: status={} category={}",
                             error.status_code,
@@ -256,7 +261,11 @@ where
             self.sleep(poll_interval).await;
         }
 
-        self.wait_for_workers().await
+        self.wait_for_workers().await?;
+        if once && claim_failed {
+            return Err(SupervisorError::ClaimFailed);
+        }
+        Ok(())
     }
 
     /// `_write_state_file(ticket_id)`: `{ticket_id, runner_host,

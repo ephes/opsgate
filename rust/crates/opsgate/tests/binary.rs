@@ -303,7 +303,7 @@ fn runner_once_with_disable_file_exits_without_claiming() {
 }
 
 /// `--once` against an unreachable API: the claim fails with the P1 log line
-/// (4.15) and the runner exits 0.
+/// (4.15) and the runner exits 1.
 #[test]
 fn runner_once_logs_a_failed_claim() {
     let dir = tempfile::tempdir().unwrap();
@@ -314,7 +314,7 @@ fn runner_once_logs_a_failed_claim() {
         .unwrap();
 
     let stderr = text(&output.stderr);
-    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
     let failures: Vec<&str> = stderr
         .lines()
         .filter(|line| line.contains("Runner claim failed"))

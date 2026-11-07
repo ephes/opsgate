@@ -352,3 +352,9 @@ and Rust `state_file_ids_retain_invalid_files_and_recover_valid_siblings` cover 
 rejected-state caching and repair retries. Corrupt-state and rejected-artifact Python
 tests include excessive nesting (including decoder recursion on Python 3.11); runner
 parity `test_unreadable_metadata_fails_closed[deep]` covers both implementations.
+
+Round 58 runner outages: `supervisor::once_claim_failure_waits_for_claimed_workers` and
+`once_ends_on_disable_file_and_empty_or_failed_claims` cover one-shot exit/worker ownership;
+runner parity `test_once_claim_failure_exits_nonzero` covers transport/503 failures in both CLIs.
+`poll_diagnostics::running_poll_outage_and_recovery_are_observable` covers repeated/changed poll errors,
+recovery, privacy and continued execution using fake API/tmux and paused time.

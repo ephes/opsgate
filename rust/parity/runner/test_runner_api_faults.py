@@ -179,3 +179,13 @@ def test_claim_failures_are_logged_and_skipped(rig: Rig) -> None:
     assert claims[8].at - claims[7].at < 0.9
     rig.observe("log_lines", runner.p1_log_lines())
     rig.observe_statuses(tid)
+
+
+@pytest.mark.parametrize("drop", [False, True])
+def test_once_claim_failure_exits_nonzero(rig: Rig, drop: bool) -> None:
+    rig.api.fail("claim", times=1, drop=drop, status=503, body=UNAVAILABLE)
+    runner = rig.runner(once=True)
+    assert runner.wait(60) != 0
+    assert len(rig.api.calls("claim")) == 1
+    assert rig.ws.agent_calls() == []
+    rig.observe("exit_failed", True)

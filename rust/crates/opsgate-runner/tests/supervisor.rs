@@ -657,7 +657,7 @@ async fn once_claims_runs_and_waits_for_workers() {
 }
 
 /// `--once` ends without claiming when the disable file exists, and after an
-/// empty or failed claim.
+/// empty claim. Failed claims return failure after waiting for owned workers.
 #[tokio::test(start_paused = true)]
 async fn once_ends_on_disable_file_and_empty_or_failed_claims() {
     let f = Fixture::new(FakeTmux::default());
@@ -672,7 +672,7 @@ async fn once_ends_on_disable_file_and_empty_or_failed_claims() {
     f.api
         .queue_claim(Err(RunnerApiError::new("down", 503, "transport_error")));
     f.api.queue_claim(Ok(Some(ticket(A, "running"))));
-    f.supervisor.run_forever(true).await.unwrap();
+    assert!(f.supervisor.run_forever(true).await.is_err());
     // A failed claim ends the round.
     assert_eq!(f.api.claim_calls.load(Ordering::SeqCst), 2);
     assert!(f.state_files().is_empty());
@@ -757,4 +757,23 @@ async fn worker_tmux_cleanup_timeout_retains_recovery_state() {
     assert!(f.api.updates().is_empty());
     assert_eq!(f.api.state(A), "running");
     assert_eq!(f.tmux.sessions(), [session(A)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn once_claim_failure_waits_for_claimed_workers() {
+    for (status, category) in [(503, "transport_error"), (500, "http_error")] {
+        let f = Fixture::new(FakeTmux::new(false, Some(0)));
+        f.api
+            .queue_claim(Ok(Some(running_ticket(A, one_step(), 0, 120))));
+        f.api.queue_claim(Err(RunnerApiError::new(
+            "synthetic-secret",
+            status,
+            category,
+        )));
+        let error = f.supervisor.run_forever(true).await.unwrap_err();
+        assert!(!error.to_string().contains("synthetic-secret"));
+        assert_eq!(f.api.state(A), "succeeded");
+        assert_eq!(f.supervisor.active_worker_count(), 0);
+        assert!(f.state_files().is_empty());
+    }
 }

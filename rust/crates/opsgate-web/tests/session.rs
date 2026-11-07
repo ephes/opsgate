@@ -349,3 +349,39 @@ async fn logout_without_the_approver_row() {
     assert_eq!(response.location(), Some("/login"));
     assert_eq!(app.cookie(), None);
 }
+
+#[tokio::test]
+async fn a_cookie_issued_before_concurrent_revocations_is_rejected() {
+    use opsgate_store::Store;
+    use std::sync::Barrier;
+
+    let app = TestApp::new();
+    let path = ticket(&app).await;
+    app.sign_in();
+    assert_eq!(app.get(&path).await.status, StatusCode::OK);
+    let start = Barrier::new(2);
+    let peers: Vec<_> = (0..2)
+        .map(|_| Store::open(app.state.settings().clone()).unwrap())
+        .collect();
+    let mut generations = std::thread::scope(|scope| {
+        let handles: Vec<_> = peers
+            .iter()
+            .map(|peer| {
+                let start = &start;
+                scope.spawn(move || {
+                    start.wait();
+                    peer.revoke_ui_sessions(APPROVER).unwrap()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    generations.sort_unstable();
+    assert_eq!(generations, [2, 3]);
+    assert_eq!(app.get(&path).await.status, StatusCode::UNAUTHORIZED);
+    app.sign_in();
+    assert_eq!(app.get(&path).await.status, StatusCode::OK);
+}

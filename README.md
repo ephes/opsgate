@@ -306,6 +306,9 @@ back the operation, including predecessor expiry and runner heartbeat changes.
   session cookie records the generation it was issued under. `POST /logout` from an authenticated session bumps
   the generation, so a copied cookie stops working too. This signs the approver out of **every** browser.
   Changing `OPSGATE_UI_PASSWORD_BCRYPT` bumps the generation when the service next starts.
+  Every committed revocation advances the generation, including concurrent logouts.
+  Concurrent Rust startups using the same replacement hash bump it once; startup with
+  the unchanged hash preserves a concurrent logout increment.
 - Session cookies issued before this mechanism existed carry no generation; approvers sign in once more after
   upgrading.
 - Login admission is atomic per client IP: recent failures plus pending password checks cannot exceed 5.

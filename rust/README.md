@@ -210,6 +210,12 @@ compared with `rust/parity/shadow/compare_dump.py`. Without a suitable
 `python3` it skips; with `OPSGATE_REQUIRE_PYTHON=1` (set in CI) it fails
 instead.
 
+`tests/audit_failures.rs` uses rejecting SQLite audit triggers through public Store
+operations. It compares every table before/after failed creation (including expiry
+and replacement), approval, cancellation, archival and runner completion. The trigger
+error must be observed, and removing it permits one clean operation with no phantom
+event. These regressions pin rollback separately from concurrent-writer protection.
+
 ## Web
 
 `opsgate-web` (slice S4a) is the axum application of `opsgate serve`.

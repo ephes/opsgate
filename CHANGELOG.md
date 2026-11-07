@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Tests
+
+- Pin Rust audited-create, expiry/replacement, approver-transition and runner-completion
+  rollback with real SQLite audit INSERT failures and successful retries.
+
 ### Security
 
 - Reserve login capacity before bcrypt in Python and Rust, including pending checks;

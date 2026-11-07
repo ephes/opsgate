@@ -295,6 +295,10 @@ matches the state it read (compare-and-set).
   `invalid_state`: the ticket moved on, so it stops reporting for it.
 - Audit events record the state that was actually replaced.
 
+Ticket creation (including predecessor expiry/replacement), approver transitions and
+runner completion commit their ticket changes and audit events together. An audit INSERT failure rolls
+back the operation, including predecessor expiry and runner heartbeat changes.
+
 ### Approver sessions
 
 - Sessions expire after `OPSGATE_UI_SESSION_TIMEOUT_SECONDS` (default `28800`, eight hours).

@@ -368,3 +368,11 @@ API parity health scenarios cover the additive liveness/readiness contract; stor
 
 `executor::running_step_heartbeats_outlive_the_readiness_threshold` pins busy-step heartbeats
 at 30, 60, 90 and 120 seconds during one step lasting beyond the readiness threshold.
+
+## Round 74 transaction failure boundaries
+
+`crates/opsgate-store/tests/audit_failures.rs` covers rejected audit INSERTs after
+new-ticket creation, predecessor expiry/replacement, approve/cancel/archive and
+runner completion mutations (success, failure, timeout and cancellation). Exact
+all-table snapshots include approval checksums, completion fields, audit events
+and runner heartbeats; removing each trigger proves the operation can succeed.

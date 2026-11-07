@@ -246,7 +246,7 @@ Slice S4b adds the sign-in and the approver's API (PLAN.md 4.5.3, 4.5.4):
   the same `bcrypt` crate (hash parsing, 72-byte truncation, `$2a$`/`$2b$`/
   `$2x$`/`$2y$`, embedded NUL bytes, `ValueError` as a mismatch; pinned by
   `fixtures/bcrypt.json`), always run, also for a wrong username, on the
-  blocking pool. `throttle::LoginThrottle` is `LoginThrottle` (5 failures in
+  blocking pool. `throttle::LoginThrottle` is `LoginThrottle` (5 recent failures plus pending checks in
   15 minutes per client address, at most 10 000 clients, monotonic clock,
   pinned by `fixtures/throttle.json`); `AppState::with_login_throttle` takes
   another one (tests: a fake clock and small limits). Logout of an
@@ -558,3 +558,18 @@ error instead of Python's traceback (D-12). `opsgate --version` prints
 `OPSGATE_GIT_COMMIT` (40 or 64 lowercase hex digits; the release workflow sets
 it), else from `git rev-parse HEAD`, else `unknown`, and records the choice in
 `OPSGATE_GIT_COMMIT_SOURCE` (`env`, `git`, `none`) for the tests.
+
+The Python/Rust admission contract now reserves before bcrypt and settles on failure,
+success or error (RAII in Rust, `finally` in Python). Pending siblings survive a
+successful login; abandoned reservations expire and a full client table denies new
+addresses. `throttle.json` includes reservation settlement and expiry sequences.
+Session lifetimes are validated at settings construction within 1..=86399999999999
+seconds (`settings.json` includes the bounds); Rust exposes a read-only accessor.
+
+Recovery state files require a matching UUID filename and string identity; invalid
+or unavailable siblings are retained and skipped. Unchanged rejected files are read and warned
+about once per process; file identity, size or timestamp changes trigger a retry. Inspect and
+repair or remove the named file in `runner-state`; restarting also retries all files. State, summary and metadata readers
+use a single regular-file descriptor opened nonblocking and cap bytes at 8 MiB before
+decoding, then apply the shared 64-level JSON depth limit. Invalid step artifacts fail as interrupted, retain the original evidence,
+and never authorize a skip or relaunch. Runner restart parity covers these boundaries.

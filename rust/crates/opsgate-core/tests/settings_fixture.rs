@@ -32,7 +32,7 @@ fn api_json(settings: &ApiSettings) -> Value {
         "session_secret": settings.session_secret,
         "trust_proxy_headers": settings.trust_proxy_headers,
         "session_cookie_secure": settings.session_cookie_secure,
-        "session_timeout_seconds": settings.session_timeout_seconds,
+        "session_timeout_seconds": settings.session_timeout_seconds(),
         "ui_username": settings.ui_username,
         "ui_password_bcrypt": settings.ui_password_bcrypt,
         "max_duration_seconds_default": settings.max_duration_seconds_default(),

@@ -168,10 +168,10 @@ SAFE_HTTP_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 class LoginThrottle:
-    """Per-client failed-login counter with a fixed lockout window.
+    """Bound recent failures plus in-flight password checks per client.
 
-    After ``limit`` failed attempts inside ``window_seconds`` the client is locked out until the oldest
-    counted failure ages out of the window. State is in-process, which matches the single waitress process.
+    Reservations expire after the failure window; success clears only completed failures.
+    State is in-process, matching the single waitress process.
     """
 
     def __init__(
@@ -187,6 +187,7 @@ class LoginThrottle:
         self.max_tracked_clients = max_tracked_clients
         self.clock = clock
         self._failures: dict[str, list[float]] = {}
+        self._pending: dict[str, dict[object, float]] = {}
         self._lock = threading.Lock()
 
     def _recent(self, key: str, now: float) -> list[float]:
@@ -207,6 +208,44 @@ class LoginThrottle:
             by_age = sorted(self._failures, key=lambda key: self._failures[key][-1])
             for key in by_age[:overflow]:
                 self._failures.pop(key, None)
+
+    def reserve(self, key: str) -> object | None:
+        """Atomically count work before hashing; abandoned reservations expire."""
+        with self._lock:
+            now = self.clock()
+            for client, attempts in list(self._pending.items()):
+                recent = {attempt: stamp for attempt, stamp in attempts.items() if stamp > now - self.window_seconds}
+                if recent:
+                    self._pending[client] = recent
+                else:
+                    del self._pending[client]
+            failures = self._recent(key, now)
+            if len(failures) + len(self._pending.get(key, {})) >= self.limit:
+                return None
+            tracked = self._pending.keys() | self._failures.keys()
+            if key not in tracked and len(tracked) >= self.max_tracked_clients:
+                self._prune(now)
+                if len(self._pending.keys() | self._failures.keys()) >= self.max_tracked_clients:
+                    return None
+            attempt = object()
+            self._pending.setdefault(key, {})[attempt] = now
+            return attempt
+
+    def settle(self, key: str, attempt: object, *, success: bool | None) -> None:
+        """Release precisely this attempt; errors release without counting a failure."""
+        with self._lock:
+            pending = self._pending.get(key, {})
+            stamp = pending.pop(attempt, None)
+            if not pending:
+                self._pending.pop(key, None)
+            now = self.clock()
+            if stamp is None or stamp <= now - self.window_seconds:
+                return
+            if success is True:
+                self._failures.pop(key, None)
+            elif success is False:
+                recent = self._recent(key, now)
+                self._failures[key] = (recent + [now])[-self.limit :]
 
     def is_locked(self, key: str) -> bool:
         with self._lock:
@@ -450,8 +489,9 @@ def create_app(
             try:
                 context = json.loads(context_raw)
             except RecursionError as exc:
-                raise ServiceError("context_json must be valid JSON: nesting is too deep",
-                                   400, "invalid_context_json") from exc
+                raise ServiceError(
+                    "context_json must be valid JSON: nesting is too deep", 400, "invalid_context_json"
+                ) from exc
             except json.JSONDecodeError as exc:
                 raise ServiceError(f"context_json must be valid JSON: {exc.msg}", 400, "invalid_context_json") from exc
             check_json_depth(context, code="invalid_context_json")
@@ -818,34 +858,35 @@ def create_app(
         next_path = sanitize_next_path(request.form.get("next")) or next_path
         throttle_key = get_client_ip() or "unknown"
 
-        if throttle.is_locked(throttle_key):
+        attempt = throttle.reserve(throttle_key)
+        if attempt is None:
             flash("Too many failed login attempts. Try again later.", "error")
             return Response(render_template("login.html", next_path=next_path), 429)
 
-        # Always run the password check, so a wrong username costs the same as a wrong password and
-        # response time does not reveal the approver name.
-        username_matches = hmac.compare_digest(
-            username.encode("utf-8"), resolved_settings.ui_username.encode("utf-8")
-        )
+        success: bool | None = None
         try:
-            password_matches = bcrypt.checkpw(
-                password.encode("utf-8"),
-                resolved_settings.ui_password_bcrypt.encode("utf-8"),
+            # Wrong usernames still incur the same password check.
+            username_matches = hmac.compare_digest(
+                username.encode("utf-8"), resolved_settings.ui_username.encode("utf-8")
             )
-        except ValueError:
-            password_matches = False
-
-        if not (username_matches and password_matches):
-            throttle.record_failure(throttle_key)
-            flash("Invalid username or password", "error")
-            if next_path is not None:
-                return redirect(url_for("ui_login", next=next_path))
-            return redirect(url_for("ui_login"))
-
-        session_generation = service.get_ui_session_generation(username)
-        if session_generation is None:
-            raise ServiceError("Approver session state is missing", 500, "session_state_missing")
-        throttle.reset(throttle_key)
+            try:
+                password_matches = bcrypt.checkpw(
+                    password.encode("utf-8"), resolved_settings.ui_password_bcrypt.encode("utf-8")
+                )
+            except ValueError:
+                password_matches = False
+            if not (username_matches and password_matches):
+                success = False
+                flash("Invalid username or password", "error")
+                if next_path is not None:
+                    return redirect(url_for("ui_login", next=next_path))
+                return redirect(url_for("ui_login"))
+            session_generation = service.get_ui_session_generation(username)
+            if session_generation is None:
+                raise ServiceError("Approver session state is missing", 500, "session_state_missing")
+            success = True
+        finally:
+            throttle.settle(throttle_key, attempt, success=success)
         session.clear()
         session["username"] = username
         session["auth_at"] = isoformat_z(utc_now())

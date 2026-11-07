@@ -298,7 +298,14 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                 .ok_or(ExecutorError::InvalidTicket("plan step is not an object"))?;
             let paths = self.step_paths(step_index, step);
             let summary_path = paths.summary_path.clone();
-            let existing = blocking(move || Ok(artifacts::load_json_object(&summary_path))).await?;
+            let (summary_present, existing) = blocking(move || {
+                Ok((
+                    summary_path.exists(),
+                    artifacts::load_json_object(&summary_path),
+                ))
+            })
+            .await?;
+            let invalid_summary = summary_present && existing.is_none();
             if let Some(existing) = existing
                 && pytext::py_lower(&text_or(&existing, "status", "")) == "succeeded"
             {
@@ -316,6 +323,7 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                         deadline,
                     },
                     &prior_summaries,
+                    invalid_summary,
                     &mut tmux_sessions,
                 )
                 .await?;
@@ -365,6 +373,7 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
         &self,
         step: &Step<'_>,
         prior_summaries: &[Value],
+        invalid_summary: bool,
         tmux_sessions: &mut Vec<Value>,
     ) -> Result<Outcome, ExecutorError> {
         let paths = step.paths;
@@ -407,6 +416,26 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
             Ok((present, previous))
         })
         .await?;
+        if invalid_summary || (metadata_present && previous_meta.is_none()) {
+            if self.tmux.has_session(&session_name).await? {
+                self.tmux.kill_session(&session_name).await?;
+                if self.tmux.has_session(&session_name).await? {
+                    return Err(std::io::Error::other(
+                        "Interrupted step session cleanup could not be verified",
+                    )
+                    .into());
+                }
+            }
+            upsert_tmux_session(
+                tmux_sessions,
+                serde_json::json!({
+                    "step_index": step.index, "session_name": session_name, "status": "interrupted"
+                })
+                .as_object()
+                .expect("object literal"),
+            )?;
+            return Ok(Outcome::Failed(format!("step_{number}_interrupted")));
+        }
         let mut exit_code_present = self.exists(&paths.exit_code_path).await?;
         let session_alive = if exit_code_present {
             false

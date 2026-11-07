@@ -13,7 +13,7 @@
 //! (`_run_worker`).
 //!
 //! Python's failure classes are kept: an error the Python runner does not
-//! catch (an unreadable state file, a failing state-file write or removal, a
+//! catch (a failing state-file write or removal, a
 //! `tmux` that cannot be started for another reason than a missing binary
 //! during discovery) ends `run_forever` with a [`SupervisorError`], and the
 //! process exits 1 (Python: a traceback and exit 1); launchd restarts it.
@@ -140,6 +140,7 @@ struct Inner<A, T, C> {
     workers: Mutex<Workers>,
     worker_done: Notify,
     artifacts_scanned: AtomicBool,
+    rejected_state: Mutex<HashMap<PathBuf, Option<StateStamp>>>,
 }
 
 /// `OpsGateRunner`. Cloning gives another handle to the same supervisor.
@@ -184,6 +185,7 @@ where
                 workers: Mutex::new(Workers::default()),
                 worker_done: Notify::new(),
                 artifacts_scanned: AtomicBool::new(false),
+                rejected_state: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -394,8 +396,8 @@ where
     /// `_recover_inflight_tickets(include_artifacts=…)`.
     ///
     /// Candidates: the ids of the state files (a file that is not JSON, not
-    /// an object or has no `ticket_id` is deleted), the tickets of the tmux
-    /// sessions named `job-<uuid>-NN-…` and, with `include_artifacts`, the
+    /// an object or has no matching UUID identity is retained and skipped until changed),
+    /// the tickets of tmux sessions named `job-<uuid>-NN-…` and, with `include_artifacts`, the
     /// artifact directories named like a ticket id. In sorted order, until
     /// `max_parallel_jobs` workers run: a ticket the API cannot return is
     /// skipped (its state file stays); one that is not `running` has its
@@ -406,10 +408,17 @@ where
         include_artifacts: bool,
     ) -> Result<(), SupervisorError> {
         let state_dir = self.inner.state_dir.clone();
-        let mut candidates: BTreeSet<String> = blocking(move || state_file_ids(&state_dir))
-            .await?
-            .into_iter()
-            .collect();
+        let inner = self.inner.clone();
+        let mut candidates: BTreeSet<String> = blocking(move || {
+            let mut rejected = inner
+                .rejected_state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            state_file_ids(&state_dir, &mut rejected)
+        })
+        .await?
+        .into_iter()
+        .collect();
         candidates.extend(self.discover_ticket_ids_from_tmux().await?);
         if include_artifacts {
             candidates.extend(self.discover_ticket_ids_from_artifacts().await?);
@@ -619,14 +628,14 @@ fn session_names(stdout: &str) -> impl Iterator<Item = &str> {
         .map(|line| pytext::strip(line.split(':').next().unwrap_or("")))
 }
 
-/// The ticket ids of the state files (`runner-state/*.json`, hidden files
-/// included, as `Path.glob`). A file that is not JSON (a BOM included), not
-/// an object or has no non-blank `ticket_id` is deleted. A directory that
-/// cannot be listed has no files (`glob` ignores the error); a file that
-/// cannot be read or is not UTF-8 is an error (Python: `OSError`,
-/// `UnicodeDecodeError`, not caught).
-fn state_file_ids(state_dir: &Path) -> io::Result<Vec<String>> {
-    use std::os::unix::ffi::OsStrExt;
+/// Recover only matching UUID filenames/identities; isolate bad files and retain evidence.
+type StateStamp = (u64, u64, u64, i64, i64, i64, i64);
+
+fn state_file_ids(
+    state_dir: &Path,
+    rejected: &mut HashMap<PathBuf, Option<StateStamp>>,
+) -> io::Result<Vec<String>> {
+    use std::os::unix::{ffi::OsStrExt, fs::MetadataExt};
 
     let Ok(entries) = std::fs::read_dir(state_dir) else {
         return Ok(Vec::new());
@@ -637,23 +646,40 @@ fn state_file_ids(state_dir: &Path) -> io::Result<Vec<String>> {
         .map(|entry| entry.path())
         .collect();
     files.sort();
+    rejected.retain(|path, _| files.binary_search(path).is_ok());
 
     let mut ids = Vec::new();
     for path in files {
-        let text = String::from_utf8(std::fs::read(&path)?).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "runner state file is not UTF-8")
-        })?;
-        let ticket_id = match opsgate_core::json::parse(&text) {
-            Ok(Value::Object(state)) => pytext::strip(&text_or(&state, "ticket_id", "")).to_owned(),
-            _ => String::new(),
-        };
-        if ticket_id.is_empty() {
-            match std::fs::remove_file(&path) {
-                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-                _ => {}
-            }
+        let stamp = std::fs::metadata(&path).ok().map(|m| {
+            (
+                m.dev(),
+                m.ino(),
+                m.len(),
+                m.mtime(),
+                m.mtime_nsec(),
+                m.ctime(),
+                m.ctime_nsec(),
+            )
+        });
+        if rejected.get(&path) == Some(&stamp) {
             continue;
         }
+        rejected.remove(&path);
+        let state = artifacts::load_json_object(&path);
+        let ticket_id = state
+            .as_ref()
+            .and_then(|state| state.get("ticket_id"))
+            .and_then(Value::as_str);
+        let Some(ticket_id) = ticket_id.filter(|id| {
+            id.len() == 36
+                && TICKET_ID_RE.is_match(id)
+                && path.file_stem().and_then(|name| name.to_str()) == Some(id)
+        }) else {
+            tracing::warn!(file = ?path.file_name(), "Ignoring invalid runner state file; evidence retained");
+            rejected.insert(path, stamp);
+            continue;
+        };
+        let ticket_id = ticket_id.to_owned();
         ids.push(ticket_id);
     }
     Ok(ids)
@@ -738,50 +764,48 @@ mod tests {
     }
 
     #[test]
-    fn state_file_ids_delete_invalid_files() {
+    fn state_file_ids_retain_invalid_files_and_recover_valid_siblings() {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path();
-        let write = |name: &str, text: &[u8]| std::fs::write(state.join(name), text).unwrap();
-        write("a.json", br#"{"ticket_id": " id-a "}"#);
-        write(".hidden.json", br#"{"ticket_id": "id-hidden"}"#);
-        write("number.json", br#"{"ticket_id": 7}"#);
-        write("not-json.json", b"{");
-        write("bom.json", "\u{feff}{\"ticket_id\": \"x\"}".as_bytes());
-        write("array.json", b"[]");
-        write("blank.json", br#"{"ticket_id": "  "}"#);
-        write("missing.json", br#"{"id": "x"}"#);
-        write("other.txt", br#"{"ticket_id": "id-txt"}"#);
-        write("tmpabc", b"{");
-        let mut ids = state_file_ids(state).unwrap();
-        ids.sort();
-        assert_eq!(ids, ["7", "id-a", "id-hidden"]);
-        let mut left: Vec<String> = std::fs::read_dir(state)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-        left.sort();
+        let id = "11111111-1111-4111-8111-111111111111";
+        std::fs::write(
+            state.join(format!("{id}.json")),
+            format!(r#"{{"ticket_id":"{id}"}}"#),
+        )
+        .unwrap();
+        for (name, bytes) in [
+            ("a.json", b"\xff".as_slice()),
+            ("b.json", b"{"),
+            ("c.json", br#"{"ticket_id":"../../invented"}"#),
+            (
+                "d.json",
+                br#"{"ticket_id":"11111111-1111-4111-8111-111111111111"}"#,
+            ),
+        ] {
+            std::fs::write(state.join(name), bytes).unwrap();
+        }
+        std::fs::create_dir(state.join("unreadable.json")).unwrap();
+        let mut rejected = HashMap::new();
+        assert_eq!(state_file_ids(state, &mut rejected).unwrap(), [id]);
+        assert_eq!(rejected.len(), 5);
+        assert_eq!(state_file_ids(state, &mut rejected).unwrap(), [id]);
+        let repaired = "22222222-2222-4222-8222-222222222222";
+        let repaired_path = state.join(format!("{repaired}.json"));
+        std::fs::write(&repaired_path, b"{").unwrap();
+        assert_eq!(state_file_ids(state, &mut rejected).unwrap(), [id]);
+        std::fs::write(&repaired_path, format!(r#"{{"ticket_id":"{repaired}"}}"#)).unwrap();
         assert_eq!(
-            left,
-            [
-                ".hidden.json",
-                "a.json",
-                "number.json",
-                "other.txt",
-                "tmpabc"
-            ]
+            state_file_ids(state, &mut rejected).unwrap(),
+            [id, repaired]
         );
-
-        // Not UTF-8, and a directory named like a state file: errors.
-        write("z.json", b"\xff");
-        assert_eq!(
-            state_file_ids(state).unwrap_err().kind(),
-            io::ErrorKind::InvalidData
+        assert!(!rejected.contains_key(&repaired_path));
+        std::fs::remove_file(repaired_path).unwrap();
+        assert_eq!(std::fs::read(state.join("a.json")).unwrap(), b"\xff");
+        assert_eq!(std::fs::read_dir(state).unwrap().count(), 6);
+        assert!(
+            state_file_ids(&state.join("missing"), &mut rejected)
+                .unwrap()
+                .is_empty()
         );
-        std::fs::remove_file(state.join("z.json")).unwrap();
-        std::fs::create_dir(state.join("dir.json")).unwrap();
-        assert!(state_file_ids(state).is_err());
-
-        // A missing directory has no state files.
-        assert!(state_file_ids(&state.join("missing")).unwrap().is_empty());
     }
 }

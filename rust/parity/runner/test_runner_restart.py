@@ -163,12 +163,23 @@ def test_sigkill_in_later_step_skips_finished_steps(rig: Rig, runners: tuple[str
     rig.observe_tree()
 
 
-@pytest.mark.parametrize("content", ["{broken", "[]", "\udcff"], ids=["invalid-json", "not-an-object", "undecodable"])
-def test_unreadable_metadata_fails_closed(rig: Rig, content: str) -> None:
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{broken",
+        "[]",
+        "\udcff",
+        " " * (8 * 1024 * 1024) + "{}",
+        '{"status":"succeeded","nested":' + "[" * 65 + "0" + "]" * 65 + "}",
+    ],
+    ids=["invalid-json", "not-an-object", "undecodable", "oversize", "deep"],
+)
+@pytest.mark.parametrize("artifact", ["session_metadata.json", "summary.json"])
+def test_unreadable_metadata_fails_closed(rig: Rig, content: str, artifact: str) -> None:
     tid = rig.api.add_ticket([step("investigator")], state="running", runner_host=RUNNER_HOST, claimable=False)
     files = step_files(rig.ws.exec_dir, tid, 1, "investigator")
     files.step_dir.mkdir(parents=True)
-    (files.step_dir / "session_metadata.json").write_bytes(content.encode("utf-8", "surrogateescape"))
+    (files.step_dir / artifact).write_bytes(content.encode("utf-8", "surrogateescape"))
     runner = rig.runner(once=True)
     assert runner.wait(60) == 0
 
@@ -177,7 +188,7 @@ def test_unreadable_metadata_fails_closed(rig: Rig, content: str) -> None:
     failed = rig.api.status_payloads(tid)[-1]
     assert failed["result_detail"] == "step_1_interrupted"
     assert [e["status"] for e in failed["tmux_sessions"]] == ["interrupted"]
-    assert files.metadata["status"] == "interrupted"
+    assert (files.step_dir / artifact).read_bytes() == content.encode("utf-8", "surrogateescape")
     assert rig.ws.agent_calls() == [] and rig.ws.sessions() == []
     rig.observe_statuses(tid)
     rig.observe_tree()

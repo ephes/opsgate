@@ -109,10 +109,29 @@ pub(crate) fn atomic_write_with(
 
 /// `_load_summary(path)`: the JSON object in `path`, or `None` when the file
 /// is missing, unreadable, not UTF-8, not JSON or not an object.
+pub const ARTIFACT_MAX_BYTES: u64 = 8 * 1024 * 1024;
+
 pub fn load_json_object(path: &Path) -> Option<JsonObject> {
-    let data = fs::read(path).ok()?;
+    use rustix::fs::{Mode, OFlags, open};
+    let fd = open(
+        path,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .ok()?;
+    let file = File::from(fd);
+    if !file.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut data = Vec::new();
+    file.take(ARTIFACT_MAX_BYTES + 1)
+        .read_to_end(&mut data)
+        .ok()?;
+    if data.len() as u64 > ARTIFACT_MAX_BYTES {
+        return None;
+    }
     let text = String::from_utf8(data).ok()?;
-    match opsgate_core::json::parse(&text) {
+    match opsgate_core::json::parse_stored(&text) {
         Ok(Value::Object(object)) => Some(object),
         _ => None,
     }
@@ -282,6 +301,55 @@ mod tests {
             load_json_object(&path),
             json!({"status": "succeeded"}).as_object().cloned()
         );
+    }
+
+    #[test]
+    fn bounded_regular_file_and_fifo_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact.json");
+        let mut bytes = b"{}".to_vec();
+        bytes.resize(usize::try_from(ARTIFACT_MAX_BYTES).unwrap(), b' ');
+        fs::write(&path, &bytes).unwrap();
+        assert!(load_json_object(&path).is_some());
+        bytes.push(b' ');
+        fs::write(&path, bytes).unwrap();
+        assert!(load_json_object(&path).is_none());
+        let fifo = dir.path().join("fifo");
+        assert!(
+            std::process::Command::new("python3")
+                .args(["-c", "import os,sys; os.mkfifo(sys.argv[1])"])
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || sender.send(load_json_object(&fifo)).unwrap());
+        assert!(
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn artifact_depth_limit_includes_the_root_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("artifact.json");
+        for (arrays, accepted) in [(63, true), (64, false), (65, false)] {
+            let text = format!(
+                r#"{{"status":"succeeded","nested":{}0{}}}"#,
+                "[".repeat(arrays),
+                "]".repeat(arrays),
+            );
+            fs::write(&path, text).unwrap();
+            assert_eq!(
+                load_json_object(&path).is_some(),
+                accepted,
+                "{arrays} arrays"
+            );
+        }
     }
 
     #[test]

@@ -10136,50 +10136,12 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "-1",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-1'",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": -1,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-1'"
   },
   {
    "env": {
@@ -10191,50 +10153,12 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='0'",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": 0,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='0'"
   },
   {
    "env": {
@@ -10246,50 +10170,12 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "-0",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-0'",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": 0,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-0'"
   },
   {
    "env": {
@@ -10674,50 +10560,12 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "9223372036854775807",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='9223372036854775807'",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": 9223372036854775807,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='9223372036854775807'"
   },
   {
    "env": {
@@ -10729,53 +10577,14 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "-9223372036854775808",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-9223372036854775808'",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": -9223372036854775808,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='-9223372036854775808'"
   },
   {
-   "divergence": "D-8",
    "env": {
     "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
     "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
@@ -10785,54 +10594,14 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "9223372036854775808",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='9223372036854775808'",
-   "rust_error": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": 9223372036854775808,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='9223372036854775808'"
   },
   {
-   "divergence": "D-8",
    "env": {
     "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
     "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
@@ -10842,51 +10611,12 @@
     "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "99999999999999999999",
     "OPSGATE_UI_USERNAME": "opsgate-admin"
    },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
    "loader": "api",
-   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='99999999999999999999'",
-   "rust_error": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer",
-   "settings": {
-    "allowed_cidrs": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "allowed_networks": [
-     "127.0.0.1/32",
-     "::1/128",
-     "100.64.0.0/10",
-     "fd7a:115c:a1e0::/48"
-    ],
-    "bind_host": "0.0.0.0",
-    "bind_port": 8711,
-    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
-    "disable_file_path": "/Users/ops/remediation/.disabled",
-    "execution_data_dir": "/Users/ops/remediation",
-    "max_duration_seconds_default": 3600,
-    "policy_floor_require_reviewer_step": false,
-    "require_tailscale_context": true,
-    "runner_token": "runner-token-000000000000",
-    "service_name": "opsgate",
-    "session_cookie_secure": false,
-    "session_secret": "session-secret-0123456789",
-    "session_timeout_seconds": 99999999999999999999,
-    "submitter_policies": [
-     {
-      "require_reviewer_step_floor": false,
-      "source": "nyxmon",
-      "token": "nyxmon-token-000000000000"
-     },
-     {
-      "require_reviewer_step_floor": false,
-      "source": "operator",
-      "token": "operator-token-00000000000"
-     }
-    ],
-    "trust_proxy_headers": false,
-    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
-    "ui_username": "opsgate-admin"
-   }
+   "name": "api OPSGATE_UI_SESSION_TIMEOUT_SECONDS='99999999999999999999'"
   },
   {
    "divergence": "D-8",
@@ -14517,6 +14247,239 @@
   },
   {
    "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api session lifetime 0"
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "-1",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api session lifetime -1"
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "1",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "loader": "api",
+   "name": "api session lifetime 1",
+   "settings": {
+    "allowed_cidrs": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "allowed_networks": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "bind_host": "0.0.0.0",
+    "bind_port": 8711,
+    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
+    "disable_file_path": "/Users/ops/remediation/.disabled",
+    "execution_data_dir": "/Users/ops/remediation",
+    "max_duration_seconds_default": 3600,
+    "policy_floor_require_reviewer_step": false,
+    "require_tailscale_context": true,
+    "runner_token": "runner-token-000000000000",
+    "service_name": "opsgate",
+    "session_cookie_secure": false,
+    "session_secret": "session-secret-0123456789",
+    "session_timeout_seconds": 1,
+    "submitter_policies": [
+     {
+      "require_reviewer_step_floor": false,
+      "source": "nyxmon",
+      "token": "nyxmon-token-000000000000"
+     },
+     {
+      "require_reviewer_step_floor": false,
+      "source": "operator",
+      "token": "operator-token-00000000000"
+     }
+    ],
+    "trust_proxy_headers": false,
+    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "ui_username": "opsgate-admin"
+   }
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "28800",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "loader": "api",
+   "name": "api session lifetime 28800",
+   "settings": {
+    "allowed_cidrs": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "allowed_networks": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "bind_host": "0.0.0.0",
+    "bind_port": 8711,
+    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
+    "disable_file_path": "/Users/ops/remediation/.disabled",
+    "execution_data_dir": "/Users/ops/remediation",
+    "max_duration_seconds_default": 3600,
+    "policy_floor_require_reviewer_step": false,
+    "require_tailscale_context": true,
+    "runner_token": "runner-token-000000000000",
+    "service_name": "opsgate",
+    "session_cookie_secure": false,
+    "session_secret": "session-secret-0123456789",
+    "session_timeout_seconds": 28800,
+    "submitter_policies": [
+     {
+      "require_reviewer_step_floor": false,
+      "source": "nyxmon",
+      "token": "nyxmon-token-000000000000"
+     },
+     {
+      "require_reviewer_step_floor": false,
+      "source": "operator",
+      "token": "operator-token-00000000000"
+     }
+    ],
+    "trust_proxy_headers": false,
+    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "ui_username": "opsgate-admin"
+   }
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "86399999999999",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "loader": "api",
+   "name": "api session lifetime 86399999999999",
+   "settings": {
+    "allowed_cidrs": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "allowed_networks": [
+     "127.0.0.1/32",
+     "::1/128",
+     "100.64.0.0/10",
+     "fd7a:115c:a1e0::/48"
+    ],
+    "bind_host": "0.0.0.0",
+    "bind_port": 8711,
+    "db_path": "/usr/local/var/opsgate/run/opsgate.sqlite3",
+    "disable_file_path": "/Users/ops/remediation/.disabled",
+    "execution_data_dir": "/Users/ops/remediation",
+    "max_duration_seconds_default": 3600,
+    "policy_floor_require_reviewer_step": false,
+    "require_tailscale_context": true,
+    "runner_token": "runner-token-000000000000",
+    "service_name": "opsgate",
+    "session_cookie_secure": false,
+    "session_secret": "session-secret-0123456789",
+    "session_timeout_seconds": 86399999999999,
+    "submitter_policies": [
+     {
+      "require_reviewer_step_floor": false,
+      "source": "nyxmon",
+      "token": "nyxmon-token-000000000000"
+     },
+     {
+      "require_reviewer_step_floor": false,
+      "source": "operator",
+      "token": "operator-token-00000000000"
+     }
+    ],
+    "trust_proxy_headers": false,
+    "ui_password_bcrypt": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "ui_username": "opsgate-admin"
+   }
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "86400000000000",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api session lifetime 86400000000000"
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to 86399999999999",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api session lifetime 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "env": {
     "OPSGATE_BIND_HOST": " 127.0.0.1 ",
     "OPSGATE_DB_PATH": " /x/db.sqlite3 ",
     "OPSGATE_DISABLE_FILE_PATH": "\t/data/off\n",
@@ -15775,6 +15738,59 @@
    },
    "loader": "api",
    "name": "api order: session timeout parse before runner token"
+  },
+  {
+   "env": {
+    "OPSGATE_RUNNER_TOKEN": "short",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_RUNNER_TOKEN is required and must be at least 20 characters",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_RUNNER_TOKEN before session bounds"
+  },
+  {
+   "env": {
+    "OPSGATE_ALLOWED_CIDRS": " , ,",
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_ALLOWED_CIDRS must contain at least one CIDR",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_ALLOWED_CIDRS before session bounds"
+  },
+  {
+   "env": {
+    "OPSGATE_MAX_DURATION_SECONDS_DEFAULT": "0",
+    "OPSGATE_RUNNER_TOKEN": "runner-token-000000000000",
+    "OPSGATE_SESSION_SECRET": "session-secret-0123456789",
+    "OPSGATE_SUBMIT_TOKEN_NYXMON": "nyxmon-token-000000000000",
+    "OPSGATE_SUBMIT_TOKEN_OPERATOR": "operator-token-00000000000",
+    "OPSGATE_UI_PASSWORD_BCRYPT": "$2b$12$C6UzMDM.H6dfI/f/IKcEe.7Pj9N6byN1Nsx3Rp3XIanFkFJxux1fW",
+    "OPSGATE_UI_SESSION_TIMEOUT_SECONDS": "0",
+    "OPSGATE_UI_USERNAME": "opsgate-admin"
+   },
+   "error": {
+    "message": "OPSGATE_MAX_DURATION_SECONDS_DEFAULT must be an integer from 1 to 31536000",
+    "python": "SettingsError"
+   },
+   "loader": "api",
+   "name": "api order: OPSGATE_MAX_DURATION_SECONDS_DEFAULT before session bounds"
   },
   {
    "env": {

@@ -80,7 +80,7 @@ resume marker:
   the ticket by that code. The step is not launched again.
 - The step's tmux session is still alive: the runner re-attaches, polls it and keeps tracking it for
   cancel/timeout.
-- Metadata exists (even if unreadable), but there is no `exit_code` and no session: the step is failed as interrupted. Its metadata
+- Valid metadata exists, but there is no `exit_code` and no session: the step is failed as interrupted. Its metadata
   status becomes `interrupted` and the ticket fails with `result_detail = step_<n>_interrupted`. Nothing is
   re-run; to retry, submit and approve a new ticket after checking what the half-run step already changed.
 
@@ -112,6 +112,17 @@ and returns `tmux command timed out` (`TmuxError::Timeout` in Rust,
 `TmuxCommandTimeout` in Python). Killing the client does not prove that its tmux session stopped;
 if cleanup cannot verify session absence, runner state and artifacts stay available for recovery.
 Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
+
+Recovery reads each state file independently; invalid/unreadable files are retained with a bounded diagnostic
+and do not prevent tmux/artifact discovery or other tickets from recovering. A state file must contain a
+string UUID ticket identity matching its filename. Recovery never derives an identity from corrupt content.
+Diagnostics name the rejected file; unchanged rejected files are not read or warned about again in the same
+process. Changes to file identity, size or timestamps trigger a retry. After inspecting retained evidence,
+repair or remove the named file from `runner-state`; a restart also retries all files.
+Both runners read state, step summaries and metadata from a single nonblocking regular-file descriptor,
+with an inclusive 8 MiB byte limit before UTF-8/JSON decoding and a 64-level JSON depth limit. Special files, oversized files and invalid
+artifacts are unavailable. Invalid summary/metadata evidence is retained; the step fails as interrupted,
+after stopping and verifying absence of any owned session, without skipping it or launching it again.
 
 Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
 files. Failed serialization, writes or replacement leave the previous destination intact and remove the
@@ -150,7 +161,8 @@ Useful keys:
 - `OPSGATE_BIND_HOST` (default `0.0.0.0`)
 - `OPSGATE_BIND_PORT` (default `8711`)
 - `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` (default `3600`; integer from `1` to `31536000`)
-- `OPSGATE_UI_SESSION_TIMEOUT_SECONDS` (default `28800`; approver session lifetime)
+- `OPSGATE_UI_SESSION_TIMEOUT_SECONDS` (default `28800`; integer from `1` to `86399999999999`,
+  the largest whole-second Python timedelta; invalid lifetimes fail settings construction/startup)
 - `OPSGATE_MAX_PARALLEL_JOBS` (default `3`)
 - `OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP` (default `false`)
 - `OPSGATE_SUBMIT_POLICY_*_REQUIRE_REVIEWER_STEP`
@@ -270,9 +282,12 @@ matches the state it read (compare-and-set).
   Changing `OPSGATE_UI_PASSWORD_BCRYPT` bumps the generation when the service next starts.
 - Session cookies issued before this mechanism existed carry no generation; approvers sign in once more after
   upgrading.
-- Failed logins are throttled per client IP. After 5 failures within 15 minutes, `/login` answers `429` until the
-  oldest failure is 15 minutes old, even for the correct password. A successful login clears the counter. The
-  counter is held in memory and resets when the service restarts.
+- Login admission is atomic per client IP: recent failures plus pending password checks cannot exceed 5.
+  `/login` answers `429` before bcrypt when full, even for the correct password. Failures count for 15 minutes;
+  abandoned reservations expire after the same window. Success clears completed failures while preserving
+  other pending checks, and verifier errors release their reservation. No mutex is held during hashing.
+  Tracking is bounded to 10,000 client addresses; when full, new addresses are denied until capacity expires.
+  Counters are held in memory and reset when the service restarts.
 
 ### Response headers
 

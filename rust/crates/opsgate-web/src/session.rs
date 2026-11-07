@@ -296,7 +296,7 @@ pub async fn session_user(
         session.clear();
         return Ok(None);
     };
-    let timeout = state.settings().session_timeout_seconds;
+    let timeout = state.settings().session_timeout_seconds();
     if !(-MAX_TIMEDELTA_SECONDS..=MAX_TIMEDELTA_SECONDS).contains(&timeout) {
         return Err(AppError::Internal(
             "OPSGATE_UI_SESSION_TIMEOUT_SECONDS is outside Python's timedelta range".to_owned(),

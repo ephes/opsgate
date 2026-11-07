@@ -29,6 +29,8 @@ use crate::pytext;
 /// Upper bound of `OPSGATE_MAX_DURATION_SECONDS_DEFAULT` and of a ticket's
 /// `max_duration_seconds` (`config.py:MAX_DURATION_SECONDS`).
 pub const MAX_DURATION_SECONDS: i64 = 31_536_000;
+/// Largest whole-second Python timedelta.
+pub const MAX_SESSION_TIMEOUT_SECONDS: i64 = 86_399_999_999_999;
 
 /// `OPSGATE_ALLOWED_CIDRS` when the variable is absent.
 pub const DEFAULT_ALLOWED_CIDRS: [&str; 4] = [
@@ -472,7 +474,7 @@ pub struct ApiSettings {
     pub session_secret: String,
     pub trust_proxy_headers: bool,
     pub session_cookie_secure: bool,
-    pub session_timeout_seconds: i64,
+    session_timeout_seconds: i64,
     pub ui_username: String,
     pub ui_password_bcrypt: String,
     /// Private so every value passed the bounds check (Python validates in
@@ -520,6 +522,11 @@ impl fmt::Debug for ApiSettings {
 }
 
 impl ApiSettings {
+    /// Positive, representable approver session lifetime.
+    pub fn session_timeout_seconds(&self) -> i64 {
+        self.session_timeout_seconds
+    }
+
     /// `OPSGATE_MAX_DURATION_SECONDS_DEFAULT`, within 1..=[`MAX_DURATION_SECONDS`].
     pub fn max_duration_seconds_default(&self) -> i64 {
         self.max_duration_seconds_default
@@ -656,7 +663,7 @@ pub fn load_api_settings(environment: &mut Environment) -> Result<ApiSettings, S
         false,
         "OPSGATE_POLICY_FLOOR_REQUIRE_REVIEWER_STEP",
     )?;
-    let session_timeout_seconds = parse_int(
+    let session_timeout_seconds = parse_int_raw(
         env.get("OPSGATE_UI_SESSION_TIMEOUT_SECONDS")?,
         28800,
         "OPSGATE_UI_SESSION_TIMEOUT_SECONDS",
@@ -749,13 +756,22 @@ pub fn load_api_settings(environment: &mut Environment) -> Result<ApiSettings, S
     }
 
     // Python validates the CIDRs while building the settings object and the
-    // duration bounds in its `__post_init__`, so these two come last.
+    // duration/session bounds in its `__post_init__`, so those checks come last.
     let allowed_networks = allowed_cidrs
         .iter()
         .map(|cidr| parse_network(cidr))
         .collect::<Option<Vec<_>>>()
         .ok_or_else(|| SettingsError::new("OPSGATE_ALLOWED_CIDRS contains an invalid network"))?;
     let max_duration_seconds_default = validate_duration_default(max_duration_default)?;
+
+    let session_timeout_seconds = match session_timeout_seconds {
+        PyInt::Value(value) if (1..=MAX_SESSION_TIMEOUT_SECONDS).contains(&value) => value,
+        _ => {
+            return Err(SettingsError::new(format!(
+                "OPSGATE_UI_SESSION_TIMEOUT_SECONDS must be an integer from 1 to {MAX_SESSION_TIMEOUT_SECONDS}"
+            )));
+        }
+    };
 
     Ok(ApiSettings {
         service_name,

@@ -1,14 +1,12 @@
-//! The login throttle (`LoginThrottle`, PLAN.md 4.5.3): failed sign-ins per
+//! The login throttle (`LoginThrottle`, PLAN.md 4.5.3): failed/pending sign-ins per
 //! client, in memory, on a monotonic clock, lost on restart.
 //!
-//! A client (its address, or `unknown`) is locked while it has at least
-//! `limit` failures newer than `window_seconds`. A failure keeps the last
-//! `limit` stamps; a successful sign-in resets the client. At most
-//! `max_tracked_clients` clients are tracked: when a failure goes beyond
-//! that, the clients without a recent failure are dropped first, then the
-//! ones whose newest failure is oldest (ties in the order the clients were
-//! first tracked, as Python's stable sort over its dictionary). Times are
-//! seconds as `f64`, compared as Python compares its floats
+//! Production admission reserves under the mutex before hashing and settles via
+//! a guard. Pending checks expire after the failure window, survive sibling success,
+//! and count with failures. A full client table denies new clients.
+//! The legacy failure-counter helpers prune expired entries and evict the oldest
+//! failures past the client limit (ties in insertion order, matching Python).
+//! Times are seconds as `f64`, compared as Python compares its floats
 //! (`fixtures/throttle.json`).
 
 use std::collections::HashMap;
@@ -36,6 +34,8 @@ struct Entry {
 
 #[derive(Debug, Default)]
 struct Failures {
+    pending: HashMap<String, HashMap<u64, f64>>,
+    next_attempt: u64,
     entries: HashMap<String, Entry>,
     next_order: u64,
 }
@@ -86,12 +86,13 @@ impl Failures {
 }
 
 /// The per-client counter of failed sign-ins.
+#[derive(Clone)]
 pub struct LoginThrottle {
     limit: usize,
     window_seconds: f64,
     max_tracked_clients: usize,
     clock: Clock,
-    failures: Mutex<Failures>,
+    failures: Arc<Mutex<Failures>>,
 }
 
 impl std::fmt::Debug for LoginThrottle {
@@ -132,12 +133,56 @@ impl LoginThrottle {
             window_seconds,
             max_tracked_clients,
             clock,
-            failures: Mutex::new(Failures::default()),
+            failures: Arc::new(Mutex::new(Failures::default())),
         }
     }
 
     fn lock(&self) -> MutexGuard<'_, Failures> {
         self.failures.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Reserve capacity atomically before bcrypt. The guard releases on error/unwind.
+    pub fn reserve(&self, key: &str) -> Option<Reservation> {
+        let mut failures = self.lock();
+        let now = (self.clock)();
+        failures.pending.retain(|_, attempts| {
+            attempts.retain(|_, stamp| *stamp > now - self.window_seconds);
+            !attempts.is_empty()
+        });
+        let count = failures.recent(key, now, self.window_seconds).len()
+            + failures.pending.get(key).map_or(0, HashMap::len);
+        if count >= self.limit {
+            return None;
+        }
+        let tracked = |state: &Failures| {
+            state
+                .entries
+                .keys()
+                .chain(state.pending.keys())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        };
+        if !failures.entries.contains_key(key)
+            && !failures.pending.contains_key(key)
+            && tracked(&failures) >= self.max_tracked_clients
+        {
+            self.prune(&mut failures, now);
+            if tracked(&failures) >= self.max_tracked_clients {
+                return None;
+            }
+        }
+        let attempt = failures.next_attempt;
+        failures.next_attempt += 1;
+        failures
+            .pending
+            .entry(key.to_owned())
+            .or_default()
+            .insert(attempt, now);
+        Some(Reservation {
+            throttle: self.clone(),
+            key: key.to_owned(),
+            attempt,
+        })
     }
 
     /// `is_locked(key)`.
@@ -216,5 +261,50 @@ impl LoginThrottle {
                 (key, stamps)
             })
             .collect()
+    }
+}
+
+/// One admitted password check. Dropping it releases only its own reservation.
+pub struct Reservation {
+    throttle: LoginThrottle,
+    key: String,
+    attempt: u64,
+}
+
+impl Reservation {
+    pub fn settle(self, success: bool) {
+        self.finish(Some(success));
+    }
+
+    fn finish(&self, success: Option<bool>) {
+        let mut failures = self.throttle.lock();
+        let Some(attempts) = failures.pending.get_mut(&self.key) else {
+            return;
+        };
+        let stamp = attempts.remove(&self.attempt);
+        if attempts.is_empty() {
+            failures.pending.remove(&self.key);
+        }
+        let now = (self.throttle.clock)();
+        if stamp.is_none_or(|stamp| stamp <= now - self.throttle.window_seconds) {
+            return;
+        }
+        match success {
+            Some(true) => {
+                failures.entries.remove(&self.key);
+            }
+            Some(false) => {
+                let mut recent = failures.recent(&self.key, now, self.throttle.window_seconds);
+                recent.push(now);
+                failures.set(&self.key, recent);
+            }
+            None => {}
+        }
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.finish(None);
     }
 }

@@ -5,7 +5,7 @@
 
 mod common;
 
-use axum::http::{Method, StatusCode};
+use axum::http::StatusCode;
 use common::{APPROVER, Call, NEW_PASSWORD_HASH, NYXMON_TOKEN, TestApp, ticket_payload};
 use opsgate_core::time::{isoformat_z, utc_now};
 use opsgate_web::session::SessionData;
@@ -167,15 +167,9 @@ async fn failing_sessions_are_cleared() {
     assert_eq!(app.cookie(), None);
 }
 
-/// Python's `timedelta(seconds=…)` overflows beyond 999 999 999 days: every
-/// check of an approver session is then a 500.
+/// The largest validated timeout remains usable by an approver session.
 #[tokio::test]
-async fn session_timeout_beyond_timedelta_is_500() {
-    let app = TestApp::with_env(&[("OPSGATE_UI_SESSION_TIMEOUT_SECONDS", "86400000000000")]);
-    let path = ticket(&app).await;
-    app.sign_in();
-    let response = app.send(Call::new(Method::GET, &path)).await;
-    assert_eq!(response.status, StatusCode::INTERNAL_SERVER_ERROR);
+async fn maximum_session_timeout_is_usable() {
     let app = TestApp::with_env(&[("OPSGATE_UI_SESSION_TIMEOUT_SECONDS", "86399999999999")]);
     let path = ticket(&app).await;
     app.sign_in();

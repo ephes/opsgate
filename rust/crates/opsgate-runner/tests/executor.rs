@@ -942,3 +942,40 @@ async fn errors_leave_run() {
     let f = Fixture::new(id, ticket, FakeTmux::new(false, Some(0)));
     assert_eq!(f.run().await.unwrap_err().kind_name(), "InvalidTicket");
 }
+
+#[tokio::test(start_paused = true)]
+async fn rejected_artifacts_are_retained_without_relaunch_or_skip() {
+    let id = "11111111-1111-4111-8111-111111111111";
+    for metadata in [false, true] {
+        for oversize in [false, true] {
+            let plan =
+                json!([{"role":"investigator","agent":"codex","prompt_markdown":"synthetic"}]);
+            let f = Fixture::new(
+                id,
+                running_ticket(id, plan.clone(), 1, 120),
+                FakeTmux::new(false, Some(0)),
+            );
+            let paths = f.paths(0, &plan[0]);
+            std::fs::create_dir_all(&paths.step_dir).unwrap();
+            let path = if metadata {
+                &paths.metadata_path
+            } else {
+                &paths.summary_path
+            };
+            let content = if oversize {
+                let mut bytes = br#"{"status":"succeeded","padding":""#.to_vec();
+                bytes.extend(vec![b'x'; 8 * 1024 * 1024]);
+                bytes.extend(br#""}"#);
+                bytes
+            } else {
+                vec![0xff]
+            };
+            std::fs::write(path, &content).unwrap();
+            f.run().await.unwrap();
+            assert!(f.tmux.launched().is_empty());
+            assert_eq!(f.api.ticket_field("state"), "failed");
+            assert_eq!(f.api.ticket_field("result_detail"), "step_1_interrupted");
+            assert_eq!(std::fs::read(path).unwrap(), content);
+        }
+    }
+}

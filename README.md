@@ -219,6 +219,13 @@ stored heartbeat; it does not assert agent availability or the success of future
 
 ### Ticket input validation
 
+The Rust server reads each request body within one 15-second elapsed deadline,
+including trickled data. Expiry returns `408 Request Timeout` without a ticket
+write. The independent 8 MiB size limit still returns `413`; bearer authentication
+precedes API body polling. UI form bodies share this limit during CSRF parsing,
+before approver authentication, and can also return 408. The Python rollback server
+keeps its existing body policy.
+
 Ticket `title`, `summary` and optional `task_ref` must be valid UTF-8 text;
 unpaired Unicode surrogates return `400 invalid_ticket` before checksum construction
 or any ticket/audit write. The same encoding contract applies to the authenticated

@@ -32,10 +32,11 @@ tower = { workspace = true, features = ["util"] }
 tracing.workspace = true
 
 [dev-dependencies]
+futures-core.workspace = true
 html5gum.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "sync", "time", "macros", "test-util"] }
 
 [lints]
 workspace = true

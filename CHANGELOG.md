@@ -4,6 +4,9 @@
 
 ### Tests
 
+- Exercise Rust blocking-store domain errors and unwinding task panics, sanitized
+  HTTP errors and healthy operations following each failure.
+
 - Cover Rust dump write/flush errors, failed-file cleanup and one-snapshot records
   and checksum counters while a concurrent WAL writer changes tickets.
 
@@ -14,6 +17,10 @@
   rollback with real SQLite audit INSERT failures and successful retries.
 
 ### Security
+
+- Bound Rust request-body collection to 15 elapsed seconds, including trickling
+  data. Timeouts return 408 before ticket mutation; auth ordering and the 8 MiB
+  size limit remain unchanged (intentional port divergence D-20).
 
 - Reserve login capacity before bcrypt in Python and Rust, including pending checks;
   release reservations on success/errors without holding the throttle lock while hashing.

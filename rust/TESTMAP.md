@@ -389,3 +389,11 @@ write and final-flush failures, checks owned file cleanup and destination/source
 preservation, and gates a WAL writer after the first serialized record. Exact
 pre-mutation records/checksum counters remain in that export; the next export sees
 the changed, deleted and newly inserted tickets with matching counters.
+
+Round 74 web request lifetime: `crates/opsgate-web/tests/body_deadline.rs` covers
+pending and trickling body deadlines (paused time, no ticket writes), auth before
+body polling, ordinary success and oversized 413. D-20 records the intentional
+Rust-only 15-second elapsed budget and 408 response.
+`crates/opsgate-web/tests/state.rs` checks domain-error and blocking-task panic
+response conversion, HTTP sanitization and subsequent healthy store/router calls
+under the test profile's unwinding behavior.

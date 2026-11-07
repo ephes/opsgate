@@ -67,6 +67,8 @@ cookie = { version = "0.18", default-features = false, features = ["private"] }
 getrandom = "0.4"
 hkdf = "0.13"
 http-body-util = "0.1"
+# Synthetic asynchronous request bodies in web deadline tests.
+futures-core = "0.3"
 minijinja = { version = "2", default-features = false, features = ["builtins", "serde", "std_collections"] }
 percent-encoding = "2"
 tower = { version = "0.5", default-features = false }

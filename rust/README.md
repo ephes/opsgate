@@ -252,7 +252,8 @@ pass through them too:
 | UI-CSRF | `csrf` | every non-`/api/` `POST`: `ensure_csrf_token`, then the form's `csrf_token` (urlencoded bodies only, D-17) |
 
 Routes take the store through `AppState::blocking` (SQLite on the blocking
-pool), read bodies only after their token check (`body`, at most 8 MiB, D-5)
+pool), read bodies only after their token check (`body`, at most 8 MiB, D-5;
+one 15-second elapsed collection deadline, D-20)
 and parse JSON with the rules of 4.6. `session::OptionalApprover` and
 `session::Approver` are the approver extractors (`get_session_user`);
 `templates::Templates` renders the embedded files of
@@ -308,6 +309,17 @@ browser, a restart, a password change) and drive the throttle with a fake
 clock (`TestApp::with_throttle`). Page tests read forms, fields, links
 and flashes with the `html5gum` tokenizer (`tests/common/html.rs`), never
 bytes.
+
+`tests/body_deadline.rs` uses paused Tokio time and synthetic pending/trickling
+streams through the real router. Both expire at 15 seconds with 408 and no writes;
+unauthorized bodies are never polled, valid bodies succeed, and oversized ones
+retain 413. This bounds total collection time rather than resetting on each frame.
+UI form bodies share the deadline in the UI-CSRF layer, before approver
+authentication (including login and ticket-action forms), and also return HTML 408.
+`tests/state.rs` forces a domain error and an unwinding blocking-task panic through
+`AppState::blocking`, checks the existing HTTP error mapping hides panic text, then
+performs healthy store and router operations. These tests unwind; the release
+profile's `panic=abort` policy is unchanged.
 
 ## CI
 

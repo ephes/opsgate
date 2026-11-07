@@ -49,6 +49,9 @@ pub use state::AppState;
 /// Largest request body read (D-5): 8 MiB, larger bodies are answered 413.
 pub const BODY_LIMIT: usize = 8 * 1024 * 1024;
 
+/// Elapsed budget for reading one complete request body (D-20).
+pub const BODY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// The whole application: the routes of [`routes::router`] behind the
 /// request processing order of PLAN.md 4.4. The layers wrap the router as a
 /// whole, so they also apply to unknown paths (404) and wrong methods (405),

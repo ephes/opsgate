@@ -13,7 +13,8 @@
 //! - anything else (SQLite errors, unreadable stored rows, a template that
 //!   fails): 500 without details (Python's unhandled exceptions), one log
 //!   line naming the error (D-12);
-//! - an oversized body: 413 (D-5).
+//! - an oversized body: 413 (D-5);
+//! - a request-body collection timeout: 408 (D-20).
 
 use std::sync::{Arc, LazyLock};
 
@@ -43,6 +44,8 @@ pub enum AppError {
     PayloadTooLarge,
     /// The request body could not be read (the client went away): 400.
     BodyUnreadable,
+    /// The elapsed request-body budget expired: 408 (D-20).
+    BodyTimeout,
 }
 
 impl AppError {
@@ -74,6 +77,7 @@ impl std::fmt::Display for AppError {
             Self::Internal(text) => f.write_str(text),
             Self::PayloadTooLarge => f.write_str("request body too large"),
             Self::BodyUnreadable => f.write_str("request body unreadable"),
+            Self::BodyTimeout => f.write_str("request body timed out"),
         }
     }
 }
@@ -128,6 +132,11 @@ pub fn error_response(path: &str, session: &SessionHandle, error: &AppError) -> 
         AppError::BodyUnreadable => (
             StatusCode::BAD_REQUEST,
             html_body("400 Bad Request", "Bad Request"),
+        )
+            .into_response(),
+        AppError::BodyTimeout => (
+            StatusCode::REQUEST_TIMEOUT,
+            html_body("408 Request Timeout", "Request Timeout"),
         )
             .into_response(),
     }

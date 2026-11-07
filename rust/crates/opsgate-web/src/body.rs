@@ -2,7 +2,8 @@
 //!
 //! A body is read only when a handler needs it, after the checks Python
 //! makes before touching it (a bearer route answers 401 before it reads the
-//! body), and never beyond [`crate::BODY_LIMIT`] (413).
+//! body), never beyond [`crate::BODY_LIMIT`] (413), and within one elapsed
+//! [`crate::BODY_READ_TIMEOUT`] (408), including trickled frames.
 //!
 //! JSON (`parse_request_json`, Flask's `get_json(silent=True)` plus
 //! `check_json_depth`): only a `Content-Type` of `application/json` or
@@ -20,13 +21,17 @@ use opsgate_core::pytext::{py_str, strip};
 use opsgate_core::validate::py_truthy;
 use serde_json::{Map, Value};
 
-use crate::BODY_LIMIT;
 use crate::error::AppError;
 use crate::form::mimetype;
+use crate::{BODY_LIMIT, BODY_READ_TIMEOUT};
 
-/// The whole body, at most [`BODY_LIMIT`] bytes.
+/// The whole body, at most [`BODY_LIMIT`] bytes within [`BODY_READ_TIMEOUT`].
 pub async fn read_body(body: Body) -> Result<Bytes, AppError> {
-    match Limited::new(body, BODY_LIMIT).collect().await {
+    let collected =
+        tokio::time::timeout(BODY_READ_TIMEOUT, Limited::new(body, BODY_LIMIT).collect())
+            .await
+            .map_err(|_| AppError::BodyTimeout)?;
+    match collected {
         Ok(collected) => Ok(collected.to_bytes()),
         Err(error) if error.downcast_ref::<LengthLimitError>().is_some() => {
             Err(AppError::PayloadTooLarge)

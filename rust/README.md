@@ -578,3 +578,10 @@ Runner outage contract: `runner --once` returns nonzero on claim failure after w
 owned workers (also in Python); empty/disabled rounds succeed. Continuous polling retries.
 Running-step poll failures in Rust log each safe status/category once per step outage plus recovery
 with the ticket id, while leaving owned sessions running.
+
+Rust bulk cleanup (supervisor ticket sessions and executor running entries) attempts all identified
+owned sessions and verifies absence after kill errors;
+unverified cleanup or any failed kill keeps recovery evidence. Health in both APIs retains liveness
+HTTP 200/status ok and adds `runner_readiness`: require status `fresh` for execution readiness.
+The heartbeat threshold is 120 seconds, with five seconds of future clock skew tolerated; absent,
+stale and invalid/future evidence is `unavailable`, `stale` or `clock_invalid` respectively.

@@ -979,3 +979,66 @@ async fn rejected_artifacts_are_retained_without_relaunch_or_skip() {
         }
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn terminal_cleanup_attempts_all_entries_and_verifies_survivors() {
+    let id = "aaaaaaaa-1111-4111-8111-111111111111";
+    let first = format!("job-{id}-01-investigator");
+    let second = format!("job-{id}-02-reviewer");
+    let mut ticket = running_ticket(id, two_steps(), 0, 120);
+    ticket.insert(
+        "tmux_sessions".into(),
+        json!([
+            {"status": "running", "session_name": first},
+            {"status": "running", "session_name": second}
+        ]),
+    );
+    let f = Fixture::new(
+        id,
+        ticket.clone(),
+        FakeTmux::default().with_sessions(&[&first, &second]),
+    );
+    f.tmux.named_probes.store(true, Ordering::SeqCst);
+    f.tmux.kill_failures.lock().unwrap().push(first.clone());
+    f.api.set_state("canceled");
+    let error = f.executor.run(Some(ticket)).await.unwrap_err();
+    assert_eq!(f.tmux.killed(), [first.clone(), second]);
+    assert_eq!(f.tmux.probes.load(Ordering::SeqCst), 2);
+    assert_eq!(f.tmux.sessions(), [first]);
+    assert!(!error.to_string().contains("synthetic-cleanup-secret"));
+    assert_eq!(error.kind_name(), "CleanupError");
+    assert!(f.api.updates().is_empty());
+}
+
+/// A busy runner emits periodic heartbeats even without a free claim slot.
+#[tokio::test(start_paused = true)]
+async fn running_step_heartbeats_outlive_the_readiness_threshold() {
+    let id = "aaaaaaaa-1111-4111-8111-111111111111";
+    let plan = json!([{"role": "investigator", "agent": "codex", "prompt_markdown": "inspect"}]);
+    let tmux = FakeTmux::new(false, None).on_launch(|tmux, _| {
+        tmux.has_session.store(true, Ordering::SeqCst);
+    });
+    let f = Fixture::with_heartbeat(id, running_ticket(id, plan.clone(), 0, 300), tmux, 30);
+    let exit = f.paths(0, &plan[0]).exit_code_path;
+    let mut calls = 0;
+    f.api.on_get(move |_| {
+        calls += 1;
+        if calls == 132 {
+            std::fs::write(&exit, "0").unwrap();
+        }
+        Ok(())
+    });
+    let start = tokio::time::Instant::now();
+    let heartbeats = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = heartbeats.clone();
+    f.api.on_update(move |payload| {
+        if payload["event"] == "heartbeat" {
+            observed.lock().unwrap().push(start.elapsed().as_secs());
+        }
+        Ok(())
+    });
+    f.run().await.unwrap();
+    assert_eq!(*heartbeats.lock().unwrap(), [30, 60, 90, 120]);
+    assert!(start.elapsed().as_secs() > 120);
+    assert_eq!(f.api.ticket_field("state"), "succeeded");
+}

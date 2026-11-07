@@ -7,7 +7,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -1424,7 +1424,22 @@ class OpsGateService:
                 "SELECT runner_host, last_heartbeat_at FROM runner_heartbeats ORDER BY last_heartbeat_at DESC LIMIT 1"
             ).fetchone()
 
+            heartbeat = runner["last_heartbeat_at"] if runner else None
+            readiness = "unavailable"
+            if heartbeat is not None:
+                try:
+                    age = utc_now() - parse_iso_datetime(heartbeat)
+                except ValueError:
+                    readiness = "clock_invalid"
+                else:
+                    if age < timedelta(seconds=-5):
+                        readiness = "clock_invalid"
+                    elif age > timedelta(seconds=120):
+                        readiness = "stale"
+                    else:
+                        readiness = "fresh"
             return {
+                "runner_readiness": {"status": readiness, "freshness_threshold_seconds": 120},
                 "status": "ok",
                 "service": self.settings.service_name,
                 "db": "ok",

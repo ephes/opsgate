@@ -542,17 +542,27 @@ where
     /// `_kill_tmux_sessions_for_ticket`: kill every session of the ticket,
     /// then verify that none is listed any more.
     pub async fn kill_tmux_sessions_for_ticket(&self, ticket_id: &str) -> Result<(), CleanupError> {
+        let mut kill_failed = false;
         for session_name in self.tmux_sessions_for_ticket(ticket_id).await? {
-            self.inner
-                .tmux
-                .kill_session(&session_name)
-                .await
-                .map_err(CleanupError::Tmux)?;
+            if self.inner.tmux.kill_session(&session_name).await.is_err() {
+                kill_failed = true;
+                tracing::warn!(
+                    "Runner session cleanup failed: ticket_id={ticket_id} session={session_name} category=kill_error"
+                );
+            }
         }
-        if self.tmux_sessions_for_ticket(ticket_id).await?.is_empty() {
-            Ok(())
-        } else {
+        // Always verify, including after a failed kill. An error never makes
+        // later owned sessions exempt from cleanup.
+        let remaining = self.tmux_sessions_for_ticket(ticket_id).await?;
+        if !remaining.is_empty() {
+            tracing::warn!(
+                "Runner session cleanup failed: ticket_id={ticket_id} category=sessions_remain"
+            );
             Err(CleanupError::Remain)
+        } else if kill_failed {
+            Err(CleanupError::Unverifiable)
+        } else {
+            Ok(())
         }
     }
 

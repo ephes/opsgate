@@ -137,6 +137,11 @@ and operators may need to remove the leftover temporary file.
 There is no setting to restore automatic re-runs. One could be added later (off by default); it would still
 need to adopt an existing `exit_code` rather than relaunch.
 
+Rust bulk cleanup (supervisor ticket sessions and executor entries marked running) attempts
+every identified owned session even if an earlier kill fails, then verifies absence. Any failed kill, surviving session or failed verification retains recovery state; later
+successful kills cannot mark an incomplete cleanup as clean. Bulk-cleanup diagnostics contain only
+session/ticket identifiers and fixed categories, preserving the original execution failure.
+
 ## Configuration
 
 The service reads `OPSGATE_ENV_FILE` first (if set), then environment variables.
@@ -199,6 +204,18 @@ Useful keys:
 - `POST /api/v1/runner/claim`
 - `POST /api/v1/runner/:id/status`
 - `GET /api/v1/health`
+
+### Runner readiness
+
+`GET /api/v1/health` keeps HTTP 200 and `status: "ok"` as control-plane liveness.
+Execution-readiness consumers must additionally require `runner_readiness.status == "fresh"`.
+Both APIs return `runner_readiness` with `status` and `freshness_threshold_seconds: 120`:
+no heartbeat is `unavailable`, age over 120 seconds is `stale`, and an invalid timestamp or
+one more than five seconds in the future is `clock_invalid`. Recent heartbeats (including
+idle claim polls and up to five seconds of future clock skew) are `fresh`. This component
+contains no runner identity; the existing heartbeat/host fields retain their compatibility contract.
+Use runner poll/heartbeat intervals below the freshness threshold. Readiness classifies the latest
+stored heartbeat; it does not assert agent availability or the success of future ticket execution.
 
 ### Ticket input validation
 

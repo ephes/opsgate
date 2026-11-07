@@ -777,3 +777,29 @@ async fn once_claim_failure_waits_for_claimed_workers() {
         assert!(f.state_files().is_empty());
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn cleanup_attempts_every_session_and_verifies_after_kill_error() {
+    let first = format!("job-{A}-01-investigator");
+    let second = format!("job-{A}-02-reviewer");
+    let unrelated = format!("job-{B}-01-investigator");
+    let f = Fixture::new(FakeTmux::default().with_sessions(&[&first, &second, &unrelated]));
+    f.tmux.kill_failures.lock().unwrap().push(first.clone());
+    f.supervisor.write_state_file(A).await.unwrap();
+    f.api.insert(ticket(A, "running"));
+    f.supervisor.run_worker(A, Some(unrunnable(A))).await;
+    assert_eq!(f.tmux.killed(), [first.clone(), second.clone()]);
+    assert_eq!(
+        f.tmux.calls(),
+        [
+            "ls".to_owned(),
+            format!("kill-session {first}"),
+            format!("kill-session {second}"),
+            "ls".to_owned()
+        ]
+    );
+    assert_eq!(f.tmux.sessions(), [first, unrelated]);
+    assert!(f.state_exists(A));
+    assert_eq!(f.supervisor.cleanup_mark(A), Some(false));
+    assert!(f.api.updates().is_empty());
+}

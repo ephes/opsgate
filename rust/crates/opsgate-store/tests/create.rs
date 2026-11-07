@@ -323,7 +323,11 @@ fn test_health_endpoint_reports_ok() {
         )
         .unwrap();
     assert_eq!(
-        Value::Object(store.health().unwrap()),
+        Value::Object({
+            let mut health = store.health().unwrap();
+            health.remove("runner_readiness");
+            health
+        }),
         json!({
             "status": "ok",
             "service": "opsgate",
@@ -388,5 +392,42 @@ fn session_generation_sync_and_revoke() {
     assert_eq!(
         opsgate_store::password_fingerprint("abc"),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[test]
+fn runner_readiness_classifies_absent_stale_future_invalid_and_idle() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = common::store(directory.path());
+    assert_eq!(
+        store.health().unwrap()["runner_readiness"]["status"],
+        "unavailable"
+    );
+    let conn = Connection::open(store.db_path()).unwrap();
+    for (stamp, status) in [
+        ("2000-01-01T00:00:00Z", "stale"),
+        ("9999-01-01T00:00:00Z", "clock_invalid"),
+        ("invalid", "clock_invalid"),
+    ] {
+        conn.execute("DELETE FROM runner_heartbeats", []).unwrap();
+        conn.execute(
+            "INSERT INTO runner_heartbeats VALUES ('synthetic-private-runner', ?1, ?1)",
+            [stamp],
+        )
+        .unwrap();
+        let health = store.health().unwrap();
+        assert_eq!(
+            health["runner_readiness"],
+            json!({"status": status, "freshness_threshold_seconds": 120})
+        );
+        assert_eq!(health["status"], "ok");
+    }
+    conn.execute("DELETE FROM runner_heartbeats", []).unwrap();
+    store
+        .claim_ticket("synthetic-private-runner", None, None)
+        .unwrap();
+    assert_eq!(
+        store.health().unwrap()["runner_readiness"]["status"],
+        "fresh"
     );
 }

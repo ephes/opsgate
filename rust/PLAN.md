@@ -650,6 +650,12 @@ compact sorted-key serializer as Flask's `jsonify` because it has it anyway):
   <its host or null>, "ticket_counters": {<state>: <count>}}`;
 - claim: `{"ticket": null}` or `{"ticket": <ticket>}`.
 
+Health additionally returns `runner_readiness: {status, freshness_threshold_seconds: 120}` in
+both implementations. Status is `unavailable` without heartbeat, `stale` for age > 120 s,
+`clock_invalid` for invalid timestamps or > 5 s future skew, otherwise `fresh`. HTTP 200 and
+control-plane status ok are unchanged; execution-readiness consumers must require `fresh`.
+The new component carries no runner identity.
+
 ### 4.7 Ticket lifecycle and SQL semantics (`service.py`)
 
 All mutating operations run in one connection inside `BEGIN IMMEDIATE`; every
@@ -1108,7 +1114,7 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   failure → error; after kills a re-list must be empty.
 - Rust maps the exception classes to the same outcomes; the `<Type>` in
   `runner_unhandled_exception:<Type>` is P2 (Rust error kind names:
-  `RunnerApiError`, `IoError`, `TmuxError`, `InvalidTicket`). Errors the
+  `RunnerApiError`, `IoError`, `TmuxError`, `InvalidTicket`, `CleanupError`). Errors the
   Python supervisor does not catch (state-file I/O, a `tmux` that cannot be
   started for another reason than a missing binary during discovery) end
   `opsgate runner` with one log line and exit 1 (Python: traceback, exit 1).
@@ -2053,3 +2059,12 @@ deploy that needs them, never by a worker (section 12); the
 `echoport-command-guard` cutover runs last in the campaign and never alongside
 another production or staging change, so S11–S14 and S16b are not scheduled in
 its window (11.3).
+
+The `CleanupError` executor diagnostic kind names unverified bulk cleanup; it is distinct
+from the supervisor's Rust `CleanupError` enum.
+
+Round 58 bulk-cleanup contract (Rust): the executor cleanup of running entries and supervisor
+ticket-session cleanup attempt every identified owned session before verifying absence, even
+after a kill failure. This does not change the separate single-session step-stop paths. Any failed kill, survivor or failed verification
+prevents cleanup success and retains recovery evidence. Diagnostics use safe identifiers/categories;
+secondary cleanup failure never replaces the initiating worker failure.

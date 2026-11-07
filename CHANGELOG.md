@@ -4,6 +4,9 @@
 
 ### Tests
 
+- Cover Rust dump write/flush errors, failed-file cleanup and one-snapshot records
+  and checksum counters while a concurrent WAL writer changes tickets.
+
 - Cover concurrent Rust session revocations and password-state startup synchronization,
   including exact generations and rejection of cookies issued before revocation.
 

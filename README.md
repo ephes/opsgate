@@ -381,4 +381,7 @@ Python-generated fixtures (`tests/test_rust_fixtures.py`) is part of `just test`
 harnesses (`just rs-parity-api`, `just rs-parity-runner`; CI jobs `parity-api` and `parity-runner`) run
 every scenario against both implementations, including mixed Python/Rust API and runner stacks. Release
 builds for macOS arm64 are published as GitHub releases `rs-v<version>` by `.github/workflows/rust-release.yml`.
-See `rust/README.md`.
+See `rust/README.md`. Rust `check-db --dump` exports one SQLite read snapshot,
+even while another connection changes tickets. Its counters describe those same
+records. Write/flush errors return failure; a failed file dump is removed and an
+existing destination is preserved.

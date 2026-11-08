@@ -622,3 +622,23 @@ unverified cleanup or any failed kill keeps recovery evidence. Health in both AP
 HTTP 200/status ok and adds `runner_readiness`: require status `fresh` for execution readiness.
 The heartbeat threshold is 120 seconds, with five seconds of future clock skew tolerated; absent,
 stale and invalid/future evidence is `unavailable`, `stale` or `clock_invalid` respectively.
+
+
+### Recovery and audit evidence boundaries
+
+Both implementations hold the same nonblocking advisory lock on `.runner.lock` in the
+canonical execution root before recovery or claims. A duplicate runner fails startup;
+process exit releases ownership without deleting state or the stable lock file.
+Prelaunch metadata publication syncs file bytes and its parent directory; failure
+prevents launch. Recovery accepts success summaries only for the current ticket id,
+integer step index, role and agent with integer-zero exit code. Rejected summaries
+remain available and fail interrupted without relaunch.
+
+Exit-code evidence is one regular nonblocking file record of at most 64 bytes.
+Log previews use a single admitted regular-file handle and no-follow component opens.
+Step scripts preserve agent failure and also fail successful agents when tee fails.
+Log checksums cover a fixed admitted length with a 64 MiB/one-second ceiling, further
+capped by the ticket deadline, and cancellation checks between 64 KiB reads. Changed
+or incomplete evidence has a null full checksum; the admitted length remains recorded.
+Schema startup preserves the current uniqueness index and replaces historical schema
+objects only inside a writer transaction, with rollback on failure.

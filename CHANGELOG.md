@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Fixed
+
+- Bound log checksum finalization by admitted length, 64 MiB, elapsed time and cancellation;
+  publish null rather than a partial or changed-file checksum.
+- Validate recovered summary ticket/step/role/agent identity and integer-zero success evidence
+  before skipping a step in either runner.
+
+- Read step logs through one admitted regular-file handle with no-follow artifact traversal.
+- Fail steps whose agent succeeds but log copying fails; retain agent failure exit codes.
+
+- Sync runner artifact bytes and directory entries before allowing privileged launch.
+- Require one OS advisory-lock owner per canonical execution root across both runners.
+
+- Preserve current open-ticket indexes and upgrade historical schemas in one writer transaction.
+- Bound exit-code recovery evidence to 64 bytes on a regular nonblocking file in both runners.
+
 ### Tests
 
 - Exercise Rust blocking-store domain errors and unwinding task panics, sanitized

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use opsgate_core::log_preview::{PREVIEW_LINE_LIMIT, read_tail_lines};
+use opsgate_core::log_preview::{Limits, PREVIEW_LINE_LIMIT, open_beneath, read_tail_lines_file};
 use opsgate_core::paths::resolve_session_log_path;
 use opsgate_core::pytext::{py_str, strip};
 use serde_json::{Map, Value};
@@ -68,6 +68,32 @@ pub fn resolve_log_path(
     })
 }
 
+/// Resolve containment and return the single authoritative opened log.
+pub fn open_log(
+    execution_data_dir: &str,
+    ticket_id: &str,
+    meta: &Map<String, Value>,
+) -> Result<(PathBuf, std::fs::File), AppError> {
+    let path = resolve_log_path(execution_data_dir, ticket_id, meta)?;
+    let root = opsgate_core::paths::resolve(std::path::Path::new(execution_data_dir))
+        .map_err(|e| AppError::Internal(format!("step log root: {e}")))?;
+    let relative = path.strip_prefix(&root).map_err(|_| {
+        AppError::service(
+            "Log file path is outside the ticket artifact root",
+            400,
+            "invalid_log_path",
+        )
+    })?;
+    let file = open_beneath(&root, relative).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::PermissionDenied {
+            AppError::Internal(format!("step log: {error}"))
+        } else {
+            step_log_missing()
+        }
+    })?;
+    Ok((path, file))
+}
+
 /// The ticket's `tmux_sessions` when it is a list (else none).
 fn sessions(ticket: &Map<String, Value>) -> &[Value] {
     match ticket.get("tmux_sessions") {
@@ -118,9 +144,9 @@ pub fn session_views(
         view.insert("log_preview".to_owned(), Value::from(""));
         view.insert("log_available".to_owned(), Value::Bool(false));
         view.insert("log_url".to_owned(), log_url);
-        match resolve_log_path(execution_data_dir, &ticket_id, meta) {
-            Ok(path) => {
-                let lines = read_tail_lines(&path, PREVIEW_LINE_LIMIT)
+        match open_log(execution_data_dir, &ticket_id, meta) {
+            Ok((_path, mut file)) => {
+                let lines = read_tail_lines_file(&mut file, PREVIEW_LINE_LIMIT, Limits::default())
                     .map_err(|error| AppError::Internal(format!("step log preview: {error}")))?;
                 view.insert("log_available".to_owned(), Value::Bool(number.is_some()));
                 view.insert("log_preview".to_owned(), Value::from(lines.join("\n")));
@@ -208,6 +234,37 @@ mod tests {
         assert!(name("0").unwrap_err().contains("log_not_found"));
         assert!(name("3").unwrap_err().contains("log_not_found"));
         assert!(session_for_step(&self::ticket(json!("not a list")), "1").is_err());
+    }
+
+    #[test]
+    fn log_admission_carries_authority_through_reading() {
+        use opsgate_core::log_preview::{Limits, read_step_log_file};
+        use std::os::unix::fs::symlink;
+        for parent in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            let step = root.join("sessions/t1/steps/01");
+            std::fs::create_dir_all(&step).unwrap();
+            let path = step.join("log");
+            std::fs::write(&path, "admitted").unwrap();
+            let outside = root.join("outside");
+            std::fs::create_dir(&outside).unwrap();
+            std::fs::write(outside.join("log"), "outside secret").unwrap();
+            let meta = json!({"log_path": path}).as_object().unwrap().clone();
+            let (_, mut file) = open_log(root.to_str().unwrap(), "t1", &meta).unwrap();
+            if parent {
+                std::fs::rename(&step, step.with_file_name("retained")).unwrap();
+                symlink(&outside, &step).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+                symlink(outside.join("log"), &path).unwrap();
+            }
+            assert_eq!(
+                read_step_log_file(&mut file, Limits::default()).unwrap(),
+                "admitted"
+            );
+            assert!(open_log(root.to_str().unwrap(), "t1", &meta).is_err());
+        }
     }
 
     #[test]

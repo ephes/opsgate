@@ -274,7 +274,7 @@ class OpsGateService:
     def init_db(self) -> None:
         with self._connection() as conn:
             conn.executescript(
-                """
+                "BEGIN IMMEDIATE;\n" + """
                 CREATE TABLE IF NOT EXISTS tickets (
                     id TEXT PRIMARY KEY,
                     source TEXT NOT NULL,
@@ -343,8 +343,15 @@ class OpsGateService:
             if "archived_by" not in ticket_columns:
                 conn.execute("ALTER TABLE tickets ADD COLUMN archived_by TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at)")
-            conn.execute("DROP INDEX IF EXISTS idx_tickets_open_dedupe")
-            conn.execute(OPEN_TICKET_DEDUPE_INDEX)
+            existing = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_tickets_open_dedupe'"
+            ).fetchone()
+            # SQLite strips the trailing semicolon when storing DDL. Only replace
+            # a historical/different definition, while holding the writer lock.
+            expected = " ".join(OPEN_TICKET_DEDUPE_INDEX.strip().rstrip(";").split())
+            if existing is None or " ".join(str(existing[0]).split()) != expected:
+                conn.execute("DROP INDEX IF EXISTS idx_tickets_open_dedupe")
+                conn.execute(OPEN_TICKET_DEDUPE_INDEX)
             conn.commit()
         self._sync_ui_session_state()
 

@@ -3221,3 +3221,40 @@ def test_runner_readiness_health_contract(
     health = response.get_json()
     assert health["status"] == "ok"
     assert health["runner_readiness"] == {"status": expected, "freshness_threshold_seconds": 120}
+
+
+@pytest.mark.parametrize("preview", [False, True])
+@pytest.mark.parametrize("swap_parent", [False, True])
+def test_log_view_reads_admitted_handle(
+    client: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, preview: bool, swap_parent: bool
+) -> None:
+    import opsgate.app as module
+
+    ticket_id = create_ticket(client, token="nyxmon-token-000000000000", title="Synthetic log", summary="Synthetic")
+    path = write_ticket_log(ticket_id, relative_path="steps/01-investigator/session.log", content="admitted log")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / path.name).write_text("outside secret")
+    set_ticket_tmux_sessions(client, ticket_id, [{"step_index": 0, "log_path": str(path)}])
+    reader = module.read_tail_lines if preview else module.read_step_log
+    called = False
+
+    def swap_then_read(source: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        if swap_parent:
+            path.parent.rename(path.parent.with_name("retained"))
+            path.parent.symlink_to(outside, target_is_directory=True)
+        else:
+            path.unlink()
+            path.symlink_to(outside / path.name)
+        return reader(source, *args, **kwargs)
+
+    monkeypatch.setattr(module, "read_tail_lines" if preview else "read_step_log", swap_then_read)
+    login(client)
+    url = f"/tickets/{ticket_id}" + ("" if preview else "/steps/1/log")
+    response = client.get(url)
+    assert called
+    assert response.status_code == 200
+    assert "admitted log" in response.get_data(as_text=True)
+    assert "outside secret" not in response.get_data(as_text=True)

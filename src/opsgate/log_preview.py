@@ -1,17 +1,51 @@
 """Bounded previews of retained UTF-8 logs; step log views."""
 
+import os
+import stat
+from contextlib import nullcontext
 from pathlib import Path
+from typing import BinaryIO
 
 TAIL_BYTE_LIMIT = 64 * 1024
 LINE_BYTE_LIMIT = 2048
 TRUNCATION_MARKER = "[log preview truncated]"
 
 
-def read_tail_lines(path: Path, max_lines: int = 40) -> list[str]:
+def open_regular(path: Path) -> BinaryIO:
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    handle = os.fdopen(fd, "rb")
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        handle.close()
+        raise OSError("log is not a regular file")
+    return handle
+
+
+def open_beneath(root: Path, relative: Path) -> BinaryIO:
+    """Pin every directory and reject aliases while opening an admitted log."""
+    parts = relative.parts
+    if not parts or relative.is_absolute() or any(part in (".", "..") for part in parts):
+        raise OSError("invalid log path")
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=directory)
+        handle = os.fdopen(fd, "rb")
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            handle.close()
+            raise OSError("log is not a regular file")
+        return handle
+    finally:
+        os.close(directory)
+
+
+def read_tail_lines(path: Path | BinaryIO, max_lines: int = 40) -> list[str]:
     if max_lines <= 0:
         return []
     try:
-        with path.open("rb") as handle:
+        with open_regular(path) if isinstance(path, Path) else nullcontext(path) as handle:
             size = handle.seek(0, 2)
             start = max(0, size - TAIL_BYTE_LIMIT)
             handle.seek(start)
@@ -40,9 +74,9 @@ STEP_LOG_BYTE_LIMIT = 2 * 1024 * 1024
 STEP_LOG_TRUNCATION_MARKER = "[step log truncated]"
 
 
-def read_step_log(path: Path) -> str:
+def read_step_log(path: Path | BinaryIO) -> str:
     """Read at most the final 2 MiB, preserving small logs in full."""
-    with path.open("rb") as handle:
+    with open_regular(path) if isinstance(path, Path) else nullcontext(path) as handle:
         size = handle.seek(0, 2)
         start = max(0, size - STEP_LOG_BYTE_LIMIT)
         handle.seek(start)

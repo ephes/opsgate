@@ -803,3 +803,40 @@ async fn cleanup_attempts_every_session_and_verifies_after_kill_error() {
     assert_eq!(f.supervisor.cleanup_mark(A), Some(false));
     assert!(f.api.updates().is_empty());
 }
+
+#[test]
+fn runner_lock_agrees_with_python_and_releases_on_process_death() {
+    use std::io::BufRead;
+    use std::process::{Command, Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let settings = Arc::new(runner_settings(dir.path(), 1));
+    let root = std::path::Path::new(&settings.execution_data_dir);
+    std::fs::create_dir_all(root).unwrap();
+    let mut child = Command::new("python3").args(["-c",
+        "import fcntl,sys; f=open(sys.argv[1], 'a+'); fcntl.flock(f, fcntl.LOCK_EX); print('ready', flush=True); sys.stdin.read()"])
+        .arg(root.join(".runner.lock")).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    let mut line = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    assert_eq!(line.trim(), "ready");
+    let make = || {
+        Supervisor::new(
+            settings.clone(),
+            FleetApi::new(),
+            Arc::new(FakeTmux::new(false, None)),
+            TestClock::new(),
+            CancellationToken::new(),
+        )
+    };
+    assert!(make().is_err());
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let owner = make().unwrap();
+    let evidence = owner.state_dir().join("evidence");
+    std::fs::write(&evidence, "retained").unwrap();
+    assert!(make().is_err());
+    drop(owner);
+    assert!(make().is_ok());
+    assert_eq!(std::fs::read_to_string(evidence).unwrap(), "retained");
+}

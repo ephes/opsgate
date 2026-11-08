@@ -865,14 +865,15 @@ Stored JSON columns (`json.dumps(x, sort_keys=True)`, separators `", "`/
 The API process owns the schema and runs the idempotent `init_db` at start:
 `CREATE TABLE IF NOT EXISTS` for the four tables, the two indexes, `ALTER
 TABLE … ADD COLUMN archived_at/archived_by` when missing,
-`idx_tickets_archived_at`, `DROP INDEX IF EXISTS idx_tickets_open_dedupe` +
-re-create, then `_sync_ui_session_state`; the DB parent directory is created
+`idx_tickets_archived_at`, and replacement of a missing/historical
+`idx_tickets_open_dedupe` definition, then `_sync_ui_session_state`. Schema DDL
+runs in one `BEGIN IMMEDIATE` transaction, rolls back on any failure, and leaves
+an already-current dedupe index untouched; the DB parent directory is created
 (`mkdir -p`). Rust runs **the same DDL text** (copied verbatim into
 `opsgate-store`), so a database initialised by either implementation is
 identical (contract test: `sqlite_master` of a Python-initialised and a
 Rust-initialised database compared after whitespace normalisation, and Rust
-start on a Python database is a no-op except the index re-creation Python also
-does; S3a: `opsgate-store/tests/schema_contract.rs` against
+start on a current Python database preserves its schema unchanged; S3a: `opsgate-store/tests/schema_contract.rs` against
 `fixtures/schema.sql`, plus the pytest `test_rust_store_ddl_is_the_python_ddl`
 that compares the DDL constants with `init_db`'s text). `check-db` verifies the
 schema: every table, index (and any foreign view or trigger) by its
@@ -1006,7 +1007,9 @@ recovery whenever cleanup cannot verify session absence.
   #!/bin/bash
   set -uo pipefail
   <command> 2>&1 | tee -a <log>
-  cmd_rc=${PIPESTATUS[0]}
+  pipeline_rc=("${PIPESTATUS[@]}")
+  cmd_rc=${pipeline_rc[0]}
+  if (( cmd_rc == 0 )); then cmd_rc=${pipeline_rc[1]}; fi
   printf "%s\n" "$cmd_rc" > <exit_code>
   exit "$cmd_rc"
   ```
@@ -1025,14 +1028,18 @@ recovery whenever cleanup cannot verify session absence.
 - Empty/non-list plan → status `invalid_plan`/`failed`/`failure`/
   `invalid_execution_plan`/`tmux_sessions: []`.
 - Per step: stop flag → return; `GET` ticket, terminal → kill sessions marked
-  running, return; a `summary.json` with status `succeeded` → collect it once
-  into prior summaries and skip.
+  running, return; a `summary.json` with status `succeeded`, matching ticket id,
+  integer step index, role and agent, and integer-zero exit code → collect it once
+  into prior summaries and skip. Mismatched or contradictory success evidence is
+  retained and fails interrupted without relaunch.
 - Fresh start: write `context.json` (both places) `{ticket_id, step_index,
   step_role, step_agent, prior_step_summaries}`, `prompt.md` = prompt + `\n`,
   `previous_step_summary.md` = last prior summary as `json.dumps(sort_keys,
   indent=2)` + `\n` (if any); metadata `{step_index, role, agent,
   session_name, attach_command, prompt_path, context_path, log_path,
   summary_path, status: "running", started_at}` written **before** launch;
+  publication syncs file bytes before rename and its parent directory afterward;
+  any publication/sync failure prevents launch;
   `step_started` status with `step_<n>_started`; script; tmux launch.
 - Poll loop every 1 s until `exit_code` exists: stop flag (exit code present →
   return canceled without touching metadata; else kill session, metadata
@@ -1048,8 +1055,13 @@ recovery whenever cleanup cannot verify session absence.
   and the harness runs with that configuration, 7.4);
   heartbeat every `max(1, interval)` s: `heartbeat` with
   `running_step_<n>_of_<total>`.
-- Finish: exit code `int(text.strip())` else 1; entry gets `finished_at`,
-  `log_path`, `log_size_bytes` (0 if missing), `log_sha256` (null if missing);
+- Finish: exit code from a single nonblocking regular-file handle, at most
+  64 bytes, `int(text.strip())` within i64 else 1 (including unavailable evidence).
+  Entry gets `finished_at`, `log_path`, admitted `log_size_bytes` (0 if missing),
+  `log_sha256` (null when missing, changed, canceled or over budget). Checksum
+  reads never exceed the admitted length or 64 MiB, check cancellation and time
+  between 64 KiB chunks, and have a one-second ceiling capped by the remaining
+  ticket deadline. Partial checksums are never published;
   `summary.json` `{ticket_id, step_index, role, agent, session_name,
   started_at, finished_at, exit_code, status: succeeded|failed, log_path,
   log_size_bytes, log_sha256, summary_markdown: <preview lines joined>}`;

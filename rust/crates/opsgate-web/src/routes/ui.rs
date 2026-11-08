@@ -23,7 +23,7 @@ use axum::middleware::{Next, from_fn};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use minijinja::value::Value as JinjaValue;
-use opsgate_core::log_preview::read_step_log;
+use opsgate_core::log_preview::{Limits, read_step_log_file};
 use opsgate_core::pytext::{py_lower, strip};
 use opsgate_core::settings::{MAX_DURATION_SECONDS, py_int_decimal};
 use opsgate_core::validate::{SUPPORTED_AGENTS, py_truthy, require_reviewer_step_floor_for_source};
@@ -40,7 +40,7 @@ use crate::path::RequestPath;
 use crate::routes::{GET_ALLOW, POST_ALLOW, allow};
 use crate::session::{SessionHandle, session_user};
 use crate::state::AppState;
-use crate::step_logs::{resolve_log_path, session_for_step, session_views};
+use crate::step_logs::{open_log, session_for_step, session_views};
 use crate::templates::{Context, to_template_value};
 use crate::urls::{UrlArg, url_for};
 
@@ -387,8 +387,8 @@ pub async fn step_log_page(
     let number = step_number.clone();
     let (ticket, meta, log_path, log_text) = blocking_fs(move || {
         let meta = session_for_step(&ticket, &number)?;
-        let log_path = resolve_log_path(&execution_data_dir, &ticket_id, &meta)?;
-        let log_text = read_step_log(&log_path)
+        let (log_path, mut log_file) = open_log(&execution_data_dir, &ticket_id, &meta)?;
+        let log_text = read_step_log_file(&mut log_file, Limits::default())
             .map_err(|error| AppError::Internal(format!("step log: {error}")))?;
         Ok((ticket, meta, log_path, log_text))
     })

@@ -140,6 +140,7 @@ struct Inner<A, T, C> {
     clock: C,
     stop: CancellationToken,
     state_dir: PathBuf,
+    _owner_file: std::fs::File,
     workers: Mutex<Workers>,
     worker_done: Notify,
     artifacts_scanned: AtomicBool,
@@ -175,7 +176,22 @@ where
         clock: C,
         stop: CancellationToken,
     ) -> io::Result<Self> {
-        let state_dir = artifacts::py_path_join(&settings.execution_data_dir, "runner-state");
+        use rustix::fs::{FlockOperation, Mode, OFlags, flock, open};
+        let root = std::path::Path::new(&settings.execution_data_dir);
+        std::fs::create_dir_all(root)?;
+        let root = root.canonicalize()?;
+        let owner_file = std::fs::File::from(open(
+            root.join(".runner.lock"),
+            OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::RUSR | Mode::WUSR,
+        )?);
+        flock(&owner_file, FlockOperation::NonBlockingLockExclusive).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "execution-state root already owned by another runner",
+            )
+        })?;
+        let state_dir = root.join("runner-state");
         std::fs::create_dir_all(&state_dir)?;
         Ok(Self {
             inner: Arc::new(Inner {
@@ -185,6 +201,7 @@ where
                 clock,
                 stop,
                 state_dir,
+                _owner_file: owner_file,
                 workers: Mutex::new(Workers::default()),
                 worker_done: Notify::new(),
                 artifacts_scanned: AtomicBool::new(false),

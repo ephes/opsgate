@@ -156,7 +156,7 @@ async fn ticket_executor_runs_steps_sequentially() {
     assert_eq!(
         script,
         format!(
-            "#!/bin/bash\nset -uo pipefail\nclaude -p --dangerously-skip-permissions < {} 2>&1 | tee -a {}\ncmd_rc=${{PIPESTATUS[0]}}\nprintf \"%s\\n\" \"$cmd_rc\" > {}\nexit \"$cmd_rc\"\n",
+            "#!/bin/bash\nset -uo pipefail\nclaude -p --dangerously-skip-permissions < {} 2>&1 | tee -a {}\npipeline_rc=(\"${{PIPESTATUS[@]}}\")\ncmd_rc=${{pipeline_rc[0]}}\nif (( cmd_rc == 0 )); then cmd_rc=${{pipeline_rc[1]}}; fi\nprintf \"%s\\n\" \"$cmd_rc\" > {}\nexit \"$cmd_rc\"\n",
             second.prompt_path.display(),
             second.log_path.display(),
             second.exit_code_path.display()
@@ -697,7 +697,11 @@ async fn ticket_executor_resumes_from_existing_step_summary() {
     std::fs::create_dir_all(&first.step_dir).unwrap();
     std::fs::write(
         &first.summary_path,
-        "{\"status\":\"succeeded\",\"summary_markdown\":\"already done\"}\n",
+        serde_json::to_vec(
+            &json!({"ticket_id": id, "step_index": 0, "role": "investigator", "agent": "codex",
+            "exit_code": 0, "status": "succeeded", "summary_markdown": "already done"}),
+        )
+        .unwrap(),
     )
     .unwrap();
     f.run().await.unwrap();
@@ -809,7 +813,11 @@ async fn resumed_summary_appears_once_in_next_step_context() {
     std::fs::create_dir_all(&first.step_dir).unwrap();
     std::fs::write(
         &first.summary_path,
-        "{\"status\":\"succeeded\",\"summary_markdown\":\"already done\"}\n",
+        serde_json::to_vec(
+            &json!({"ticket_id": id, "step_index": 0, "role": "investigator", "agent": "codex",
+            "exit_code": 0, "status": "succeeded", "summary_markdown": "already done"}),
+        )
+        .unwrap(),
     )
     .unwrap();
     f.run().await.unwrap();
@@ -818,7 +826,7 @@ async fn resumed_summary_appears_once_in_next_step_context() {
     assert_eq!(context["step_index"], 1);
     assert_eq!(
         context["prior_step_summaries"],
-        json!([{"status": "succeeded", "summary_markdown": "already done"}])
+        json!([read_json(&first.summary_path)])
     );
     assert_eq!(f.tmux.launched().len(), 1);
     assert_eq!(f.api.ticket_field("state"), "succeeded");
@@ -1041,4 +1049,118 @@ async fn running_step_heartbeats_outlive_the_readiness_threshold() {
     assert_eq!(*heartbeats.lock().unwrap(), [30, 60, 90, 120]);
     assert!(start.elapsed().as_secs() > 120);
     assert_eq!(f.api.ticket_field("state"), "succeeded");
+}
+
+#[tokio::test(start_paused = true)]
+async fn log_copy_status_is_part_of_ticket_success() {
+    for (agent_rc, copy_rc, expected) in [(0, 0, 0), (3, 0, 3), (0, 7, 7), (3, 7, 3)] {
+        let bin = tempfile::tempdir().unwrap();
+        for (name, script) in [
+            (
+                "codex",
+                format!("#!/bin/sh\necho synthetic\nexit {agent_rc}\n"),
+            ),
+            ("tee", format!("#!/bin/sh\ncat >> \"$2\"\nexit {copy_rc}\n")),
+        ] {
+            let path = bin.path().join(name);
+            std::fs::write(&path, script).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let path = format!(
+            "{}:{}",
+            bin.path().display(),
+            std::env::var("PATH").unwrap()
+        );
+        let tmux = FakeTmux::new(false, None).on_launch(move |_, script| {
+            let result = std::process::Command::new("/bin/bash")
+                .arg(script)
+                .env("PATH", &path)
+                .status()
+                .unwrap();
+            assert_eq!(result.code(), Some(expected));
+        });
+        let id = "aaaaaaaa-1111-4111-8111-111111111111";
+        let plan =
+            json!([{"role": "implementer", "agent": "codex", "prompt_markdown": "synthetic"}]);
+        let f = Fixture::new(id, running_ticket(id, plan.clone(), 1, 120), tmux);
+        f.run().await.unwrap();
+        let paths = f.paths(0, &plan[0]);
+        assert_eq!(
+            std::fs::read_to_string(&paths.exit_code_path).unwrap(),
+            format!("{expected}\n")
+        );
+        let summary = read_json(&paths.summary_path);
+        assert_eq!(summary["exit_code"], expected);
+        assert_eq!(
+            summary["status"],
+            if expected == 0 { "succeeded" } else { "failed" }
+        );
+        assert_eq!(f.ticket()["state"], summary["status"]);
+        assert_eq!(f.tmux.launched().len(), 1);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn recovered_summary_identity_cannot_skip_or_relaunch() {
+    for patch in [
+        json!({"ticket_id": "another-ticket"}),
+        json!({"step_index": 1}),
+        json!({"step_index": false}),
+        json!({"role": "reviewer"}),
+        json!({"agent": "claude"}),
+        json!({"exit_code": 7}),
+        json!({"exit_code": false}),
+        json!({"exit_code": "0"}),
+        json!({"exit_code": 0.0}),
+        json!({"ticket_id": null}),
+    ] {
+        let id = "aaaaaaaa-1111-4111-8111-111111111111";
+        let plan = two_steps();
+        let f = Fixture::new(
+            id,
+            running_ticket(id, plan.clone(), 1, 120),
+            FakeTmux::new(false, Some(0)),
+        );
+        let paths = f.paths(0, &plan[0]);
+        std::fs::create_dir_all(&paths.step_dir).unwrap();
+        let mut summary =
+            json!({"ticket_id": id, "step_index": 0, "role": "investigator", "agent": "codex",
+            "exit_code": 0, "status": "succeeded", "summary_markdown": "synthetic"})
+            .as_object()
+            .unwrap()
+            .clone();
+        summary.extend(patch.as_object().unwrap().clone());
+        let evidence = serde_json::to_vec(&summary).unwrap();
+        std::fs::write(&paths.summary_path, &evidence).unwrap();
+        std::fs::write(&paths.exit_code_path, "0").unwrap();
+        f.run().await.unwrap();
+        assert_eq!(f.ticket()["state"], "failed", "{patch}");
+        assert_eq!(f.ticket()["result_detail"], "step_1_interrupted");
+        assert!(f.tmux.launched().is_empty());
+        assert_eq!(std::fs::read(&paths.summary_path).unwrap(), evidence);
+        assert!(!f.paths(1, &plan[1]).context_path.exists());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn oversized_log_finalization_keeps_length_without_full_checksum() {
+    let id = "aaaaaaaa-1111-4111-8111-111111111111";
+    let plan = two_steps();
+    let tmux = FakeTmux::new(false, None).on_launch(|_, script| {
+        let dir = script.parent().unwrap();
+        std::fs::File::create(dir.join("session.log"))
+            .unwrap()
+            .set_len(opsgate_runner::artifacts::LOG_CHECKSUM_MAX_BYTES + 1)
+            .unwrap();
+        std::fs::write(dir.join("exit_code"), "0").unwrap();
+    });
+    let f = Fixture::new(id, running_ticket(id, plan.clone(), 1, 120), tmux);
+    f.run().await.unwrap();
+    let summary = read_json(&f.paths(0, &plan[0]).summary_path);
+    assert!(summary["log_sha256"].is_null());
+    assert_eq!(
+        summary["log_size_bytes"],
+        opsgate_runner::artifacts::LOG_CHECKSUM_MAX_BYTES + 1
+    );
+    assert_eq!(f.ticket()["state"], "succeeded");
 }

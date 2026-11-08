@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hmac
 import json
 import re
@@ -11,7 +12,7 @@ from datetime import timedelta
 from functools import wraps
 from ipaddress import ip_address, ip_network
 from pathlib import Path
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, BinaryIO, ParamSpec, TypeVar, cast
 from urllib.parse import urlsplit
 
 import bcrypt
@@ -31,7 +32,7 @@ from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import MAX_DURATION_SECONDS, OpsGateSettings, load_settings
-from .log_preview import read_step_log, read_tail_lines
+from .log_preview import open_beneath, read_step_log, read_tail_lines
 from .service import (
     LIST_ARCHIVED_EXCLUDE,
     LIST_ARCHIVED_INCLUDE,
@@ -625,7 +626,7 @@ def create_app(
             return False
         return True
 
-    def resolve_session_log_path(*, ticket_id: str, session_meta: dict[str, Any]) -> Path:
+    def resolve_session_log_path(*, ticket_id: str, session_meta: dict[str, Any]) -> tuple[Path, BinaryIO]:
         raw_log_path = str(session_meta.get("log_path", "")).strip()
         if not raw_log_path:
             raise ServiceError("Log file is not available for this step", 404, "log_not_found")
@@ -634,9 +635,17 @@ def create_app(
         artifacts_root = session_artifacts_root_for_ticket(ticket_id)
         if not is_path_within_root(root=artifacts_root, candidate=log_path):
             raise ServiceError("Log file path is outside the ticket artifact root", 400, "invalid_log_path")
-        if not log_path.exists() or not log_path.is_file():
-            raise ServiceError("Log file is not available for this step", 404, "log_not_found")
-        return log_path
+        root = Path(resolved_settings.execution_data_dir).resolve()
+        try:
+            relative = log_path.relative_to(root)
+        except ValueError:
+            raise ServiceError("Log file path is outside the ticket artifact root", 400, "invalid_log_path") from None
+        try:
+            return log_path, open_beneath(root, relative)
+        except OSError as error:
+            if error.errno in (errno.EACCES, errno.EPERM):
+                raise
+            raise ServiceError("Log file is not available for this step", 404, "log_not_found") from None
 
     def build_ticket_session_views(ticket: dict[str, Any]) -> list[dict[str, Any]]:
         session_views: list[dict[str, Any]] = []
@@ -659,11 +668,12 @@ def create_app(
             if step_number is not None:
                 view["log_url"] = url_for("ui_ticket_step_log", ticket_id=ticket_id, step_number=step_number)
             try:
-                log_path = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
+                log_path, log_handle = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
             except ServiceError:
                 session_views.append(view)
                 continue
-            preview_lines = read_tail_lines(log_path, max_lines=LOG_PREVIEW_LINE_LIMIT)
+            with log_handle:
+                preview_lines = read_tail_lines(log_handle, max_lines=LOG_PREVIEW_LINE_LIMIT)
             view["log_available"] = step_number is not None
             view["log_preview"] = "\n".join(preview_lines)
             session_views.append(view)
@@ -952,8 +962,9 @@ def create_app(
             return redirect(url_for("ui_login", next=request.path))
         ticket = service.get_ticket(ticket_id)
         session_meta = get_ticket_session_for_step(ticket=ticket, step_number=step_number)
-        log_path = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
-        log_text = read_step_log(log_path)
+        log_path, log_handle = resolve_session_log_path(ticket_id=ticket_id, session_meta=session_meta)
+        with log_handle:
+            log_text = read_step_log(log_handle)
         return Response(
             render_template(
                 "ticket_log.html",

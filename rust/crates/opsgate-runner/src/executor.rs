@@ -310,8 +310,12 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
                 ))
             })
             .await?;
-            let invalid_summary = summary_present && existing.is_none();
-            if let Some(existing) = existing
+            let valid_summary = existing.as_ref().is_some_and(|summary| {
+                summary_identity_valid(summary, &self.ticket_id, step_index, step)
+            });
+            let invalid_summary = summary_present && !valid_summary;
+            if valid_summary
+                && let Some(existing) = existing
                 && pytext::py_lower(&text_or(&existing, "status", "")) == "succeeded"
             {
                 prior_summaries.push(Value::Object(existing));
@@ -690,16 +694,20 @@ impl<A: RunnerApi, T: Tmux, C: Clock> TicketExecutor<A, T, C> {
         let number = step.index + 1;
         let exit_code_path = paths.exit_code_path.clone();
         let log_path = paths.log_path.clone();
+        let remaining = (step.deadline - self.clock.now())
+            .to_std()
+            .unwrap_or_default();
+        let checksum_deadline = std::time::Instant::now()
+            + remaining.min(Duration::from_secs(artifacts::LOG_CHECKSUM_SECONDS));
+        let stop = self.stop.clone();
         let (exit_code, log_size, log_sha256, tail) = blocking(move || {
             let exit_code = read_exit_code(&exit_code_path)?;
-            let (log_size, log_sha256) = if log_path.exists() {
-                (
-                    std::fs::metadata(&log_path)?.len(),
-                    Some(artifacts::sha256_file(&log_path)?),
-                )
-            } else {
-                (0, None)
-            };
+            let (log_size, log_sha256) = artifacts::checksum_file(
+                &log_path,
+                artifacts::LOG_CHECKSUM_MAX_BYTES,
+                checksum_deadline,
+                || stop.is_cancelled(),
+            )?;
             let tail = opsgate_core::log_preview::read_tail_lines(
                 &log_path,
                 opsgate_core::log_preview::PREVIEW_LINE_LIMIT,
@@ -891,11 +899,46 @@ fn path_value(path: &Path) -> Value {
     Value::from(path.to_string_lossy().into_owned())
 }
 
+fn summary_identity_valid(
+    summary: &JsonObject,
+    ticket_id: &str,
+    index: usize,
+    step: &JsonObject,
+) -> bool {
+    summary.get("ticket_id").and_then(Value::as_str) == Some(ticket_id)
+        && summary.get("step_index").and_then(Value::as_u64) == Some(index as u64)
+        && summary.get("role").and_then(Value::as_str)
+            == Some(text_or(step, "role", "step").as_str())
+        && summary.get("agent").and_then(Value::as_str) == Some(text_or(step, "agent", "").as_str())
+        && (pytext::py_lower(&text_or(summary, "status", "")) != "succeeded"
+            || summary.get("exit_code").and_then(Value::as_i64) == Some(0))
+}
+
 /// `int(exit_code_path.read_text().strip())`, 1 for text that is not an
-/// integer (also not UTF-8); read errors are returned. An integer outside
+/// integer (also not UTF-8); unavailable/nonregular/over-64-byte records fail.
+/// An integer outside
 /// `i64` (impossible for a shell exit status) also counts as 1.
 fn read_exit_code(path: &Path) -> std::io::Result<i64> {
-    let data = std::fs::read(path)?;
+    use rustix::fs::{Mode, OFlags, open};
+    use std::io::Read;
+    let result = (|| -> std::io::Result<Vec<u8>> {
+        let fd = open(
+            path,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let file = std::fs::File::from(fd);
+        if !file.metadata()?.is_file() {
+            return Ok(Vec::new());
+        }
+        let mut data = Vec::new();
+        file.take(65).read_to_end(&mut data)?;
+        Ok(data)
+    })();
+    let data = result.unwrap_or_default();
+    if data.len() > 64 {
+        return Ok(1);
+    }
     Ok(std::str::from_utf8(&data)
         .ok()
         .and_then(crate::values::parse_py_int)
@@ -996,6 +1039,25 @@ mod tests {
     }
 
     #[test]
+    fn exit_code_bounded_regular_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exit_code");
+        std::fs::write(&path, vec![b'0'; 100_000]).unwrap();
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            std::process::Command::new("python3")
+                .args(["-c", "import os,sys; os.mkfifo(sys.argv[1])"])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
+        assert_eq!(read_exit_code(dir.path()).unwrap(), 1);
+    }
+
+    #[test]
     fn exit_code_text() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("exit_code");
@@ -1012,6 +1074,6 @@ mod tests {
             assert_eq!(read_exit_code(&path).unwrap(), expected, "{content:?}");
         }
         std::fs::remove_file(&path).unwrap();
-        assert!(read_exit_code(&path).is_err());
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
     }
 }

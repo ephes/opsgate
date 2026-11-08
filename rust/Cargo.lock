@@ -968,6 +968,7 @@ dependencies = [
  "gethostname",
  "ipnet",
  "proptest",
+ "rustix",
  "ryu",
  "serde",
  "serde_json",

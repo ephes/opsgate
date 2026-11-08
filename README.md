@@ -69,10 +69,17 @@ say so explicitly and explain how source-of-truth will be reconciled afterward.
 
 ## Runner restart recovery
 
+Only one runner may own a canonical execution-data root at a time. Python and Rust hold the
+same nonblocking OS advisory lock on `.runner.lock` before scanning recovery state or claiming
+work. A duplicate start fails immediately; stopping or killing the owner releases the lock.
+Leave the lock file and recovery data in place, then restart the intended runner.
+
 Step sessions run in a separate tmux server, so a step can keep running, or finish, while the runner is down.
 On restart the runner re-drives every `running` ticket it finds (runner state files, live `job-<ticket>-*` tmux
-sessions, and session artifact directories). Steps whose `summary.json` says `succeeded` are skipped and their
-summaries are passed once to later steps. For the first unfinished step the runner writes
+sessions, and session artifact directories). A recovered `succeeded` summary is skipped only when
+its ticket id, integer step index, role and agent match the current plan, and its exit code is
+integer zero. Its summary is passed once to later steps. Missing/mismatched identity or contradictory
+success evidence is retained and fails the step as interrupted, without relaunch. For the first unfinished step the runner writes
 `session_metadata.json` (status `running`, `started_at`) before it ever launches the step, and uses it as the
 resume marker:
 
@@ -124,13 +131,18 @@ string UUID ticket identity matching its filename. Recovery never derives an ide
 Diagnostics name the rejected file; unchanged rejected files are not read or warned about again in the same
 process. Changes to file identity, size or timestamps trigger a retry. After inspecting retained evidence,
 repair or remove the named file from `runner-state`; a restart also retries all files.
+Exit-code evidence is read once from a nonblocking regular file, with a 64-byte ceiling;
+missing, special, oversized or invalid records mean failure and never authorize relaunch.
+
 Both runners read state, step summaries and metadata from a single nonblocking regular-file descriptor,
 with an inclusive 8 MiB byte limit before UTF-8/JSON decoding and a 64-level JSON depth limit. Special files, oversized files and invalid
 artifacts are unavailable. Invalid summary/metadata evidence is retained; the step fails as interrupted,
 after stopping and verifying absence of any owned session, without skipping it or launching it again.
 
 Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
-files. Failed serialization, writes or replacement leave the previous destination intact and remove the
+files. Bytes are synced before rename and the parent directory is synced before publication
+returns. A prelaunch metadata sync/publication failure prevents launch; retained evidence is
+adopted or classified as interrupted on restart. Failed serialization, writes or replacement leave the previous destination intact and remove the
 owned temporary file. If the filesystem also refuses cleanup, the original publication error is preserved
 and operators may need to remove the leftover temporary file.
 
@@ -287,6 +299,9 @@ Omitting `result` derives the canonical result from the terminal state. Running 
 and heartbeats must omit terminal results. Incompatible pairs return `400 invalid_runner_result`
 without changing the ticket, heartbeat or audit history.
 
+Startup preserves the current open-ticket uniqueness index. Historical index replacement and
+archive-column upgrades run under one SQLite writer transaction; a failed upgrade rolls back.
+
 ### Concurrent ticket transitions
 
 Approve, reject, cancel, archive, unarchive, runner claim and runner status updates each run in a single
@@ -337,7 +352,20 @@ Every response (UI pages, redirects, errors and API answers) carries:
 
 A reverse proxy in front of OpsGate must not remove these headers.
 
+Step scripts capture agent and log-copy statuses together. Agent failure retains its exit code;
+a successful agent with failed log copying fails the step and ticket without rerunning it.
+
+Log finalization admits one regular-file length for checksum work, with a 64 MiB byte ceiling
+and a one-second elapsed budget, capped by the remaining ticket budget. It checks cancellation
+and elapsed time between 64 KiB reads and never chases a growing EOF. `log_size_bytes` records
+the admitted length; `log_sha256: null` explicitly means no full checksum (missing, changed,
+over-budget or canceled evidence). Partial hashes are never published as complete log hashes.
+
 ## Log previews
+
+The API carries a single regular-file handle from containment admission through preview reading.
+Directory-relative no-follow opens pin every artifact path component; leaf/parent swaps cannot
+redirect an admitted read, and special files are unavailable without blocking.
 
 Ticket detail previews and runner step summaries read only the final 64 KiB of a log,
 show up to 40 lines, and retain at most the final 2 KiB of each line. Omitted bytes

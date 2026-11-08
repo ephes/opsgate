@@ -45,20 +45,62 @@ impl Default for Limits {
 
 /// Open a file for reading like Python's `open(path, "rb")`: a directory is
 /// an error (`IsADirectoryError`) instead of a readable handle.
-fn open_regular(path: &Path) -> io::Result<File> {
-    let file = File::open(path)?;
-    if file.metadata()?.is_dir() {
+pub fn open_regular(path: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags, open};
+    let file = File::from(open(
+        path,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?);
+    require_regular(file)
+}
+
+fn require_regular(file: File) -> io::Result<File> {
+    if !file.metadata()?.is_file() {
         return Err(io::Error::new(
-            io::ErrorKind::IsADirectory,
-            "is a directory",
+            io::ErrorKind::InvalidInput,
+            "log is not a regular file",
         ));
     }
     Ok(file)
 }
 
-/// The final `limit` bytes of the file and whether earlier bytes exist.
-fn read_tail(path: &Path, limit: u64) -> io::Result<(Vec<u8>, bool)> {
-    let mut file = open_regular(path)?;
+/// Open each component relative to its pinned parent, with no symlink traversal.
+/// The caller owns containment validation; `root` is the trusted execution root.
+pub fn open_beneath(root: &Path, relative: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags, open, openat};
+    use std::path::Component;
+    let mut names = Vec::new();
+    for component in relative.components() {
+        match component {
+            Component::Normal(name) => names.push(name),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "invalid log path",
+                ));
+            }
+        }
+    }
+    let (leaf, parents) = names
+        .split_last()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty log path"))?;
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let mut directory = open(root, flags, Mode::empty())?;
+    for name in parents {
+        directory = openat(&directory, *name, flags, Mode::empty())?;
+    }
+    let file = File::from(openat(
+        &directory,
+        *leaf,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?);
+    require_regular(file)
+}
+
+/// The final `limit` bytes of an opened file and whether earlier bytes exist.
+fn read_tail(file: &mut File, limit: u64) -> io::Result<(Vec<u8>, bool)> {
     let size = file.seek(SeekFrom::End(0))?;
     let start = size.saturating_sub(limit);
     file.seek(SeekFrom::Start(start))?;
@@ -85,7 +127,23 @@ pub fn read_tail_lines_with(
     if max_lines == 0 {
         return Ok(Vec::new());
     }
-    let (data, omitted_bytes) = match read_tail(path, limits.tail_bytes) {
+    let mut file = match open_regular(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    read_tail_lines_file(&mut file, max_lines, limits)
+}
+
+pub fn read_tail_lines_file(
+    file: &mut File,
+    max_lines: usize,
+    limits: Limits,
+) -> io::Result<Vec<String>> {
+    if max_lines == 0 {
+        return Ok(Vec::new());
+    }
+    let (data, omitted_bytes) = match read_tail(file, limits.tail_bytes) {
         Ok(tail) => tail,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
@@ -156,7 +214,11 @@ pub fn read_step_log(path: &Path) -> io::Result<String> {
 
 /// [`read_step_log`] with explicit limits.
 pub fn read_step_log_with(path: &Path, limits: Limits) -> io::Result<String> {
-    let (data, omitted_bytes) = read_tail(path, limits.step_log_bytes)?;
+    read_step_log_file(&mut open_regular(path)?, limits)
+}
+
+pub fn read_step_log_file(file: &mut File, limits: Limits) -> io::Result<String> {
+    let (data, omitted_bytes) = read_tail(file, limits.step_log_bytes)?;
     // Python decodes first and normalises the text; `\r` and `\n` never
     // occur inside a replaced sequence, so normalising the bytes first is the
     // same.
@@ -182,6 +244,45 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         assert!(read_tail_lines(directory.path(), 40).is_err());
         assert!(read_step_log(directory.path()).is_err());
+    }
+
+    #[test]
+    fn opened_log_pins_bytes_and_rejects_swapped_aliases_and_fifos() {
+        use std::os::unix::fs::symlink;
+        for parent in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let inside = dir.path().join("inside");
+            let outside = dir.path().join("outside");
+            std::fs::create_dir(&inside).unwrap();
+            std::fs::create_dir(&outside).unwrap();
+            std::fs::write(inside.join("log"), "admitted").unwrap();
+            std::fs::write(outside.join("log"), "outside secret").unwrap();
+            let mut file = open_beneath(dir.path(), Path::new("inside/log")).unwrap();
+            if parent {
+                std::fs::rename(&inside, dir.path().join("retained")).unwrap();
+                symlink(&outside, &inside).unwrap();
+            } else {
+                std::fs::remove_file(inside.join("log")).unwrap();
+                symlink(outside.join("log"), inside.join("log")).unwrap();
+            }
+            assert_eq!(
+                read_step_log_file(&mut file, Limits::default()).unwrap(),
+                "admitted"
+            );
+            assert!(open_beneath(dir.path(), Path::new("inside/log")).is_err());
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("fifo");
+        assert!(
+            std::process::Command::new("python3")
+                .args(["-c", "import os,sys; os.mkfifo(sys.argv[1])"])
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(open_beneath(dir.path(), Path::new("fifo")).is_err());
+        assert!(open_regular(&fifo).is_err());
     }
 
     #[test]

@@ -1227,3 +1227,42 @@ def test_prelaunch_publication_failure_prevents_launch(
         executor.run(initial_ticket=ticket)
         assert ticket["result_detail"] == "step_1_interrupted"
         assert executor.launched_sessions == []
+
+
+@pytest.mark.parametrize(("agent_rc", "copy_rc", "expected"), [(0, 0, 0), (3, 0, 3), (0, 7, 7), (3, 7, 3)])
+def test_log_copy_failure_fails_ticket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent_rc: int, copy_rc: int, expected: int
+) -> None:
+    import os
+    import subprocess
+
+    commands = tmp_path / "bin"
+    commands.mkdir()
+    for name, text in {
+        "codex": f"#!/bin/sh\necho synthetic\nexit {agent_rc}\n",
+        "tee": f'#!/bin/sh\ncat >> "$2"\nexit {copy_rc}\n',
+    }.items():
+        path = commands / name
+        path.write_text(text)
+        path.chmod(0o700)
+    monkeypatch.setenv("PATH", str(commands) + os.pathsep + os.environ["PATH"])
+    ticket_id = "77777777-7777-4777-8777-777777777777"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "synthetic"}]
+    ticket = _resume_ticket(ticket_id, plan)
+
+    class ScriptExecutor(RecordingStubTicketExecutor):
+        def _tmux_new_session(self, *, session_name: str, script_path: Path) -> None:
+            self.launched_sessions.append(session_name)
+            result = subprocess.run(["/bin/bash", str(script_path)], check=False, timeout=5)
+            assert result.returncode == expected
+
+    executor = ScriptExecutor(settings=_runner_settings(tmp_path), api=FakeApi(ticket), stop_event=threading.Event(),
+                              ticket_id=ticket_id, has_session=False, auto_complete_exit_code=None)
+    executor.run(initial_ticket=ticket)
+    paths = executor._prepare_step_paths(0, plan[0])
+    assert paths.exit_code_path.read_text() == f"{expected}\n"
+    summary = json.loads(paths.summary_path.read_text())
+    assert summary["exit_code"] == expected
+    assert summary["status"] == ("succeeded" if expected == 0 else "failed")
+    assert ticket["state"] == summary["status"]
+    assert len(executor.launched_sessions) == 1

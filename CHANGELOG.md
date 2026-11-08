@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Read step logs through one admitted regular-file handle with no-follow artifact traversal.
+- Fail steps whose agent succeeds but log copying fails; retain agent failure exit codes.
+
 - Sync runner artifact bytes and directory entries before allowing privileged launch.
 - Require one OS advisory-lock owner per canonical execution root across both runners.
 

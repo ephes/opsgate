@@ -153,7 +153,9 @@ pub fn step_script(
         "#!/bin/bash".to_owned(),
         "set -uo pipefail".to_owned(),
         format!("{command} 2>&1 | tee -a {log}"),
-        "cmd_rc=${PIPESTATUS[0]}".to_owned(),
+        "pipeline_rc=(\"${PIPESTATUS[@]}\")".to_owned(),
+        "cmd_rc=${pipeline_rc[0]}".to_owned(),
+        "if (( cmd_rc == 0 )); then cmd_rc=${pipeline_rc[1]}; fi".to_owned(),
         format!("printf \"%s\\n\" \"$cmd_rc\" > {exit_code}"),
         "exit \"$cmd_rc\"".to_owned(),
         String::new(),
@@ -286,7 +288,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             script,
-            "#!/bin/bash\nset -uo pipefail\nclaude -p --dangerously-skip-permissions < /s/prompt.md 2>&1 | tee -a /s/session.log\ncmd_rc=${PIPESTATUS[0]}\nprintf \"%s\\n\" \"$cmd_rc\" > /s/exit_code\nexit \"$cmd_rc\"\n"
+            "#!/bin/bash\nset -uo pipefail\nclaude -p --dangerously-skip-permissions < /s/prompt.md 2>&1 | tee -a /s/session.log\npipeline_rc=(\"${PIPESTATUS[@]}\")\ncmd_rc=${pipeline_rc[0]}\nif (( cmd_rc == 0 )); then cmd_rc=${pipeline_rc[1]}; fi\nprintf \"%s\\n\" \"$cmd_rc\" > /s/exit_code\nexit \"$cmd_rc\"\n"
         );
     }
 }

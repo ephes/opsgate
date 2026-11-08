@@ -350,7 +350,14 @@ Every response (UI pages, redirects, errors and API answers) carries:
 
 A reverse proxy in front of OpsGate must not remove these headers.
 
+Step scripts capture agent and log-copy statuses together. Agent failure retains its exit code;
+a successful agent with failed log copying fails the step and ticket without rerunning it.
+
 ## Log previews
+
+The API carries a single regular-file handle from containment admission through preview reading.
+Directory-relative no-follow opens pin every artifact path component; leaf/parent swaps cannot
+redirect an admitted read, and special files are unavailable without blocking.
 
 Ticket detail previews and runner step summaries read only the final 64 KiB of a log,
 show up to 40 lines, and retain at most the final 2 KiB of each line. Omitted bytes

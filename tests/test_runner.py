@@ -225,7 +225,8 @@ def test_ticket_executor_resumes_from_existing_step_summary(tmp_path: Path) -> N
     first_step_paths = executor._prepare_step_paths(0, ticket["execution_plan"][0])
     first_step_paths.step_dir.mkdir(parents=True, exist_ok=True)
     first_step_paths.summary_path.write_text(
-        '{"status":"succeeded","summary_markdown":"already done"}\n',
+        json.dumps({"ticket_id": ticket_id, "step_index": 0, "role": "investigator", "agent": "codex",
+                    "exit_code": 0, "status": "succeeded", "summary_markdown": "already done"}),
         encoding="utf-8",
     )
 
@@ -631,7 +632,8 @@ def test_resumed_summary_appears_once_in_next_step_context(tmp_path: Path) -> No
     first_step_paths = executor._prepare_step_paths(0, plan[0])
     first_step_paths.step_dir.mkdir(parents=True, exist_ok=True)
     first_step_paths.summary_path.write_text(
-        '{"status":"succeeded","summary_markdown":"already done"}\n',
+        json.dumps({"ticket_id": ticket_id, "step_index": 0, "role": "investigator", "agent": "codex",
+                    "exit_code": 0, "status": "succeeded", "summary_markdown": "already done"}),
         encoding="utf-8",
     )
 
@@ -640,7 +642,7 @@ def test_resumed_summary_appears_once_in_next_step_context(tmp_path: Path) -> No
     second_step_paths = executor._prepare_step_paths(1, plan[1])
     context = json.loads(second_step_paths.context_path.read_text(encoding="utf-8"))
     assert context["step_index"] == 1
-    assert context["prior_step_summaries"] == [{"status": "succeeded", "summary_markdown": "already done"}]
+    assert context["prior_step_summaries"] == [json.loads(first_step_paths.summary_path.read_text())]
     assert len(executor.launched_sessions) == 1
     assert ticket["state"] == "succeeded"
 
@@ -1266,3 +1268,50 @@ def test_log_copy_failure_fails_ticket(
     assert summary["status"] == ("succeeded" if expected == 0 else "failed")
     assert ticket["state"] == summary["status"]
     assert len(executor.launched_sessions) == 1
+
+
+@pytest.mark.parametrize("patch", [
+    {"ticket_id": "another-ticket"}, {"step_index": 1}, {"step_index": False},
+    {"role": "reviewer"}, {"agent": "claude"}, {"exit_code": 7}, {"exit_code": False},
+    {"exit_code": "0"}, {"exit_code": 0.0}, {"ticket_id": None},
+])
+def test_recovered_summary_identity_never_skips_or_relaunches(tmp_path: Path, patch: dict[str, Any]) -> None:
+    ticket_id = "77777777-7777-4777-8777-777777777777"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "synthetic"},
+            {"role": "reviewer", "agent": "claude", "prompt_markdown": "synthetic"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path), api=FakeApi(ticket), stop_event=threading.Event(),
+        ticket_id=ticket_id, has_session=False, auto_complete_exit_code=0,
+    )
+    paths = executor._prepare_step_paths(0, plan[0])
+    paths.step_dir.mkdir(parents=True)
+    summary = {"ticket_id": ticket_id, "step_index": 0, "role": "implementer", "agent": "codex",
+               "exit_code": 0, "status": "succeeded", "summary_markdown": "synthetic"} | patch
+    evidence = json.dumps(summary).encode()
+    paths.summary_path.write_bytes(evidence)
+    # Even contradictory zero exit evidence cannot override a rejected summary.
+    paths.exit_code_path.write_text("0")
+    executor.run(initial_ticket=ticket)
+    assert ticket["state"] == "failed"
+    assert ticket["result_detail"] == "step_1_interrupted"
+    assert executor.launched_sessions == []
+    assert paths.summary_path.read_bytes() == evidence
+    assert not executor._prepare_step_paths(1, plan[1]).context_path.exists()
+
+
+def test_checksum_budget_is_used_in_finalization(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ticket_id = "77777777-7777-4777-8777-777777777777"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "synthetic"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path), api=FakeApi(ticket), stop_event=threading.Event(),
+        ticket_id=ticket_id, has_session=False, auto_complete_exit_code=0,
+    )
+    paths = _write_interrupted_step(executor, 0, plan[0], exit_code=0)
+    monkeypatch.setattr("opsgate.runner.LOG_CHECKSUM_MAX_BYTES", 1, raising=False)
+    executor.run(initial_ticket=ticket)
+    summary = json.loads(paths.summary_path.read_text())
+    assert summary["log_sha256"] is None
+    assert summary["log_size_bytes"] == len(b"original run output\n")
+    assert ticket["state"] == "succeeded"

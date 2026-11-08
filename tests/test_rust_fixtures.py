@@ -146,8 +146,7 @@ def _rust_str_constants(source: str) -> dict[str, str]:
 def test_rust_store_ddl_is_the_python_ddl() -> None:
     """``opsgate-store`` runs ``init_db``'s statements with the same text
     (rust/PLAN.md 4.10), so both implementations initialise identical
-    databases and Rust's start on a Python database re-creates only what
-    Python re-creates."""
+    databases and both preserve an already-current Python schema."""
     import ast
 
     from opsgate import service

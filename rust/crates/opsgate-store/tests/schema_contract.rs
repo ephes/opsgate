@@ -1,7 +1,7 @@
 //! Schema contract (PLAN.md 4.10): a Rust-initialised database has the
 //! objects of a Python-initialised one (`fixtures/schema.sql`, generated from
 //! `OpsGateService.init_db`), and Rust's start on a Python database changes
-//! nothing but the dedupe index Python re-creates too.
+//! nothing when the dedupe index is already current.
 
 mod common;
 
@@ -256,8 +256,11 @@ fn failed_index_upgrade_retains_unique_index_and_excludes_writers() {
     use std::sync::{Arc, Mutex};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("schema.db");
-    let conn = Connection::open(&path).unwrap();
-    schema::apply(&conn).unwrap();
+    let conn = python_database(&path);
+    const DUPLICATE: &str = "INSERT INTO tickets (id, source, task_ref, title, summary, execution_plan_json,
+        policy_requirements_json, context_json, payload_checksum, state, created_by, created_at, max_duration_seconds)
+        SELECT 't-2', source, task_ref, title, summary, execution_plan_json, policy_requirements_json,
+        context_json, payload_checksum, state, created_by, created_at, max_duration_seconds FROM tickets WHERE id='t-1'";
     conn.execute_batch("DROP INDEX idx_tickets_open_dedupe; CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)").unwrap();
     let blocked = Arc::new(Mutex::new(Vec::new()));
     let observed = blocked.clone();
@@ -275,7 +278,7 @@ fn failed_index_upgrade_retains_unique_index_and_excludes_writers() {
             observed
                 .lock()
                 .unwrap()
-                .push(peer.execute_batch("BEGIN IMMEDIATE").is_err());
+                .push(peer.execute_batch(DUPLICATE).is_err());
             Authorization::Deny
         } else {
             Authorization::Allow
@@ -297,5 +300,6 @@ fn failed_index_upgrade_retains_unique_index_and_excludes_writers() {
         sql,
         "CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)"
     );
+    assert!(conn.execute_batch(DUPLICATE).is_err());
     schema::apply(&conn).unwrap();
 }

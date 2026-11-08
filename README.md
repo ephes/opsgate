@@ -76,8 +76,10 @@ Leave the lock file and recovery data in place, then restart the intended runner
 
 Step sessions run in a separate tmux server, so a step can keep running, or finish, while the runner is down.
 On restart the runner re-drives every `running` ticket it finds (runner state files, live `job-<ticket>-*` tmux
-sessions, and session artifact directories). Steps whose `summary.json` says `succeeded` are skipped and their
-summaries are passed once to later steps. For the first unfinished step the runner writes
+sessions, and session artifact directories). A recovered `succeeded` summary is skipped only when
+its ticket id, integer step index, role and agent match the current plan, and its exit code is
+integer zero. Its summary is passed once to later steps. Missing/mismatched identity or contradictory
+success evidence is retained and fails the step as interrupted, without relaunch. For the first unfinished step the runner writes
 `session_metadata.json` (status `running`, `started_at`) before it ever launches the step, and uses it as the
 resume marker:
 
@@ -352,6 +354,12 @@ A reverse proxy in front of OpsGate must not remove these headers.
 
 Step scripts capture agent and log-copy statuses together. Agent failure retains its exit code;
 a successful agent with failed log copying fails the step and ticket without rerunning it.
+
+Log finalization admits one regular-file length for checksum work, with a 64 MiB byte ceiling
+and a one-second elapsed budget, capped by the remaining ticket budget. It checks cancellation
+and elapsed time between 64 KiB reads and never chases a growing EOF. `log_size_bytes` records
+the admitted length; `log_sha256: null` explicitly means no full checksum (missing, changed,
+over-budget or canceled evidence). Partial hashes are never published as complete log hashes.
 
 ## Log previews
 

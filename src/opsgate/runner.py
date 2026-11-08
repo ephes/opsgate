@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .config import RunnerSettings, load_runner_settings
-from .log_preview import read_tail_lines
+from .log_preview import open_regular, read_tail_lines
 from .service import (
     SUPPORTED_AGENTS,
     TERMINAL_STATES,
@@ -41,6 +41,8 @@ ARTIFACT_MAX_BYTES = 8 * 1024 * 1024
 API_RESPONSE_MAX_BYTES = 8 * 1024 * 1024
 API_REQUEST_TIMEOUT_SECONDS = 15.0
 TMUX_COMMAND_TIMEOUT_SECONDS = 5.0
+LOG_CHECKSUM_MAX_BYTES = 64 * 1024 * 1024
+LOG_CHECKSUM_SECONDS = 1.0
 
 TMUX_TICKET_RE = re.compile(r"^job-([0-9a-fA-F-]{36})-\d{2}-")
 
@@ -281,15 +283,51 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
-def _sha256(path: Path) -> str:
+def _hash_snapshot(handle: Any, size: int, *, deadline: float, stop_event: threading.Event) -> str | None:
+    if size > LOG_CHECKSUM_MAX_BYTES:
+        return None
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 64)
-            if not chunk:
-                break
-            digest.update(chunk)
+    remaining = size
+    while remaining:
+        if stop_event.is_set() or time.monotonic() >= deadline:
+            return None
+        chunk = handle.read(min(remaining, 64 * 1024))
+        if not chunk:
+            return None
+        remaining -= len(chunk)
+        digest.update(chunk)
+    if stop_event.is_set() or time.monotonic() >= deadline:
+        return None
     return digest.hexdigest()
+
+
+def _sha256(path: Path, *, deadline: float, stop_event: threading.Event) -> tuple[int, str | None]:
+    """Hash only the admitted length, and refuse changed or incomplete evidence."""
+    try:
+        with open_regular(path) as handle:
+            before = os.fstat(handle.fileno())
+            digest = _hash_snapshot(handle, before.st_size, deadline=deadline, stop_event=stop_event)
+            after = os.fstat(handle.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns
+            ):
+                digest = None
+            return before.st_size, digest
+    except FileNotFoundError:
+        return 0, None
+
+
+def _summary_identity_valid(summary: dict[str, Any], ticket_id: str, index: int, step: dict[str, Any]) -> bool:
+    if not (
+        summary.get("ticket_id") == ticket_id
+        and type(summary.get("step_index")) is int and summary["step_index"] == index
+        and summary.get("role") == str(step.get("role", "step"))
+        and summary.get("agent") == str(step.get("agent", ""))
+    ):
+        return False
+    return str(summary.get("status", "")).lower() != "succeeded" or (
+        type(summary.get("exit_code")) is int and summary["exit_code"] == 0
+    )
 
 
 def _tail_lines(path: Path, max_lines: int = 40) -> list[str]:
@@ -389,7 +427,13 @@ class TicketExecutor:
 
             step_paths = self._prepare_step_paths(step_index, step)
             existing_summary = self._load_summary(step_paths.summary_path)
-            if existing_summary is not None and str(existing_summary.get("status", "")).lower() == "succeeded":
+            valid_summary = existing_summary is not None and _summary_identity_valid(
+                existing_summary, self.ticket_id, step_index, step
+            )
+            if (
+                valid_summary and existing_summary is not None
+                and str(existing_summary.get("status", "")).lower() == "succeeded"
+            ):
                 prior_summaries.append(existing_summary)
                 continue
 
@@ -401,7 +445,7 @@ class TicketExecutor:
                 tmux_sessions=tmux_sessions,
                 deadline=deadline,
                 step_paths=step_paths,
-                invalid_summary=existing_summary is None and step_paths.summary_path.exists(),
+                invalid_summary=step_paths.summary_path.exists() and not valid_summary,
             )
 
             if step_outcome.kind == "succeeded":
@@ -648,8 +692,12 @@ class TicketExecutor:
         finished_at = isoformat_z(utc_now())
         tmux_entry["finished_at"] = finished_at
         tmux_entry["log_path"] = str(step_paths.log_path)
-        tmux_entry["log_size_bytes"] = step_paths.log_path.stat().st_size if step_paths.log_path.exists() else 0
-        tmux_entry["log_sha256"] = _sha256(step_paths.log_path) if step_paths.log_path.exists() else None
+        checksum_deadline = time.monotonic() + min(
+            LOG_CHECKSUM_SECONDS, max(0.0, (deadline - utc_now()).total_seconds())
+        )
+        tmux_entry["log_size_bytes"], tmux_entry["log_sha256"] = _sha256(
+            step_paths.log_path, deadline=checksum_deadline, stop_event=self.stop_event,
+        )
 
         summary = {
             "ticket_id": self.ticket_id,

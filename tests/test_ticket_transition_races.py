@@ -390,6 +390,8 @@ def test_schema_replacement_is_atomic(service: OpsGateService, monkeypatch: pyte
     from collections.abc import Iterator
     from contextlib import contextmanager
 
+    _create(service, "schema-a")
+    _create(service, "schema-b")
     original = service._connection
     with original() as conn:
         conn.execute("DROP INDEX idx_tickets_open_dedupe")
@@ -406,7 +408,7 @@ def test_schema_replacement_is_atomic(service: OpsGateService, monkeypatch: pyte
                     # DROP has executed. A second connection must still be excluded.
                     with sqlite3.connect(service.settings.db_path, timeout=0) as peer:
                         try:
-                            peer.execute("BEGIN IMMEDIATE")
+                            peer.execute("UPDATE tickets SET task_ref='schema-a' WHERE task_ref='schema-b'")
                         except sqlite3.OperationalError:
                             blocked.append(True)
                         else:
@@ -426,5 +428,7 @@ def test_schema_replacement_is_atomic(service: OpsGateService, monkeypatch: pyte
         assert conn.execute("SELECT sql FROM sqlite_master WHERE name='idx_tickets_open_dedupe'").fetchone()[0] == (
             "CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)"
         )
+        with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"):
+            conn.execute("UPDATE tickets SET task_ref='schema-a' WHERE task_ref='schema-b'")
     service.init_db()
     test_schema_preserves_current_index(service)

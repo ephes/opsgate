@@ -3,8 +3,9 @@
 //! JSON artifacts (`context.json`, `session_metadata.json`, `summary.json`)
 //! and runner state files are published by same-directory atomic
 //! replacement of a 0600 temporary file (`_atomic_write_json`): on any
-//! failure the destination is untouched and the temporary file is removed,
-//! and a failing removal never replaces the original error. The JSON text is
+//! failure before rename the destination is untouched and the temporary file
+//! is removed. A directory-sync failure after rename leaves the published
+//! evidence in place and propagates failure. Cleanup never replaces the original error. The JSON text is
 //! `json.dump(payload, sort_keys=True, indent=2)` plus a newline in Python;
 //! here `serde_json`'s two-space pretty printer (formatting P2).
 
@@ -147,25 +148,85 @@ pub fn load_json_object(path: &Path) -> Option<JsonObject> {
     }
 }
 
-/// `_sha256(path)`: lowercase hex SHA-256 of the file, read in 64 KiB chunks.
-pub fn sha256_file(path: &Path) -> io::Result<String> {
-    let mut file = File::open(path)?;
+/// Full log checksums have a 64 MiB work ceiling and a one-second elapsed
+/// budget, further restricted by the ticket deadline and shutdown cancellation.
+pub const LOG_CHECKSUM_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub const LOG_CHECKSUM_SECONDS: u64 = 1;
+
+fn hash_snapshot(
+    reader: &mut impl Read,
+    size: u64,
+    max_bytes: u64,
+    deadline: std::time::Instant,
+    canceled: impl Fn() -> bool,
+) -> io::Result<Option<String>> {
+    if size > max_bytes {
+        return Ok(None);
+    }
+    let mut remaining = size;
     let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 64 * 1024];
-    loop {
-        let read = match file.read(&mut buffer) {
-            Ok(0) => break,
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining > 0 {
+        if canceled() || std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        let count = usize::try_from(remaining.min(buffer.len() as u64)).unwrap();
+        let read = match reader.read(&mut buffer[..count]) {
+            Ok(0) => return Ok(None),
             Ok(read) => read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         };
+        remaining -= read as u64;
         digest.update(&buffer[..read]);
     }
-    Ok(digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect())
+    if canceled() || std::time::Instant::now() >= deadline {
+        return Ok(None);
+    }
+    Ok(Some(
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    ))
+}
+
+/// Hash the fixed admitted regular-file length. Changed, oversized, canceled
+/// or out-of-budget evidence has no full checksum; never publish a partial hash.
+pub fn checksum_file(
+    path: &Path,
+    max_bytes: u64,
+    deadline: std::time::Instant,
+    canceled: impl Fn() -> bool,
+) -> io::Result<(u64, Option<String>)> {
+    let mut file = match opsgate_core::log_preview::open_regular(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((0, None)),
+        Err(error) => return Err(error),
+    };
+    use std::os::unix::fs::MetadataExt;
+    let before = file.metadata()?;
+    let mut digest = hash_snapshot(&mut file, before.len(), max_bytes, deadline, canceled)?;
+    let after = file.metadata()?;
+    if before.len() != after.len()
+        || before.modified()? != after.modified()?
+        || (before.ctime(), before.ctime_nsec()) != (after.ctime(), after.ctime_nsec())
+    {
+        digest = None;
+    }
+    Ok((before.len(), digest))
+}
+
+/// Bounded full checksum for callers without a ticket deadline.
+pub fn sha256_file(path: &Path) -> io::Result<String> {
+    let (_, digest) = checksum_file(
+        path,
+        LOG_CHECKSUM_MAX_BYTES,
+        std::time::Instant::now() + std::time::Duration::from_secs(LOG_CHECKSUM_SECONDS),
+        || false,
+    )?;
+    digest.ok_or_else(|| io::Error::other("full log checksum unavailable"))
 }
 
 #[cfg(test)]
@@ -393,6 +454,81 @@ mod tests {
                 "{arrays} arrays"
             );
         }
+    }
+
+    #[test]
+    fn checksum_work_is_finite_and_partial_digests_are_unavailable() {
+        use std::time::{Duration, Instant};
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert_eq!(
+            hash_snapshot(&mut &b"abc"[..], 3, 3, deadline, || false)
+                .unwrap()
+                .as_deref(),
+            Some(expected)
+        );
+        assert!(
+            hash_snapshot(&mut &b"abc"[..], 3, 2, deadline, || false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            hash_snapshot(&mut &b"abc"[..], 3, 3, Instant::now(), || false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            hash_snapshot(&mut &b"abc"[..], 3, 3, deadline, || true)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            hash_snapshot(&mut &b"ab"[..], 3, 3, deadline, || false)
+                .unwrap()
+                .is_none()
+        );
+        struct GrowingReader {
+            consumed: usize,
+        }
+        impl Read for GrowingReader {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                self.consumed += buffer.len();
+                assert!(self.consumed <= 3);
+                buffer.copy_from_slice(&b"abc"[..buffer.len()]);
+                Ok(buffer.len())
+            }
+        }
+        let mut source = GrowingReader { consumed: 0 };
+        assert_eq!(
+            hash_snapshot(&mut source, 3, 3, deadline, || false)
+                .unwrap()
+                .as_deref(),
+            Some(expected)
+        );
+        assert_eq!(source.consumed, 3);
+    }
+
+    #[test]
+    fn checksum_changed_file_is_not_full_evidence() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("log");
+        fs::write(&path, b"abc").unwrap();
+        let once = AtomicBool::new(false);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let evidence = checksum_file(&path, 10, deadline, || {
+            if !once.swap(true, Ordering::SeqCst) {
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&path)
+                    .unwrap()
+                    .write_all(b"more")
+                    .unwrap();
+            }
+            false
+        })
+        .unwrap();
+        assert_eq!(evidence, (3, None));
     }
 
     #[test]

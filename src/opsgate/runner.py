@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import logging
@@ -262,7 +263,14 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             temp_path = Path(handle.name)
             json.dump(payload, handle, sort_keys=True, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
         temp_path.replace(path)
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     except BaseException:
         if temp_path is not None:
             try:
@@ -771,7 +779,18 @@ class OpsGateRunner:
         self.settings = settings
         self.api = RunnerApiClient(settings)
         self.stop_event = threading.Event()
-        self.state_dir = Path(settings.execution_data_dir) / "runner-state"
+        root = Path(settings.execution_data_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        root = root.resolve()
+        # Never unlink this stable inode: Python and Rust use the same flock.
+        fd = os.open(root / ".runner.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        self._owner_file = os.fdopen(fd, "rb+")
+        try:
+            fcntl.flock(self._owner_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self._owner_file.close()
+            raise RuntimeError("execution-state root already owned by another runner") from None
+        self.state_dir = root / "runner-state"
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.workers: dict[str, threading.Thread] = {}
         self._worker_cleanup: dict[str, bool] = {}

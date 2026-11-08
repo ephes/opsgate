@@ -69,6 +69,11 @@ say so explicitly and explain how source-of-truth will be reconciled afterward.
 
 ## Runner restart recovery
 
+Only one runner may own a canonical execution-data root at a time. Python and Rust hold the
+same nonblocking OS advisory lock on `.runner.lock` before scanning recovery state or claiming
+work. A duplicate start fails immediately; stopping or killing the owner releases the lock.
+Leave the lock file and recovery data in place, then restart the intended runner.
+
 Step sessions run in a separate tmux server, so a step can keep running, or finish, while the runner is down.
 On restart the runner re-drives every `running` ticket it finds (runner state files, live `job-<ticket>-*` tmux
 sessions, and session artifact directories). Steps whose `summary.json` says `succeeded` are skipped and their
@@ -133,7 +138,9 @@ artifacts are unavailable. Invalid summary/metadata evidence is retained; the st
 after stopping and verifying absence of any owned session, without skipping it or launching it again.
 
 Runner JSON state and artifacts are published by same-directory atomic replacement with private (0600)
-files. Failed serialization, writes or replacement leave the previous destination intact and remove the
+files. Bytes are synced before rename and the parent directory is synced before publication
+returns. A prelaunch metadata sync/publication failure prevents launch; retained evidence is
+adopted or classified as interrupted on restart. Failed serialization, writes or replacement leave the previous destination intact and remove the
 owned temporary file. If the filesystem also refuses cleanup, the original publication error is preserved
 and operators may need to remove the leftover temporary file.
 

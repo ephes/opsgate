@@ -93,6 +93,14 @@ pub(crate) fn atomic_write_with(
     path: &Path,
     write: impl FnOnce(&mut NamedTempFile) -> io::Result<()>,
 ) -> io::Result<()> {
+    atomic_write_with_sync(path, write, |file| file.sync_all())
+}
+
+fn atomic_write_with_sync(
+    path: &Path,
+    write: impl FnOnce(&mut NamedTempFile) -> io::Result<()>,
+    mut sync: impl FnMut(&File) -> io::Result<()>,
+) -> io::Result<()> {
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -103,7 +111,9 @@ pub(crate) fn atomic_write_with(
     // destination and hands it back (and drops it) on failure.
     let mut temp = tempfile::Builder::new().prefix("tmp").tempfile_in(parent)?;
     write(&mut temp)?;
+    sync(temp.as_file())?;
     temp.persist(path).map_err(|error| error.error)?;
+    sync(&File::open(parent)?)?;
     Ok(())
 }
 
@@ -215,6 +225,39 @@ mod tests {
             b"previous state"
         );
         assert_eq!(entries(dir.path()), [destination]);
+    }
+
+    #[test]
+    fn failed_sync_is_reported_and_evidence_is_retained() {
+        for fail_directory in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("session_metadata.json");
+            fs::write(&path, "previous").unwrap();
+            let mut called = false;
+            let error = atomic_write_with_sync(
+                &path,
+                |temp| temp.write_all(b"running"),
+                |file| {
+                    if file.metadata()?.is_dir() == fail_directory {
+                        called = true;
+                        Err(injected())
+                    } else {
+                        file.sync_all()
+                    }
+                },
+            )
+            .unwrap_err();
+            assert!(called);
+            assert_eq!(error.to_string(), "injected failure");
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                if fail_directory {
+                    b"running".as_slice()
+                } else {
+                    b"previous".as_slice()
+                }
+            );
+        }
     }
 
     /// `test_successful_publication_is_private`.

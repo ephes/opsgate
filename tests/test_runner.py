@@ -1170,3 +1170,60 @@ def test_recovery_skips_unchanged_rejected_state_and_retries_repair(
     bad.write_text(json.dumps({"ticket_id": ticket_id}))
     runner._recover_inflight_tickets(include_artifacts=False)
     assert reads == [bad, bad] and started == [ticket_id]
+
+
+@pytest.mark.parametrize("failure", ["file_sync", "rename", "directory_sync"])
+def test_prelaunch_publication_failure_prevents_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    import os
+    import stat
+
+    from opsgate import runner as module
+
+    ticket_id = "77777777-7777-4777-8777-777777777777"
+    plan = [{"role": "implementer", "agent": "codex", "prompt_markdown": "synthetic"}]
+    ticket = _resume_ticket(ticket_id, plan)
+    executor = RecordingStubTicketExecutor(
+        settings=_runner_settings(tmp_path), api=FakeApi(ticket), stop_event=threading.Event(),
+        ticket_id=ticket_id, has_session=False, auto_complete_exit_code=0,
+    )
+    publish = module._atomic_write_json
+    sync = os.fsync
+    injected = False
+
+    def marker_publication(path: Path, payload: dict[str, Any]) -> None:
+        if path.name != "session_metadata.json":
+            return publish(path, payload)
+
+        def fail_sync(fd: int) -> None:
+            nonlocal injected
+            is_dir = stat.S_ISDIR(os.fstat(fd).st_mode)
+            if (failure == "directory_sync" and is_dir) or (failure == "file_sync" and not is_dir):
+                injected = True
+                raise OSError("injected synchronization failure")
+            sync(fd)
+
+        def fail_replace(source: Path, target: Path) -> Path:
+            nonlocal injected
+            injected = True
+            raise OSError("injected rename failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "fsync", fail_sync)
+            if failure == "rename":
+                patch.setattr(Path, "replace", fail_replace)
+            publish(path, payload)
+
+    monkeypatch.setattr(module, "_atomic_write_json", marker_publication)
+    with pytest.raises(OSError, match="injected"):
+        executor.run(initial_ticket=ticket)
+    assert injected
+    assert executor.launched_sessions == []
+    paths = executor._prepare_step_paths(0, plan[0])
+    if failure == "directory_sync":
+        assert json.loads(paths.metadata_path.read_text())["status"] == "running"
+        monkeypatch.setattr(module, "_atomic_write_json", publish)
+        executor.run(initial_ticket=ticket)
+        assert ticket["result_detail"] == "step_1_interrupted"
+        assert executor.launched_sessions == []

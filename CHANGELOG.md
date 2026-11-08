@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Sync runner artifact bytes and directory entries before allowing privileged launch.
+- Require one OS advisory-lock owner per canonical execution root across both runners.
+
 - Preserve current open-ticket indexes and upgrade historical schemas in one writer transaction.
 - Bound exit-code recovery evidence to 64 bytes on a regular nonblocking file in both runners.
 

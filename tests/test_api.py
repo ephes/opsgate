@@ -3258,3 +3258,98 @@ def test_log_view_reads_admitted_handle(
     assert response.status_code == 200
     assert "admitted log" in response.get_data(as_text=True)
     assert "outside secret" not in response.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("damage", [{}, {"expires_at": "2000-01-01T00:00:00Z"},
+                                    {"title": "tampered"},
+                                    {"policy_requirements_json": '{"require_reviewer_step":true}'}])
+def test_status_cannot_start_approved_ticket(client: Any, damage: dict[str, str]) -> None:
+    ticket_id = create_ticket(client, token="nyxmon-token-000000000000", title="Admission", summary="Synthetic")
+    login(client)
+    assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        for column, value in damage.items():
+            conn.execute(f"UPDATE tickets SET {column} = ? WHERE id = ?", (value, ticket_id))
+        before = conn.execute("SELECT * FROM tickets").fetchall(), conn.execute("SELECT * FROM audit_events").fetchall()
+    response = client.post(f"/api/v1/runner/{ticket_id}/status", headers=runner_headers(),
+                           json={"runner_host": "runner-a", "state": "running"})
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "invalid_state"
+    with sqlite3.connect(client.application.config["OPSGATE_TEST_DB_PATH"]) as conn:
+        assert (conn.execute("SELECT * FROM tickets").fetchall(),
+                conn.execute("SELECT * FROM audit_events").fetchall()) == before
+        assert conn.execute("SELECT count(*) FROM runner_heartbeats").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("duration", [None, "private-corruption", float("inf"), -float("inf"),
+                                     0, -1, 31536001, 1.5, b"900"])
+@pytest.mark.parametrize("audit_fails", [False, True])
+def test_claim_isolates_invalid_stored_duration(client: Any, duration: Any, audit_fails: bool) -> None:
+    ids = [create_ticket(client, token="nyxmon-token-000000000000", title=f"Duration {n}", summary="Synthetic")
+           for n in range(2)]
+    login(client)
+    for ticket_id in ids:
+        assert client.post(f"/api/v1/tickets/{ticket_id}/approve", headers=csrf_headers(client)).status_code == 200
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    # Model a restored legacy nullable column, using only this temporary DB.
+    if duration is None:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA writable_schema=ON")
+            conn.execute("UPDATE sqlite_master SET sql=replace(sql, 'max_duration_seconds INTEGER NOT NULL', "
+                         "'max_duration_seconds INTEGER') WHERE name='tickets'")
+            version = conn.execute("PRAGMA schema_version").fetchone()[0]
+            conn.execute(f"PRAGMA schema_version={version + 1}")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE tickets SET max_duration_seconds=?, approved_at='2000-01-01T00:00:00Z' WHERE id=?",
+                     (duration, ids[0]))
+        if audit_fails:
+            conn.execute("CREATE TRIGGER fail_audit BEFORE INSERT ON audit_events "
+                         "WHEN NEW.event_type='ticket_failed' BEGIN SELECT RAISE(ABORT, 'synthetic'); END")
+    if audit_fails:
+        with pytest.raises(sqlite3.IntegrityError, match="synthetic"):
+            client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT state FROM tickets ORDER BY approved_at").fetchall() == [("approved",)] * 2
+            assert conn.execute("SELECT count(*) FROM runner_heartbeats").fetchone()[0] == 0
+        return
+    response = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert response.status_code == 200
+    assert response.get_json()["ticket"]["id"] == ids[1]
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT state,result_detail FROM tickets WHERE id=?", (ids[0],)).fetchone() == (
+            "failed", "invalid_stored_plan")
+        events = conn.execute("SELECT metadata_json FROM audit_events WHERE ticket_id=? AND event_type='ticket_failed'",
+                              (ids[0],)).fetchall()
+        assert [json.loads(row[0]) for row in events] == [{"reason": "invalid_stored_plan", "error": "invalid_ticket"}]
+    assert client.post("/api/v1/runner/claim", headers=runner_headers(),
+                       json={"runner_host": "runner-a"}).get_json()["ticket"] is None
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT count(*) FROM audit_events WHERE ticket_id=? AND event_type='ticket_failed'",
+                            (ids[0],)).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("corruption", ["expired", "tampered", "duration"])
+def test_claim_commits_bounded_invalid_prefix(client: Any, corruption: str) -> None:
+    good = create_ticket(client, token="nyxmon-token-000000000000", title="Budget", summary="Synthetic")
+    login(client)
+    assert client.post(f"/api/v1/tickets/{good}/approve", headers=csrf_headers(client)).status_code == 200
+    db_path = client.application.config["OPSGATE_TEST_DB_PATH"]
+    with sqlite3.connect(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(tickets)")]
+        projection = ["?" if c == "id" else "NULL" if c == "task_ref" else
+                      "'2000-01-01T00:00:00Z'" if c == "approved_at" else c for c in columns]
+        sql = f"INSERT INTO tickets ({','.join(columns)}) SELECT {','.join(projection)} FROM tickets WHERE id=?"
+        conn.executemany(sql, [(f"00000000-0000-4000-8000-{n:012d}", good) for n in range(1001)])
+        conn.execute("UPDATE tickets SET expires_at='2000-01-01T00:00:00Z' WHERE id != ? AND rowid % 2=0", (good,))
+        damage = {"expired": "expires_at='2000-01-01T00:00:00Z'", "tampered": "title='changed'",
+                  "duration": "max_duration_seconds='bad'"}[corruption]
+        conn.execute(f"UPDATE tickets SET {damage} WHERE id != ? AND rowid % 2=1", (good,))
+    for poll in range(10):
+        response = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+        assert response.status_code == 200
+        assert response.get_json()["ticket"] is None
+        with sqlite3.connect(db_path) as conn:
+            assert conn.execute("SELECT count(*) FROM tickets WHERE state IN ('failed','expired')").fetchone()[0] == (
+                poll + 1) * 100
+    response = client.post("/api/v1/runner/claim", headers=runner_headers(), json={"runner_host": "runner-a"})
+    assert response.get_json()["ticket"]["id"] == good

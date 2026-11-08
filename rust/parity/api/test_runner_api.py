@@ -314,13 +314,22 @@ def test_runner_status_on_pending_and_missing_tickets(anon: Browser) -> None:
 
 
 @S4B
-def test_approved_ticket_may_be_started_by_status(anon: Browser, approver: Browser) -> None:
+@pytest.mark.parametrize(
+    "damage",
+    [{}, {"expires_at": PAST}, {"title": "tampered"}, {"policy_requirements_json": '{"require_reviewer_step":true}'}],
+)
+def test_status_cannot_start_approved_ticket(
+    anon: Browser, approver: Browser, db: Database, damage: dict[str, str]
+) -> None:
     ticket_id = create_ticket(anon)
     assert approver.api_action(ticket_id, "approve").status == 200
-    body = runner_status(
-        anon, ticket_id, {"runner_host": "runner-b", "state": "running", "event": "step_started"}
-    ).json()
-    assert (body["state"], body["runner_host"], body["started_at"]) == ("running", "runner-b", None)
+    if damage:
+        db.set_ticket(ticket_id, **damage)
+    response = runner_status(anon, ticket_id, {"runner_host": "runner-b", "state": "running", "event": "step_started"})
+    assert (response.status, response.error) == (409, "invalid_state")
+    row = db.rows("SELECT state, runner_host, started_at FROM tickets WHERE id=?", (ticket_id,))[0]
+    assert (row["state"], row["runner_host"], row["started_at"]) == ("approved", None, None)
+    assert db.audit_types(ticket_id) == ["ticket_created", "ticket_approved"]
 
 
 @S4B
@@ -507,3 +516,17 @@ def test_runner_readiness_rejects_invalid_or_old_evidence(
     health = response.json()
     assert health["status"] == "ok"
     assert health["runner_readiness"] == {"status": expected, "freshness_threshold_seconds": 120}
+
+
+@S4B
+@pytest.mark.parametrize("duration", ["private-corruption", float("inf"), 0, -1, 31536001, 1.5])
+def test_claim_isolates_invalid_stored_duration(anon: Browser, approver: Browser, db: Database, duration: Any) -> None:
+    bad = create_ticket(anon, task_ref="bad-duration")
+    good = create_ticket(anon, task_ref="good-duration")
+    for ticket_id in [bad, good]:
+        assert approver.api_action(ticket_id, "approve").status == 200
+    db.set_ticket(bad, max_duration_seconds=duration, approved_at=PAST)
+    assert claim(anon).json()["ticket"]["id"] == good
+    row = db.rows("SELECT state,result_detail FROM tickets WHERE id=?", (bad,))[0]
+    assert (row["state"], row["result_detail"]) == ("failed", "invalid_stored_plan")
+    assert db.audit_types(bad) == ["ticket_created", "ticket_approved", "ticket_failed"]

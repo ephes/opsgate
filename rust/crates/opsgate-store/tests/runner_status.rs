@@ -360,7 +360,7 @@ fn explicit_null_false_and_zero_values() {
 }
 
 #[test]
-fn approved_ticket_may_be_set_running_but_not_terminal() {
+fn approved_ticket_requires_claim_before_status() {
     let (_directory, store) = store();
     let id = create(&store, "nyxmon", &ticket_payload("Approved", None, None));
     approve(&store, &id).unwrap();
@@ -377,22 +377,20 @@ fn approved_ticket_may_be_set_running_but_not_terminal() {
         error(status(&store, &id, "runner-a", json!({"state": "bogus"}))),
         (400, "invalid_runner_state")
     );
-    let ticket = status(&store, &id, "runner-x", json!({"state": " RUNNING "})).unwrap();
-    assert_eq!(ticket["state"], "running");
-    assert_eq!(ticket["runner_host"], "runner-x");
-    assert_eq!(ticket["finished_at"], Value::Null);
-    // No `started_at`: only the claim sets it.
-    assert_eq!(ticket["started_at"], Value::Null);
-    let events = audit(&store, &id);
     assert_eq!(
-        events.last().unwrap(),
-        &(
-            "runner_heartbeat".to_owned(),
-            Some("approved".to_owned()),
-            Some("running".to_owned()),
-            json!({"event": "heartbeat", "result_detail": ""}),
-        )
+        error(status(
+            &store,
+            &id,
+            "runner-x",
+            json!({"state": " RUNNING "})
+        )),
+        (409, "invalid_state")
     );
+    let ticket = store.get_ticket(&id).unwrap();
+    assert_eq!(ticket["state"], "approved");
+    assert_eq!(ticket["runner_host"], Value::Null);
+    assert_eq!(ticket["started_at"], Value::Null);
+    assert_eq!(audit(&store, &id).len(), 2);
     // Pending tickets receive no status at all.
     let pending = create(&store, "nyxmon", &ticket_payload("Pending", None, None));
     assert_eq!(

@@ -15,6 +15,7 @@ use opsgate_core::validate::{
     TicketPayload, enforce_policy_against_plan, parse_execution_plan, parse_policy_requirements,
     stored_policy_requires_reviewer,
 };
+use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Map, Value};
 
@@ -48,9 +49,6 @@ enum Rejected {
     /// The stored JSON fails validation (`ServiceError` in Python's `try`):
     /// the ticket fails with `invalid_stored_plan` and this error code.
     InvalidStoredPlan(&'static str),
-    /// Python's unhandled exceptions inside the claim (an unparsable stored
-    /// duration): the whole claim fails (500) and rolls back.
-    Unhandled(StoreError),
 }
 
 impl From<ServiceError> for Rejected {
@@ -84,9 +82,10 @@ fn current_checksum(row: &TicketRow) -> Result<String, Rejected> {
     if !stored(&row.tmux_sessions_json)?.is_array() {
         return Err(Rejected::InvalidStoredPlan("invalid_tmux_sessions"));
     }
-    let max_duration_seconds = row.max_duration_int().map_err(Rejected::Unhandled)?;
-    // A float that overflows to infinity (D-2): Python hashes `Infinity`;
-    // Rust cannot, and fails the ticket instead of blocking the queue.
+    let max_duration_seconds = match row.max_duration_seconds {
+        SqlValue::Integer(value @ 1..=31_536_000) => value,
+        _ => return Err(Rejected::InvalidStoredPlan("invalid_ticket")),
+    };
     Ok(TicketPayload {
         source: &row.source,
         task_ref: row.task_ref.as_deref(),
@@ -146,7 +145,7 @@ pub(crate) fn claim(
     runner_host: &str,
 ) -> Result<Option<Ticket>, StoreError> {
     let transaction = write_transaction(connection)?;
-    loop {
+    for _ in 0..100 {
         let row = transaction
             .query_row(
                 "SELECT * FROM tickets \
@@ -173,7 +172,6 @@ pub(crate) fn claim(
 
         let current = match current_checksum(&row) {
             Ok(checksum) => checksum,
-            Err(Rejected::Unhandled(error)) => return Err(error),
             Err(Rejected::InvalidStoredPlan(code)) => {
                 let mut metadata = Map::new();
                 metadata.insert("reason".into(), Value::from("invalid_stored_plan"));
@@ -223,4 +221,7 @@ pub(crate) fn claim(
         transaction.commit()?;
         return reread(connection, &row.id, "Ticket disappeared after claim").map(Some);
     }
+    update_runner_heartbeat(&transaction, runner_host)?;
+    transaction.commit()?;
+    Ok(None)
 }

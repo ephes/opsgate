@@ -605,34 +605,30 @@ fn claim_expires_stale_approved_tickets_and_moves_on() {
 }
 
 /// Python's unhandled exceptions inside the claim (an unparsable stored
-/// expiry or duration) fail the whole claim and roll it back, including
+/// expiry) fail the whole claim and roll it back, including
 /// tickets failed earlier in the same round and the heartbeat.
 #[test]
 fn unhandled_errors_roll_the_claim_back() {
-    for (column, value) in [
-        ("expires_at", "not a date"),
-        ("max_duration_seconds", "n/a"),
-    ] {
-        let (_directory, store) = store();
-        let tampered = create(&store, NYXMON, &ticket_payload("Tampered", None, None));
-        let broken = create(&store, NYXMON, &ticket_payload("Broken", None, None));
-        approve(&store, &tampered).unwrap();
-        approve(&store, &broken).unwrap();
-        execute(
-            &store,
-            "UPDATE tickets SET title = 'changed' WHERE id = ?",
-            [&tampered],
-        );
-        execute(
-            &store,
-            &format!("UPDATE tickets SET {column} = ? WHERE id = ?"),
-            (value, &broken),
-        );
-        let before = snapshot(&store);
-        let error = store.claim_ticket("runner-a", None, None).unwrap_err();
-        assert!(error.service().is_none(), "{column}: {error}");
-        assert_eq!(snapshot(&store), before, "{column}");
-    }
+    let (column, value) = ("expires_at", "not a date");
+    let (_directory, store) = store();
+    let tampered = create(&store, NYXMON, &ticket_payload("Tampered", None, None));
+    let broken = create(&store, NYXMON, &ticket_payload("Broken", None, None));
+    approve(&store, &tampered).unwrap();
+    approve(&store, &broken).unwrap();
+    execute(
+        &store,
+        "UPDATE tickets SET title = 'changed' WHERE id = ?",
+        [&tampered],
+    );
+    execute(
+        &store,
+        &format!("UPDATE tickets SET {column} = ? WHERE id = ?"),
+        (value, &broken),
+    );
+    let before = snapshot(&store);
+    let error = store.claim_ticket("runner-a", None, None).unwrap_err();
+    assert!(error.service().is_none(), "{column}: {error}");
+    assert_eq!(snapshot(&store), before, "{column}");
 }
 
 #[test]
@@ -681,4 +677,120 @@ fn float_contexts_pass_the_tamper_check() {
         created["payload_checksum"]
     );
     assert_eq!(claim(&store, "runner-a").unwrap()["id"], id.as_str());
+}
+
+#[test]
+fn claim_isolates_invalid_duration_and_preserves_audit_atomicity() {
+    use rusqlite::types::Value as SqlValue;
+    for value in [
+        SqlValue::Null,
+        SqlValue::Text("private-corruption".into()),
+        SqlValue::Real(f64::INFINITY),
+        SqlValue::Real(f64::NEG_INFINITY),
+        SqlValue::Real(1.5),
+        SqlValue::Integer(0),
+        SqlValue::Integer(-1),
+        SqlValue::Integer(31_536_001),
+        SqlValue::Blob(b"900".to_vec()),
+    ] {
+        for audit_fails in [false, true] {
+            let (_directory, store) = store();
+            let bad = create(&store, NYXMON, &ticket_payload("Bad duration", None, None));
+            let good = create(&store, NYXMON, &ticket_payload("Good duration", None, None));
+            approve(&store, &bad).unwrap();
+            approve(&store, &good).unwrap();
+            if value == SqlValue::Null {
+                let conn = Connection::open(store.db_path()).unwrap();
+                conn.execute_batch("PRAGMA writable_schema=ON;
+                    UPDATE sqlite_master SET sql=replace(sql, 'max_duration_seconds INTEGER NOT NULL',
+                    'max_duration_seconds INTEGER') WHERE name='tickets';
+                    PRAGMA schema_version=999;").unwrap();
+            }
+            execute(
+                &store,
+                "UPDATE tickets SET max_duration_seconds=?, approved_at='2000-01-01T00:00:00Z' WHERE id=?",
+                (&value, &bad),
+            );
+            if audit_fails {
+                execute(&store, "CREATE TRIGGER fail_audit BEFORE INSERT ON audit_events
+                        WHEN NEW.event_type='ticket_failed' BEGIN SELECT RAISE(ABORT, 'synthetic'); END", []);
+                let before = snapshot(&store);
+                assert!(store.claim_ticket("runner-a", None, None).is_err());
+                assert_eq!(snapshot(&store), before);
+                continue;
+            }
+            assert_eq!(claim(&store, "runner-a").unwrap()["id"], good);
+            assert_eq!(column_of(&store, &bad, "state"), "failed");
+            assert_eq!(
+                column_of(&store, &bad, "result_detail"),
+                "invalid_stored_plan"
+            );
+            assert_eq!(
+                audit(&store, &bad).last().unwrap().3,
+                json!({"reason":"invalid_stored_plan", "error":"invalid_ticket"})
+            );
+            assert!(claim(&store, "runner-a").is_none());
+            assert_eq!(
+                audit_event_types(&store, &bad)
+                    .iter()
+                    .filter(|e| *e == "ticket_failed")
+                    .count(),
+                1
+            );
+        }
+    }
+}
+
+#[test]
+fn claim_commits_bounded_invalid_prefix() {
+    let (_directory, store) = store();
+    let good = create(&store, NYXMON, &ticket_payload("Budget", None, None));
+    approve(&store, &good).unwrap();
+    let conn = Connection::open(store.db_path()).unwrap();
+    let mut statement = conn.prepare("PRAGMA table_info(tickets)").unwrap();
+    let columns: Vec<String> = statement
+        .query_map([], |r| r.get(1))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let projection: Vec<&str> = columns
+        .iter()
+        .map(|c| match c.as_str() {
+            "id" => "?",
+            "task_ref" => "NULL",
+            "approved_at" => "'2000-01-01T00:00:00Z'",
+            other => other,
+        })
+        .collect();
+    let sql = format!(
+        "INSERT INTO tickets ({}) SELECT {} FROM tickets WHERE id=?",
+        columns.join(","),
+        projection.join(",")
+    );
+    for n in 0..1001 {
+        conn.execute(&sql, (format!("00000000-0000-4000-8000-{n:012}"), &good))
+            .unwrap();
+    }
+    conn.execute(
+        "UPDATE tickets SET expires_at='2000-01-01T00:00:00Z' WHERE id != ? AND rowid % 2=0",
+        [&good],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE tickets SET max_duration_seconds='bad' WHERE id != ? AND rowid % 2=1",
+        [&good],
+    )
+    .unwrap();
+    for poll in 1..=10 {
+        assert!(claim(&store, "runner-a").is_none());
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM tickets WHERE state IN ('failed','expired')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, poll * 100);
+    }
+    assert_eq!(claim(&store, "runner-a").unwrap()["id"], good);
 }

@@ -165,6 +165,12 @@ pub(crate) fn update_runner_status(
         if previous_state == "running" && terminal {
             fields.push(("finished_at", SqlValue::Text(now.clone())));
         }
+        if previous_state != "running" {
+            return Err(conflict(
+                "Runner must claim ticket before status updates",
+                "invalid_state",
+            ));
+        }
         fields.push(("state", SqlValue::Text(requested.clone())));
         result_value = match requested.as_str() {
             "succeeded" => Some("success".to_owned()),

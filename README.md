@@ -217,6 +217,19 @@ Useful keys:
 - `POST /api/v1/runner/:id/status`
 - `GET /api/v1/health`
 
+Runner status updates require an already-running ticket. Approved tickets must first use
+`POST /api/v1/runner/claim`; trying to start them through status returns `409 invalid_state`,
+with no ticket, audit or heartbeat changes. Claim applies expiry, plan/policy and approval-checksum
+checks before assigning ownership and recording the start.
+
+Each claim transaction examines at most 100 approved candidates, in approval/creation order.
+Expired and invalid rows commit with their audit events before the poll returns `ticket: null`
+when this budget is exhausted. A null result can mean deferred work; runners should poll again.
+Stored durations must be SQLite integers from 1 to 31536000. Corrupt durations (including NULL,
+text, BLOB, non-finite/fractional numbers and out-of-range integers) are failed once as
+`invalid_stored_plan`, with safe audit code `invalid_ticket`, and claim continues to the next
+candidate within its budget. An audit failure rolls back the whole batch.
+
 ### Runner readiness
 
 `GET /api/v1/health` keeps HTTP 200 and `status: "ok"` as control-plane liveness.

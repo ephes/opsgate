@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Require claim admission before status updates can run approved tickets in both APIs.
+- Quarantine corrupt stored durations without blocking later approved work, with atomic audits.
+- Bound each claim transaction to 100 candidates and commit queue recovery progress between polls.
+
 - Bound log checksum finalization by admitted length, 64 MiB, elapsed time and cancellation;
   publish null rather than a partial or changed-file checksum.
 - Validate recovered summary ticket/step/role/agent identity and integer-zero success evidence

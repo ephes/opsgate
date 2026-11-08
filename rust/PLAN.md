@@ -745,13 +745,16 @@ compare-and-set (409 `state_changed`), as in Python.
 
 - If the disable file exists → `{"ticket": null}` without touching the DB
   (and without a heartbeat).
-- In one `BEGIN IMMEDIATE`, loop: oldest `approved`, not archived ticket by
+- In one `BEGIN IMMEDIATE`, examine at most 100 candidates: oldest `approved`, not archived ticket by
   `approved_at ASC, created_at ASC`. None → upsert heartbeat for
   `runner_host`, commit, null.
+- At the candidate limit, upsert the heartbeat, commit progress and return null; later polls
+  continue in order. Null therefore also means deferred work.
 - Lazily expired → next. Stored JSON validation (`parse_stored_json`: decode,
   depth ≤ 64; plan via `parse_execution_plan`; policy must be an object and
   pass `parse_policy_requirements` without dropping keys; enforce; context
-  object; tmux sessions array) — failure → `failed`, `result='failure'`,
+  object; tmux sessions array; stored duration must be an INTEGER from 1 to 31536000,
+  otherwise error `invalid_ticket`) — failure → `failed`, `result='failure'`,
   `result_detail='invalid_stored_plan'`, audit `ticket_failed`
   `{"reason": "invalid_stored_plan", "error": <code>}`, next ticket.
 - Recomputed checksum ≠ `approved_payload_checksum` (or none) → `failed`,
@@ -763,7 +766,7 @@ compare-and-set (409 `state_changed`), as in Python.
 - `runner_host` = body `runner_host` stripped, else client address, else
   `"runner"`. Every CAS miss (`rowcount 0`) continues the loop.
 - An exception other than `ServiceError` inside the loop (an unparsable
-  stored `expires_at`, a stored duration `int()` rejects) is a 500 that rolls
+  stored `expires_at`) is a 500 that rolls
   the whole claim back, including tickets failed earlier in the same round and
   the heartbeat (S3b, `fixtures/store.json` scenario `claim_and_status`).
 
@@ -778,7 +781,7 @@ transaction). In the transaction: 404; terminal → 409 `invalid_state`; not
 approved/running → 409; no `state` and not running → 409 ("Heartbeat requires
 running state"); running and assigned host differs → 409
 `runner_host_mismatch`. Requested `state` ∈ {running, succeeded, failed,
-canceled} else 400 `invalid_runner_state`; terminal from non-running → 409;
+canceled} else 400 `invalid_runner_state`; any requested state from approved → 409 `invalid_state` (claim is required);
 terminal from running sets `finished_at`. Result derived from state
 (success/failure/canceled) or given `result` ∈ {success, failure, timeout,
 canceled} and compatible (succeeded→success; failed→failure|timeout;

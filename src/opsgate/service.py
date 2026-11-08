@@ -27,6 +27,7 @@ RUNNER_EVENT_TYPES = {
     "ticket_succeeded",
     "invalid_plan",
 }
+CLAIM_CANDIDATE_LIMIT = 100
 SUPPORTED_AGENTS = ("codex", "claude")
 LIST_ARCHIVED_EXCLUDE = "exclude"
 LIST_ARCHIVED_ONLY = "only"
@@ -1143,7 +1144,7 @@ class OpsGateService:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                while True:
+                for _ in range(CLAIM_CANDIDATE_LIMIT):
                     row = conn.execute(
                         """
                         SELECT * FROM tickets
@@ -1184,6 +1185,9 @@ class OpsGateService:
                         tmux_sessions = parse_stored_json(row["tmux_sessions_json"])
                         if not isinstance(tmux_sessions, list):
                             raise ServiceError("Stored tmux sessions must be an array", 400, "invalid_tmux_sessions")
+                        duration = row["max_duration_seconds"]
+                        if type(duration) is not int or not 1 <= duration <= MAX_DURATION_SECONDS:
+                            raise ServiceError("Invalid stored duration", 400, "invalid_ticket")
                         payload_for_checksum = self._ticket_payload_from_fields(
                             source=row["source"],
                             task_ref=row["task_ref"],
@@ -1193,7 +1197,7 @@ class OpsGateService:
                             policy_requirements=policy_requirements,
                             context=context,
                             expires_at=row["expires_at"],
-                            max_duration_seconds=int(row["max_duration_seconds"]),
+                            max_duration_seconds=duration,
                         )
                         current_checksum = compute_payload_checksum(payload_for_checksum)
                     except ServiceError as error:
@@ -1287,6 +1291,10 @@ class OpsGateService:
                     if updated is None:
                         raise ServiceError("Ticket disappeared after claim", 500, "db_error")
                     return self._serialize_ticket(updated)
+                # Commit quarantined/expired rows before yielding to other writers.
+                self._update_runner_heartbeat(conn, runner_host=runner_host)
+                conn.commit()
+                return None
             except Exception:
                 conn.rollback()
                 raise
@@ -1353,6 +1361,8 @@ class OpsGateService:
                 if previous_state == "running" and requested_state in TERMINAL_STATES:
                     update_fields.append("finished_at = ?")
                     update_values.append(now)
+                if previous_state != "running":
+                    raise ServiceError("Runner must claim ticket before status updates", 409, "invalid_state")
                 next_state = requested_state
                 update_fields.append("state = ?")
                 update_values.append(requested_state)

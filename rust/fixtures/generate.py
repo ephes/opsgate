@@ -2272,7 +2272,7 @@ STORE_SCENARIOS: list[dict[str, Any]] = [
                         "result_detail": "max_duration_seconds_exceeded"}, host="runner-b"),
             _act("cancel", 7, reason="operator"),
             _status(7, {"state": "failed"}, host="runner-c"),
-            # An approved ticket: heartbeat refused, set running, terminal refused.
+            # An approved ticket: all status transitions require claim first.
             _create("nyxmon", "cl-approved"),
             _act("approve", 8),
             _status(8, {}),
@@ -2281,8 +2281,8 @@ STORE_SCENARIOS: list[dict[str, Any]] = [
             _status(8, {"state": "canceled", "result": "canceled"}, host="runner-d"),
             _create("nyxmon", "cl-pending"),
             _status(9, {"state": "running"}),
-            # An unhandled error rolls the whole claim back: the tampered
-            # ticket in front stays approved, and no heartbeat is written.
+            # A damaged duration is quarantined after the tampered ticket.
+            # Claim commits both failures and its heartbeat.
             _create("nyxmon", "cl-rollback-tampered"),
             _create("nyxmon", "cl-rollback-duration"),
             _act("approve", 10),

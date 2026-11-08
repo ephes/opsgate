@@ -170,7 +170,9 @@ def test_rust_store_ddl_is_the_python_ddl() -> None:
         key=lambda call: (call.lineno, call.col_offset),
     )
     statements = [
-        (call.func.attr, call.args[0].value if isinstance(call.args[0], ast.Constant) else ast.unparse(call.args[0]))
+        (call.func.attr, call.args[0].value if isinstance(call.args[0], ast.Constant)
+         else ast.literal_eval(call.args[0].right) if isinstance(call.args[0], ast.BinOp)
+         else ast.unparse(call.args[0]))
         for call in calls
         if isinstance(call.func, ast.Attribute)
     ]
@@ -181,6 +183,7 @@ def test_rust_store_ddl_is_the_python_ddl() -> None:
         ("execute", rust["ADD_ARCHIVED_AT"]),
         ("execute", rust["ADD_ARCHIVED_BY"]),
         ("execute", rust["ARCHIVED_AT_INDEX"]),
+        ("execute", "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_tickets_open_dedupe'"),
         ("execute", rust["DROP_OPEN_TICKET_DEDUPE_INDEX"]),
         ("execute", "OPEN_TICKET_DEDUPE_INDEX"),
     ]

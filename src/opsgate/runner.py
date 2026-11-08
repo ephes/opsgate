@@ -61,6 +61,22 @@ def _load_json_object(path: Path) -> dict[str, Any] | None:
     return loaded if isinstance(loaded, dict) else None
 
 
+def _read_exit_code(path: Path) -> int:
+    """Unavailable or oversized exit evidence is failure, never success."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                return 1
+            raw = stream.read(65)
+        if len(raw) > 64:
+            return 1
+        value = int(raw.decode("utf-8").strip())
+        return value if -(2**63) <= value < 2**63 else 1
+    except (OSError, ValueError):
+        return 1
+
+
 class RunnerApiError(RuntimeError):
     def __init__(self, message: str, *, status_code: int, error_code: str) -> None:
         super().__init__(message)
@@ -619,10 +635,7 @@ class TicketExecutor:
 
             time.sleep(1.0)
 
-        try:
-            exit_code = int(step_paths.exit_code_path.read_text(encoding="utf-8").strip())
-        except ValueError:
-            exit_code = 1
+        exit_code = _read_exit_code(step_paths.exit_code_path)
 
         finished_at = isoformat_z(utc_now())
         tmux_entry["finished_at"] = finished_at

@@ -892,10 +892,30 @@ fn path_value(path: &Path) -> Value {
 }
 
 /// `int(exit_code_path.read_text().strip())`, 1 for text that is not an
-/// integer (also not UTF-8); read errors are returned. An integer outside
+/// integer (also not UTF-8); unavailable/nonregular/over-64-byte records fail.
+/// An integer outside
 /// `i64` (impossible for a shell exit status) also counts as 1.
 fn read_exit_code(path: &Path) -> std::io::Result<i64> {
-    let data = std::fs::read(path)?;
+    use rustix::fs::{Mode, OFlags, open};
+    use std::io::Read;
+    let result = (|| -> std::io::Result<Vec<u8>> {
+        let fd = open(
+            path,
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let file = std::fs::File::from(fd);
+        if !file.metadata()?.is_file() {
+            return Ok(Vec::new());
+        }
+        let mut data = Vec::new();
+        file.take(65).read_to_end(&mut data)?;
+        Ok(data)
+    })();
+    let data = result.unwrap_or_default();
+    if data.len() > 64 {
+        return Ok(1);
+    }
     Ok(std::str::from_utf8(&data)
         .ok()
         .and_then(crate::values::parse_py_int)
@@ -996,6 +1016,25 @@ mod tests {
     }
 
     #[test]
+    fn exit_code_bounded_regular_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("exit_code");
+        std::fs::write(&path, vec![b'0'; 100_000]).unwrap();
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            std::process::Command::new("python3")
+                .args(["-c", "import os,sys; os.mkfifo(sys.argv[1])"])
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
+        assert_eq!(read_exit_code(dir.path()).unwrap(), 1);
+    }
+
+    #[test]
     fn exit_code_text() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("exit_code");
@@ -1012,6 +1051,6 @@ mod tests {
             assert_eq!(read_exit_code(&path).unwrap(), expected, "{content:?}");
         }
         std::fs::remove_file(&path).unwrap();
-        assert!(read_exit_code(&path).is_err());
+        assert_eq!(read_exit_code(&path).unwrap(), 1);
     }
 }

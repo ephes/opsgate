@@ -6,7 +6,7 @@
 //!
 //! Ported Python: `init_db`, `OPEN_TICKET_DEDUPE_INDEX`.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 /// The script `init_db` passes to `executescript`, verbatim (indentation
 /// included: SQLite keeps it in `sqlite_master`).
@@ -114,10 +114,10 @@ pub const ADD_ARCHIVED_BY: &str = "ALTER TABLE tickets ADD COLUMN archived_by TE
 pub const ARCHIVED_AT_INDEX: &str =
     "CREATE INDEX IF NOT EXISTS idx_tickets_archived_at ON tickets(archived_at, created_at)";
 
-/// `init_db` drops the open-ticket dedupe index on every start …
+/// Drop a historical open-ticket index inside the schema transaction.
 pub const DROP_OPEN_TICKET_DEDUPE_INDEX: &str = "DROP INDEX IF EXISTS idx_tickets_open_dedupe";
 
-/// … and re-creates it (`OPEN_TICKET_DEDUPE_INDEX`, verbatim): at most one
+/// The current index (`OPEN_TICKET_DEDUPE_INDEX`, verbatim): at most one
 /// open ticket per `(source, task_ref)` outside archived tickets (4.7.1).
 pub const OPEN_TICKET_DEDUPE_INDEX: &str = r#"
 CREATE UNIQUE INDEX idx_tickets_open_dedupe
@@ -127,13 +127,11 @@ CREATE UNIQUE INDEX idx_tickets_open_dedupe
       AND state IN ('pending_approval', 'approved', 'running');
 "#;
 
-/// The DDL part of `init_db`, statement by statement as Python runs it, each
-/// in autocommit mode: the tables and indexes, the archive columns when
-/// missing, the archive index, then the dedupe index dropped and re-created.
-/// Idempotent: on a database initialised by either implementation only the
-/// dedupe index is re-created.
+/// Upgrade schema under one writer transaction; preserve the current dedupe
+/// index and roll back a failed historical-index replacement.
 pub fn apply(connection: &Connection) -> rusqlite::Result<()> {
-    connection.execute_batch(INIT_SCRIPT)?;
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(INIT_SCRIPT)?;
     let columns = ticket_columns(connection)?;
     if !columns.iter().any(|name| name == "archived_at") {
         connection.execute_batch(ADD_ARCHIVED_AT)?;
@@ -142,9 +140,16 @@ pub fn apply(connection: &Connection) -> rusqlite::Result<()> {
         connection.execute_batch(ADD_ARCHIVED_BY)?;
     }
     connection.execute_batch(ARCHIVED_AT_INDEX)?;
-    connection.execute_batch(DROP_OPEN_TICKET_DEDUPE_INDEX)?;
-    connection.execute_batch(OPEN_TICKET_DEDUPE_INDEX)?;
-    Ok(())
+    let existing: Option<String> = connection.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_tickets_open_dedupe'",
+        [], |row| row.get(0),
+    ).optional()?;
+    let expected = normalize_sql(OPEN_TICKET_DEDUPE_INDEX.trim().trim_end_matches(';'));
+    if existing.as_deref().map(normalize_sql).as_deref() != Some(expected.as_str()) {
+        connection.execute_batch(DROP_OPEN_TICKET_DEDUPE_INDEX)?;
+        connection.execute_batch(OPEN_TICKET_DEDUPE_INDEX)?;
+    }
+    transaction.commit()
 }
 
 /// The column names of `tickets` (`PRAGMA table_info(tickets)`).

@@ -124,6 +124,9 @@ string UUID ticket identity matching its filename. Recovery never derives an ide
 Diagnostics name the rejected file; unchanged rejected files are not read or warned about again in the same
 process. Changes to file identity, size or timestamps trigger a retry. After inspecting retained evidence,
 repair or remove the named file from `runner-state`; a restart also retries all files.
+Exit-code evidence is read once from a nonblocking regular file, with a 64-byte ceiling;
+missing, special, oversized or invalid records mean failure and never authorize relaunch.
+
 Both runners read state, step summaries and metadata from a single nonblocking regular-file descriptor,
 with an inclusive 8 MiB byte limit before UTF-8/JSON decoding and a 64-level JSON depth limit. Special files, oversized files and invalid
 artifacts are unavailable. Invalid summary/metadata evidence is retained; the step fails as interrupted,
@@ -286,6 +289,9 @@ Runner status `result` values must match the terminal transition: `succeeded` ac
 Omitting `result` derives the canonical result from the terminal state. Running updates
 and heartbeats must omit terminal results. Incompatible pairs return `400 invalid_runner_result`
 without changing the ticket, heartbeat or audit history.
+
+Startup preserves the current open-ticket uniqueness index. Historical index replacement and
+archive-column upgrades run under one SQLite writer transaction; a failed upgrade rolls back.
 
 ### Concurrent ticket transitions
 

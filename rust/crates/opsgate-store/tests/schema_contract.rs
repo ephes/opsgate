@@ -235,3 +235,67 @@ fn open_fails_when_the_database_cannot_be_created() {
     let error = opsgate_store::Store::open(common::settings(&path, &Map::new())).unwrap_err();
     assert!(error.service().is_none(), "{error}");
 }
+
+#[test]
+fn current_index_is_preserved() {
+    let conn = Connection::open_in_memory().unwrap();
+    schema::apply(&conn).unwrap();
+    let before: i64 = conn
+        .query_row("PRAGMA schema_version", [], |r| r.get(0))
+        .unwrap();
+    schema::apply(&conn).unwrap();
+    let after: i64 = conn
+        .query_row("PRAGMA schema_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn failed_index_upgrade_retains_unique_index_and_excludes_writers() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::{Arc, Mutex};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schema.db");
+    let conn = Connection::open(&path).unwrap();
+    schema::apply(&conn).unwrap();
+    conn.execute_batch("DROP INDEX idx_tickets_open_dedupe; CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)").unwrap();
+    let blocked = Arc::new(Mutex::new(Vec::new()));
+    let observed = blocked.clone();
+    let peer_path = path.clone();
+    conn.authorizer(Some(move |ctx: AuthContext<'_>| {
+        if matches!(
+            ctx.action,
+            AuthAction::CreateIndex {
+                index_name: "idx_tickets_open_dedupe",
+                ..
+            }
+        ) {
+            let peer = Connection::open(&peer_path).unwrap();
+            peer.busy_timeout(std::time::Duration::ZERO).unwrap();
+            observed
+                .lock()
+                .unwrap()
+                .push(peer.execute_batch("BEGIN IMMEDIATE").is_err());
+            Authorization::Deny
+        } else {
+            Authorization::Allow
+        }
+    }))
+    .unwrap();
+    assert!(schema::apply(&conn).is_err());
+    conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+        .unwrap();
+    assert_eq!(*blocked.lock().unwrap(), vec![true]);
+    let sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='idx_tickets_open_dedupe'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        sql,
+        "CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)"
+    );
+    schema::apply(&conn).unwrap();
+}

@@ -376,3 +376,55 @@ def test_unarchive_with_stale_read_returns_state_changed(
     _assert_error(outcome, "state_changed")
     monkeypatch.undo()
     assert service.get_ticket(ticket_id)["archived_by"] == "other-approver"
+
+
+def test_schema_preserves_current_index(service: OpsGateService) -> None:
+    with sqlite3.connect(service.settings.db_path) as conn:
+        before = conn.execute("PRAGMA schema_version").fetchone()
+    service.init_db()
+    with sqlite3.connect(service.settings.db_path) as conn:
+        assert conn.execute("PRAGMA schema_version").fetchone() == before
+
+
+def test_schema_replacement_is_atomic(service: OpsGateService, monkeypatch: pytest.MonkeyPatch) -> None:
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+
+    original = service._connection
+    with original() as conn:
+        conn.execute("DROP INDEX idx_tickets_open_dedupe")
+        conn.execute("CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)")
+        conn.commit()
+
+    blocked: list[bool] = []
+
+    @contextmanager
+    def injected() -> Iterator[sqlite3.Connection]:
+        with original() as conn:
+            def authorize(action: int, arg: str | None, *_: object) -> int:
+                if action == sqlite3.SQLITE_CREATE_INDEX and arg == "idx_tickets_open_dedupe":
+                    # DROP has executed. A second connection must still be excluded.
+                    with sqlite3.connect(service.settings.db_path, timeout=0) as peer:
+                        try:
+                            peer.execute("BEGIN IMMEDIATE")
+                        except sqlite3.OperationalError:
+                            blocked.append(True)
+                        else:
+                            blocked.append(False)
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            conn.set_authorizer(authorize)
+            yield conn
+
+    monkeypatch.setattr(service, "_connection", injected)
+    with pytest.raises(sqlite3.DatabaseError, match="authorized"):
+        service.init_db()
+    assert blocked == [True]
+    monkeypatch.setattr(service, "_connection", original)
+    with original() as conn:
+        assert conn.execute("SELECT sql FROM sqlite_master WHERE name='idx_tickets_open_dedupe'").fetchone()[0] == (
+            "CREATE UNIQUE INDEX idx_tickets_open_dedupe ON tickets(source, task_ref)"
+        )
+    service.init_db()
+    test_schema_preserves_current_index(service)

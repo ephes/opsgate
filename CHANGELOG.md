@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve current open-ticket indexes and upgrade historical schemas in one writer transaction.
+- Bound exit-code recovery evidence to 64 bytes on a regular nonblocking file in both runners.
+
 ### Tests
 
 - Exercise Rust blocking-store domain errors and unwinding task panics, sanitized

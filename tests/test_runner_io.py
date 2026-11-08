@@ -1,6 +1,7 @@
 """Synthetic loopback bodies and owned fake processes; no external services."""
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -340,3 +341,21 @@ def test_api_https_watchdog_normalizes_interrupted_handshake(
         assert time.monotonic() - started < 1
         assert (caught.value.status_code, caught.value.error_code) == (503, "transport_error")
         assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize("content", [b"0\n", b"7", b"\xff", b"0" * 65, b"9" * 100_000])
+def test_exit_code_bounded_record(tmp_path: Path, content: bytes) -> None:
+    from opsgate.runner import _read_exit_code
+
+    path = tmp_path / "exit_code"
+    path.write_bytes(content)
+    assert _read_exit_code(path) == (0 if content == b"0\n" else 7 if content == b"7" else 1)
+
+
+def test_exit_code_nonregular(tmp_path: Path) -> None:
+    from opsgate.runner import _read_exit_code
+
+    assert _read_exit_code(tmp_path) == 1
+    fifo = tmp_path / "exit_code"
+    os.mkfifo(fifo)
+    assert _read_exit_code(fifo) == 1

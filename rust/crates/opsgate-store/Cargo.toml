@@ -17,6 +17,7 @@ subtle.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+rusqlite = { workspace = true, features = ["hooks"] }
 regex.workspace = true
 tempfile.workspace = true
 uuid.workspace = true

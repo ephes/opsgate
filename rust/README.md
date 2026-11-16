@@ -121,8 +121,10 @@ readable by Rust (JSON columns under the rules of 4.6 including the D-2
 cases, storage classes, `expires_at`, integer durations). It prints the
 result and the counts (tickets per state, audit events, approver rows,
 runner heartbeats) and exits 0, or 1 when anything is wrong or the file is
-not a readable SQLite database. Problems name ticket ids, audit event ids and
-columns, never stored values. It opens the database read-only and never
+not a readable SQLite database. Problems name ticket rowids, audit event ids and fixed column/error categories,
+never record contents. Stored state and schema labels preserve printable Unicode,
+escape control/format characters (including bidi controls), and retain at most
+128 UTF-8 bytes each, including a truncation marker. It opens the database read-only and never
 creates, migrates, checkpoints or writes it; for a WAL database SQLite may
 create the `-wal`/`-shm` side files, as for any reader. Schema, counts and
 row checks share one read transaction, released before report formatting.

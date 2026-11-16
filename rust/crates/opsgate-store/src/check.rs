@@ -2,8 +2,8 @@
 //! read-only before Rust serves it — the schema matches 4.10, every stored
 //! row is readable under the Rust rules (JSON of 4.6 incl. the D-2 cases,
 //! storage classes, `expires_at` of 4.9) — and report the counts. Nothing is
-//! written; no stored value or secret is printed (only ticket ids, audit
-//! event ids, column names and what is wrong).
+//! written; no record content or secret is printed (only row positions, audit
+//! event ids, bounded escaped state/schema names and fixed error categories).
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -21,6 +21,22 @@ use crate::ticket::{TicketRow, text_column};
 
 /// Problems listed in the report; the rest are counted.
 const MAX_LISTED_PROBLEMS: usize = 50;
+
+/// Stored labels are inert and at most 128 UTF-8 bytes, including truncation.
+/// Escape each scalar as a unit so neither UTF-8 nor an escape is cut in half.
+fn safe_field(text: &str) -> String {
+    const LIMIT: usize = 128;
+    let mut output = String::new();
+    for character in text.chars() {
+        let escaped = character.escape_debug().to_string();
+        if output.len() + escaped.len() > LIMIT - "…".len() {
+            output.push('…');
+            break;
+        }
+        output.push_str(&escaped);
+    }
+    output
+}
 
 /// The result of [`check_db`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -63,8 +79,9 @@ impl fmt::Display for CheckReport {
             for problem in problems.iter().take(MAX_LISTED_PROBLEMS) {
                 writeln!(f, "  {problem}")?;
             }
-            if total > problems.len() {
-                writeln!(f, "  … and {} more", total - problems.len())?;
+            let listed = problems.len().min(MAX_LISTED_PROBLEMS);
+            if total > listed {
+                writeln!(f, "  … and {} more", total - listed)?;
             }
             Ok(())
         };
@@ -182,20 +199,29 @@ fn schema_problems(connection: &Connection) -> Result<Vec<String>, StoreError> {
     let mut problems = Vec::new();
     for object in &expected {
         let Some(found) = find(&actual, object) else {
-            problems.push(format!("missing {} {}", object.kind, object.name));
+            problems.push(format!(
+                "missing {} {}",
+                safe_field(&object.kind),
+                safe_field(&object.name)
+            ));
             continue;
         };
         let migrated_form = find(&accepted_too, object);
         if !same(&found, object) && !migrated_form.is_some_and(|form| same(&found, &form)) {
             problems.push(format!(
                 "{} {}: definition differs",
-                object.kind, object.name
+                safe_field(&object.kind),
+                safe_field(&object.name)
             ));
         }
     }
     for object in &actual {
         if find(&expected, object).is_none() {
-            problems.push(format!("unexpected {} {}", object.kind, object.name));
+            problems.push(format!(
+                "unexpected {} {}",
+                safe_field(&object.kind),
+                safe_field(&object.name)
+            ));
         }
     }
     Ok(problems)
@@ -218,7 +244,13 @@ fn check_tickets(
         connection.prepare("SELECT state, COUNT(*) FROM tickets GROUP BY state ORDER BY state")?;
     let states = statement.query_map([], |row| {
         Ok((
-            row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            match row.get_ref(0)? {
+                ValueRef::Text(bytes) => {
+                    safe_field(std::str::from_utf8(bytes).unwrap_or("<invalid UTF-8>"))
+                }
+                ValueRef::Null => "<NULL>".to_owned(),
+                _ => "<non-text>".to_owned(),
+            },
             row.get::<_, i64>(1)?,
         ))
     })?;
@@ -233,13 +265,18 @@ fn check_tickets(
     while let Some(row) = rows.next()? {
         let ticket = match TicketRow::from_row(row) {
             Ok(ticket) => ticket,
-            Err(error) => {
+            Err(mut error) => {
+                // TicketRow's service diagnostics carry a stored ticket id.
+                // Offline audits identify this row by SQLite rowid instead.
+                if let StoreError::Unreadable(unreadable) = &mut error {
+                    unreadable.key = None;
+                }
                 let rowid: i64 = row.get("_rowid")?;
                 report.row_problem(format_args!("tickets rowid {rowid}: {error}"));
                 continue;
             }
         };
-        let id = &ticket.id;
+        let id = format!("rowid {}", row.get::<_, i64>("_rowid")?);
         for (column, text) in [
             ("execution_plan_json", &ticket.execution_plan_json),
             ("policy_requirements_json", &ticket.policy_requirements_json),

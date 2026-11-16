@@ -330,3 +330,45 @@ fn write_protected_database_is_checked() {
     assert_eq!(report.tickets, 2);
     assert_eq!(std::fs::read(&path).unwrap(), before);
 }
+
+#[test]
+fn stored_identifiers_are_bounded_and_terminal_inert() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = database_with_tickets(directory.path());
+    let writer = Connection::open(&path).unwrap();
+    let hostile = format!("Ü😀\u{1b}[31m\n\r\t\u{202e}\u{2066}{}", "界".repeat(4000));
+    writer.execute(
+        "UPDATE tickets SET id = ?, state = ?, context_json = 'invalid', title = 'synthetic-private-content' WHERE task_ref = 'a'",
+        [&hostile, &hostile],
+    ).unwrap();
+    // The TicketRow storage-class error path must not expose the id either.
+    writer
+        .execute(
+            "UPDATE tickets SET id = ?, title = X'00' WHERE task_ref = 'b'",
+            [format!("{hostile}b")],
+        )
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    assert_eq!(report.row_problem_count, 2);
+    for problem in &report.row_problems {
+        assert!(problem.len() < 300, "{} bytes", problem.len());
+        assert!(!problem.contains('界'));
+    }
+    let state = &report.ticket_states.last().unwrap().0;
+    assert!(state.starts_with("Ü😀"), "{state:?}");
+    assert!(state.len() <= 128, "{} bytes", state.len());
+    let text = report.to_string();
+    for control in ['\u{1b}', '\r', '\t', '\u{202e}', '\u{2066}'] {
+        assert!(!text.contains(control));
+    }
+    assert!(!text.contains("synthetic-private-content"));
+    writer
+        .execute_batch(&format!("CREATE VIEW \"{hostile}\" AS SELECT 1"))
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    let problem = &report.schema_problems[0];
+    assert!(problem.len() < 160, "{} bytes", problem.len());
+    assert!(problem.contains("Ü😀"));
+    assert!(problem.contains("\\u{1b}"));
+    assert!(!problem.contains('\n') && !problem.contains('\u{202e}'));
+}

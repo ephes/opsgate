@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Identify offline audit ticket problems by rowid and bound/escape stored state
+  and schema labels before retaining or displaying them.
+
 - Retain at most 50 offline audit row diagnostics while counting every failed
   check and reporting the exact number omitted.
 

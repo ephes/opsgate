@@ -30,6 +30,8 @@ pub struct CheckReport {
     pub schema_problems: Vec<String>,
     /// Stored values Rust cannot read (checked only when the schema matches).
     pub row_problems: Vec<String>,
+    /// Exact number of failed row checks, including those not retained.
+    pub row_problem_count: usize,
     /// Tickets per state, by state.
     pub ticket_states: Vec<(String, i64)>,
     pub tickets: i64,
@@ -39,9 +41,16 @@ pub struct CheckReport {
 }
 
 impl CheckReport {
+    fn row_problem(&mut self, message: fmt::Arguments<'_>) {
+        self.row_problem_count += 1;
+        if self.row_problems.len() < MAX_LISTED_PROBLEMS {
+            self.row_problems.push(message.to_string());
+        }
+    }
+
     /// Whether the database can be served by Rust as it is.
     pub fn is_ok(&self) -> bool {
-        self.schema_problems.is_empty() && self.row_problems.is_empty()
+        self.schema_problems.is_empty() && self.row_problem_count == 0
     }
 }
 
@@ -50,21 +59,29 @@ impl fmt::Display for CheckReport {
         writeln!(f, "database: {}", self.path.display())?;
         let status = |problems: &[String]| if problems.is_empty() { "ok" } else { "FAILED" };
         writeln!(f, "schema: {}", status(&self.schema_problems))?;
-        let list = |f: &mut fmt::Formatter<'_>, problems: &[String]| -> fmt::Result {
+        let list = |f: &mut fmt::Formatter<'_>, problems: &[String], total: usize| -> fmt::Result {
             for problem in problems.iter().take(MAX_LISTED_PROBLEMS) {
                 writeln!(f, "  {problem}")?;
             }
-            if problems.len() > MAX_LISTED_PROBLEMS {
-                writeln!(f, "  … and {} more", problems.len() - MAX_LISTED_PROBLEMS)?;
+            if total > problems.len() {
+                writeln!(f, "  … and {} more", total - problems.len())?;
             }
             Ok(())
         };
-        list(f, &self.schema_problems)?;
+        list(f, &self.schema_problems, self.schema_problems.len())?;
         if !self.schema_problems.is_empty() {
             return writeln!(f, "rows: not checked (schema differs)");
         }
-        writeln!(f, "rows: {}", status(&self.row_problems))?;
-        list(f, &self.row_problems)?;
+        writeln!(
+            f,
+            "rows: {}",
+            if self.row_problem_count == 0 {
+                "ok"
+            } else {
+                "FAILED"
+            }
+        )?;
+        list(f, &self.row_problems, self.row_problem_count)?;
         let states = self
             .ticket_states
             .iter()
@@ -125,14 +142,14 @@ fn check_db_inner(path: &Path, after_counts: impl FnOnce()) -> Result<CheckRepor
         "ui_session_state",
         &["username", "password_fingerprint", "updated_at"],
         &["session_generation"],
-        &mut report.row_problems,
+        &mut report,
     )?;
     report.runner_heartbeats = check_rows(
         connection,
         "runner_heartbeats",
         &["runner_host", "last_heartbeat_at", "updated_at"],
         &[],
-        &mut report.row_problems,
+        &mut report,
     )?;
     Ok(report)
 }
@@ -218,9 +235,7 @@ fn check_tickets(
             Ok(ticket) => ticket,
             Err(error) => {
                 let rowid: i64 = row.get("_rowid")?;
-                report
-                    .row_problems
-                    .push(format!("tickets rowid {rowid}: {error}"));
+                report.row_problem(format_args!("tickets rowid {rowid}: {error}"));
                 continue;
             }
         };
@@ -232,14 +247,10 @@ fn check_tickets(
             ("tmux_sessions_json", &ticket.tmux_sessions_json),
         ] {
             match parse(text) {
-                Err(error) => report
-                    .row_problems
-                    .push(format!("tickets {id}: {column}: {error}")),
+                Err(error) => report.row_problem(format_args!("tickets {id}: {column}: {error}")),
                 Ok(value) => {
                     if let Some(problem) = json_problem(&value) {
-                        report
-                            .row_problems
-                            .push(format!("tickets {id}: {column}: {problem}"));
+                        report.row_problem(format_args!("tickets {id}: {column}: {problem}"));
                     }
                 }
             }
@@ -248,7 +259,7 @@ fn check_tickets(
             ticket.max_duration_seconds,
             rusqlite::types::Value::Integer(_)
         ) {
-            report.row_problems.push(format!(
+            report.row_problem(format_args!(
                 "tickets {id}: max_duration_seconds: not an integer"
             ));
         }
@@ -256,9 +267,7 @@ fn check_tickets(
             && !opsgate_core::pytext::strip(expires_at).is_empty()
             && let Err(error) = parse_iso_datetime(expires_at)
         {
-            report
-                .row_problems
-                .push(format!("tickets {id}: expires_at: {error}"));
+            report.row_problem(format_args!("tickets {id}: expires_at: {error}"));
         }
     }
     Ok(())
@@ -285,23 +294,24 @@ fn check_audit_events(connection: &Connection, report: &mut CheckReport) -> Resu
             "new_state",
         ] {
             if let Err(error) = text_column(row, "audit_events", key, column) {
-                report.row_problems.push(error.to_string());
+                report.row_problem(format_args!("{error}"));
             }
         }
         match text_column(row, "audit_events", key, "metadata_json") {
-            Err(error) => report.row_problems.push(error.to_string()),
-            Ok(None) => report
-                .row_problems
-                .push(format!("audit_events {}: metadata_json: NULL", id)),
+            Err(error) => report.row_problem(format_args!("{error}")),
+            Ok(None) => {
+                report.row_problem(format_args!("audit_events {}: metadata_json: NULL", id))
+            }
             Ok(Some(text)) => {
                 let problem = match parse(&text) {
                     Err(error) => Some(error.to_string()),
                     Ok(value) => json_problem(&value),
                 };
                 if let Some(problem) = problem {
-                    report
-                        .row_problems
-                        .push(format!("audit_events {}: metadata_json: {problem}", id));
+                    report.row_problem(format_args!(
+                        "audit_events {}: metadata_json: {problem}",
+                        id
+                    ));
                 }
             }
         }
@@ -315,7 +325,7 @@ fn check_rows(
     table: &'static str,
     text_columns: &[&str],
     integer_columns: &[&str],
-    problems: &mut Vec<String>,
+    report: &mut CheckReport,
 ) -> Result<i64, StoreError> {
     let mut statement = connection.prepare(&format!("SELECT * FROM {table}"))?;
     let mut rows = statement.query([])?;
@@ -327,12 +337,12 @@ fn check_rows(
         let key = format!("row {count}");
         for column in text_columns {
             if let Err(error) = text_column(row, table, Some(&key), column) {
-                problems.push(error.to_string());
+                report.row_problem(format_args!("{error}"));
             }
         }
         for column in integer_columns {
             if !matches!(row.get_ref(*column)?, ValueRef::Integer(_)) {
-                problems.push(format!("{table} {key}: {column}: not an integer"));
+                report.row_problem(format_args!("{table} {key}: {column}: not an integer"));
             }
         }
     }

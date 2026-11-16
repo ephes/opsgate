@@ -126,7 +126,9 @@ columns, never stored values. It opens the database read-only and never
 creates, migrates, checkpoints or writes it; for a WAL database SQLite may
 create the `-wal`/`-shm` side files, as for any reader. Schema, counts and
 row checks share one read transaction, released before report formatting.
-Concurrent WAL commits appear only in a later audit. This offline retained-data
+Concurrent WAL commits appear only in a later audit. Row diagnostics retain at
+most 50 messages; all failed checks are counted, including later rows and tables.
+The report gives the exact omitted count and remains failed after the sample fills. This offline retained-data
 checker does not reactivate the retired OpsGate service.
 
 `--dump <file>` (S3b) also writes the data-parity records of PLAN.md 11.2

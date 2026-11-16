@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Retain at most 50 offline audit row diagnostics while counting every failed
+  check and reporting the exact number omitted.
+
 - Audit retained databases in one read-only SQLite snapshot across schema, counts
   and row checks; release it before formatting the report. Offline checker only;
   no service reactivation or rollout.

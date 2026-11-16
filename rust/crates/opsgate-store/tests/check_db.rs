@@ -279,7 +279,7 @@ fn many_problems_are_capped_in_the_report() {
     let directory = tempfile::tempdir().unwrap();
     let path = database_with_tickets(directory.path());
     let connection = Connection::open(&path).unwrap();
-    for index in 0..60 {
+    for index in 0..2000 {
         connection
             .execute(
                 "INSERT INTO audit_events (ticket_id, event_type, actor, timestamp, metadata_json) VALUES ('t', 'e', 'a', 't', ?)",
@@ -288,8 +288,19 @@ fn many_problems_are_capped_in_the_report() {
             .unwrap();
     }
     let report = check_db(&path).unwrap();
-    assert_eq!(report.row_problems.len(), 60);
-    assert!(report.to_string().contains("… and 10 more"));
+    assert_eq!(report.row_problems.len(), 50);
+    assert_eq!(report.row_problem_count, 2000);
+    assert!(!report.is_ok());
+    assert!(report.to_string().contains("… and 1950 more"));
+    // Corruption found in a later table must still be counted after the cap.
+    connection
+        .execute("UPDATE runner_heartbeats SET updated_at = X'00'", [])
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    assert_eq!(report.row_problems.len(), 50);
+    assert!(!report.is_ok());
+    assert_eq!(report.row_problem_count, 2001);
+    assert!(report.to_string().contains("… and 1951 more"));
 }
 
 #[test]

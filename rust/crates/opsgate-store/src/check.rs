@@ -99,26 +99,36 @@ pub(crate) fn open_read_only(path: &Path) -> rusqlite::Result<Connection> {
 /// Checks the database at `path` (see the module documentation). An `Err`
 /// means the file could not be opened or read as a SQLite database at all.
 pub fn check_db(path: &Path) -> Result<CheckReport, StoreError> {
-    let connection = open_read_only(path)?;
+    check_db_inner(path, || {})
+}
+
+// Test seam at the count/scan boundary; production always supplies a no-op.
+fn check_db_inner(path: &Path, after_counts: impl FnOnce()) -> Result<CheckReport, StoreError> {
+    let mut connection = open_read_only(path)?;
+    // BEGIN DEFERRED on a query-only connection: the first schema read pins
+    // every later count and row projection to the same generation. RAII also
+    // releases the snapshot on schema differences and read errors.
+    let snapshot = connection.transaction()?;
+    let connection = &snapshot;
     let mut report = CheckReport {
         path: path.to_owned(),
-        schema_problems: schema_problems(&connection)?,
+        schema_problems: schema_problems(connection)?,
         ..CheckReport::default()
     };
     if !report.schema_problems.is_empty() {
         return Ok(report);
     }
-    check_tickets(&connection, &mut report)?;
-    check_audit_events(&connection, &mut report)?;
+    check_tickets(connection, &mut report, after_counts)?;
+    check_audit_events(connection, &mut report)?;
     report.ui_session_state = check_rows(
-        &connection,
+        connection,
         "ui_session_state",
         &["username", "password_fingerprint", "updated_at"],
         &["session_generation"],
         &mut report.row_problems,
     )?;
     report.runner_heartbeats = check_rows(
-        &connection,
+        connection,
         "runner_heartbeats",
         &["runner_host", "last_heartbeat_at", "updated_at"],
         &[],
@@ -182,7 +192,11 @@ fn json_problem(value: &Value) -> Option<String> {
         .map(|error| format!("{error} (D-2)"))
 }
 
-fn check_tickets(connection: &Connection, report: &mut CheckReport) -> Result<(), StoreError> {
+fn check_tickets(
+    connection: &Connection,
+    report: &mut CheckReport,
+    after_counts: impl FnOnce(),
+) -> Result<(), StoreError> {
     let mut statement =
         connection.prepare("SELECT state, COUNT(*) FROM tickets GROUP BY state ORDER BY state")?;
     let states = statement.query_map([], |row| {
@@ -193,6 +207,8 @@ fn check_tickets(connection: &Connection, report: &mut CheckReport) -> Result<()
     })?;
     report.ticket_states = states.collect::<rusqlite::Result<_>>()?;
     report.tickets = report.ticket_states.iter().map(|(_, count)| count).sum();
+    drop(statement);
+    after_counts();
 
     let mut statement =
         connection.prepare("SELECT rowid AS _rowid, * FROM tickets ORDER BY rowid")?;
@@ -321,4 +337,60 @@ fn check_rows(
         }
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_uses_one_snapshot_across_counts_rows_and_tables() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("audit.sqlite3");
+        let writer = Connection::open(&path).unwrap();
+        writer.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        schema::apply(&writer).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let report = check_db_inner(&path, || {
+            writer
+                .execute_batch(
+                    "BEGIN IMMEDIATE;
+                 INSERT INTO tickets (id, source, title, summary, execution_plan_json,
+                    policy_requirements_json, context_json, payload_checksum, state,
+                    created_by, created_at, max_duration_seconds)
+                 VALUES ('synthetic', 'test', 't', 's', '[]', '{}', 'invalid',
+                    'hash', 'expired', 'test', 'now', 1);
+                 INSERT INTO audit_events (ticket_id, event_type, actor, timestamp)
+                    VALUES ('synthetic', 'test', 'test', 'now');
+                 INSERT INTO runner_heartbeats VALUES ('test', 'now', 'now');
+                 INSERT INTO ui_session_state VALUES ('test', 1, 'synthetic', 'now');
+                 COMMIT;",
+                )
+                .unwrap();
+        })
+        .unwrap();
+        assert!(report.is_ok(), "{report}");
+        assert_eq!(
+            (
+                report.tickets,
+                report.audit_events,
+                report.ui_session_state,
+                report.runner_heartbeats
+            ),
+            (0, 0, 0, 0),
+            "{report}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let later = check_db(&path).unwrap();
+        assert!(!later.is_ok());
+        assert_eq!(
+            (
+                later.tickets,
+                later.audit_events,
+                later.ui_session_state,
+                later.runner_heartbeats
+            ),
+            (1, 1, 1, 1)
+        );
+    }
 }

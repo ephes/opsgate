@@ -124,7 +124,10 @@ runner heartbeats) and exits 0, or 1 when anything is wrong or the file is
 not a readable SQLite database. Problems name ticket ids, audit event ids and
 columns, never stored values. It opens the database read-only and never
 creates, migrates, checkpoints or writes it; for a WAL database SQLite may
-create the `-wal`/`-shm` side files, as for any reader.
+create the `-wal`/`-shm` side files, as for any reader. Schema, counts and
+row checks share one read transaction, released before report formatting.
+Concurrent WAL commits appear only in a later audit. This offline retained-data
+checker does not reactivate the retired OpsGate service.
 
 `--dump <file>` (S3b) also writes the data-parity records of PLAN.md 11.2
 step 1, one JSON line per ticket in `rowid` order: the serialisation as `GET

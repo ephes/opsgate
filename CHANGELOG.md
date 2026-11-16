@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Audit retained databases in one read-only SQLite snapshot across schema, counts
+  and row checks; release it before formatting the report. Offline checker only;
+  no service reactivation or rollout.
+
 - Bound login throttle expiry maintenance to 16 other clients per admission,
   plus exact expiry for the requested client, in Python and Rust. Count tracked
   clients without rebuilding the key union and remove empty cleanup positions.

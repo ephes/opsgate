@@ -338,7 +338,15 @@ back the operation, including predecessor expiry and runner heartbeat changes.
   abandoned reservations expire after the same window. Success clears completed failures while preserving
   other pending checks, and verifier errors release their reservation. No mutex is held during hashing.
   Tracking is bounded to 10,000 client addresses; when full, new addresses are denied until capacity expires.
-  Counters are held in memory and reset when the service restarts.
+  Across all clients, each API process admits at most four running or queued password checks.
+  Excess attempts receive the same `429` login page without counting a password failure.
+  Rust acquires capacity before queueing on the blocking pool; canceling a request does not
+  release the job's capacity until it finishes. Verifier completion or panic releases capacity.
+  Admission counts tracked clients directly and examines at most 16 other clients per request in round-robin
+  order, plus the requested client's own expiry. Cleanup state holds one position per active client;
+  settlement removes it when the client becomes empty. A full table can briefly deny a new address while
+  incremental cleanup reaches expired entries; repeated requests advance cleanup without evicting active
+  clients. Counters are held in memory and reset when the service restarts.
 
 ### Response headers
 

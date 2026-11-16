@@ -76,9 +76,75 @@ pub fn credentials_match(
     username_matches && password_matches
 }
 
+/// Maximum password jobs running or queued across this process.
+pub const LOGIN_PASSWORD_WORK_LIMIT: usize = 4;
+static PASSWORD_WORK: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(LOGIN_PASSWORD_WORK_LIMIT);
+
+/// Admit before queueing, keeping capacity in the blocking job even when the
+/// requesting future is canceled. No waiting queue is created for admission.
+pub(crate) fn try_password_work<T, F>(work: F) -> Option<tokio::task::JoinHandle<T>>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let permit = PASSWORD_WORK.try_acquire().ok()?;
+    Some(tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn password_work_bounds_running_and_queued_after_caller_cancellation() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        let _entered = runtime.enter();
+        let (started, starting) = std::sync::mpsc::channel();
+        let mut releases = Vec::new();
+        for _ in 0..4 {
+            let (release, released) = std::sync::mpsc::channel();
+            releases.push(release);
+            let started = started.clone();
+            // Dropping JoinHandle is what a canceled HTTP future does.
+            drop(
+                try_password_work(move || {
+                    let _ = started.send(());
+                    let _ = released.recv_timeout(std::time::Duration::from_secs(5));
+                })
+                .unwrap(),
+            );
+        }
+        starting
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(
+            try_password_work(|| ()).is_none(),
+            "one running plus three queued must fill admission"
+        );
+        for release in releases {
+            release.send(()).unwrap();
+        }
+        runtime
+            .block_on(tokio::task::spawn_blocking(|| ()))
+            .unwrap();
+        assert_eq!(
+            runtime.block_on(try_password_work(|| 42).unwrap()).unwrap(),
+            42
+        );
+        assert!(
+            runtime
+                .block_on(try_password_work(|| panic!("synthetic verifier")).unwrap())
+                .is_err()
+        );
+        assert!(try_password_work(|| ()).is_some());
+    }
 
     #[test]
     fn the_password_check_always_runs() {

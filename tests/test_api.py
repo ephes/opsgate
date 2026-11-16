@@ -3258,3 +3258,102 @@ def test_log_view_reads_admitted_handle(
     assert response.status_code == 200
     assert "admitted log" in response.get_data(as_text=True)
     assert "outside secret" not in response.get_data(as_text=True)
+
+
+def test_login_global_password_work_across_clients_and_apps(
+    settings: OpsGateSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Event
+
+    apps = [create_app(settings), create_app(settings)]
+    for app in apps:
+        app.config.update(TESTING=True)
+    entered, release = Barrier(5), Event()
+    calls: list[bool] = []
+
+    def verify(*_args: Any) -> bool:
+        calls.append(True)
+        entered.wait(timeout=5)
+        assert release.wait(5)
+        return False
+
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", verify)
+
+    def attempt(index: int) -> int:
+        with apps[index % 2].test_client() as browser:
+            browser.get("/login")
+            return browser.post(
+                "/login",
+                environ_overrides={"REMOTE_ADDR": f"100.64.0.{index + 1}"},
+                data={"username": settings.ui_username, "password": "wrong",
+                      "csrf_token": session_csrf_token(browser)},
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        running = [pool.submit(attempt, index) for index in range(4)]
+        entered.wait(timeout=5)
+        try:
+            refused = pool.submit(attempt, 4)
+            assert refused.result(timeout=2) == 429
+            assert len(calls) == 4
+        finally:
+            release.set()
+        assert [future.result(timeout=5) for future in running] == [302] * 4
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", lambda *_args: False)
+    assert attempt(4) == 302
+
+
+@pytest.mark.parametrize("clients", [1000, 2000, 4000])
+def test_login_throttle_admission_key_visits_are_linear(clients: int) -> None:
+    visits = 0
+
+    class CountingDict(dict[str, Any]):
+        def items(self) -> Any:
+            nonlocal visits
+            visits += len(self)
+            return super().items()
+
+        def keys(self) -> Any:
+            nonlocal visits
+            visits += len(self)
+            return super().keys()
+
+        def get(self, key: str, default: Any = None) -> Any:
+            nonlocal visits
+            visits += 1
+            return super().get(key, default)
+
+    throttle = LoginThrottle()
+    throttle._pending = CountingDict()
+    throttle._failures = CountingDict()
+    for index in range(clients):
+        assert throttle.reserve(f"client-{index}") is not None
+    assert visits <= clients * 100, visits
+
+
+def test_login_throttle_incremental_expiry_preserves_target_and_bounds_storage() -> None:
+    clock = FakeClock()
+    throttle = LoginThrottle(limit=1, window_seconds=60, max_tracked_clients=64, clock=clock)
+    slots = [throttle.reserve(f"client-{index}") for index in range(64)]
+    assert all(slot is not None for slot in slots)
+    assert throttle.reserve("overflow") is None
+    clock.now += 60
+    # This target lies beyond one sweep budget; its own expiry is still exact.
+    fresh = throttle.reserve("client-63")
+    assert fresh is not None
+    throttle.settle("client-63", fresh, success=False)
+    throttle.settle("client-63", slots[-1], success=True)
+    assert throttle.reserve("client-63") is None
+    assert throttle.reserve("new-client") is not None
+    for _ in range(4):
+        assert throttle.reserve("client-63") is None
+    assert set(throttle._tracked) == {"client-63", "new-client"}
+    clock.now += 60
+    for index in range(1000):
+        slot = throttle.reserve(f"churn-{index}")
+        assert slot is not None
+        throttle.settle(f"churn-{index}", slot, success=None)
+    assert not throttle._tracked
+    assert not throttle._pending
+    assert not throttle._failures

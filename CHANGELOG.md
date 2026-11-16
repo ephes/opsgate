@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- Bound login throttle expiry maintenance to 16 other clients per admission,
+  plus exact expiry for the requested client, in Python and Rust. Count tracked
+  clients without rebuilding the key union and remove empty cleanup positions.
+  A full table may briefly refuse new clients until incremental cleanup reaches
+  expired entries; active clients remain protected.
+
+- Limit aggregate login password work to four running or queued checks per API
+  process in Python and Rust. Refuse overload with 429 before hashing; canceled
+  Rust callers cannot release capacity still owned by a blocking verifier.
+
 - Bound log checksum finalization by admitted length, 64 MiB, elapsed time and cancellation;
   publish null rather than a partial or changed-file checksum.
 - Validate recovered summary ticket/step/role/agent identity and integer-zero success evidence

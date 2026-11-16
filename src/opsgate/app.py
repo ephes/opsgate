@@ -151,6 +151,8 @@ ROLE_PROMPT_SCAFFOLDING: dict[str, dict[str, object]] = {
 }
 ROLE_PROMPT_SCAFFOLDING["implementor"] = ROLE_PROMPT_SCAFFOLDING["implementer"]
 LOG_PREVIEW_LINE_LIMIT = 40
+LOGIN_PASSWORD_WORK_LIMIT = 4
+_LOGIN_PASSWORD_WORK = threading.BoundedSemaphore(LOGIN_PASSWORD_WORK_LIMIT)
 LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_THROTTLE_MAX_TRACKED_CLIENTS = 10_000
@@ -879,12 +881,17 @@ def create_app(
             username_matches = hmac.compare_digest(
                 username.encode("utf-8"), resolved_settings.ui_username.encode("utf-8")
             )
+            if not _LOGIN_PASSWORD_WORK.acquire(blocking=False):
+                flash("Too many failed login attempts. Try again later.", "error")
+                return Response(render_template("login.html", next_path=next_path), 429)
             try:
                 password_matches = bcrypt.checkpw(
                     password.encode("utf-8"), resolved_settings.ui_password_bcrypt.encode("utf-8")
                 )
             except ValueError:
                 password_matches = False
+            finally:
+                _LOGIN_PASSWORD_WORK.release()
             if not (username_matches and password_matches):
                 success = False
                 flash("Invalid username or password", "error")

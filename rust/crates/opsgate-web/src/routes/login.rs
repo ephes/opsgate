@@ -30,7 +30,7 @@ use opsgate_core::pytext::strip;
 use crate::client;
 use crate::error::{AppError, redirect};
 use crate::form::FormData;
-use crate::password::{checkpw, credentials_match};
+use crate::password::{checkpw, credentials_match, try_password_work};
 use crate::session::{SessionHandle, session_user, signed_in};
 use crate::state::AppState;
 use crate::templates::Context;
@@ -126,7 +126,7 @@ pub async fn login_submit(
     let password_bcrypt = state.settings().ui_password_bcrypt.clone();
     let checked_username = username.clone();
     // bcrypt is CPU work: off the async workers, as the store's calls.
-    let (matches, reservation) = tokio::task::spawn_blocking(move || {
+    let Some(work) = try_password_work(move || {
         let matches = credentials_match(
             &checked_username,
             &password,
@@ -135,9 +135,13 @@ pub async fn login_submit(
             checkpw,
         );
         (matches, reservation)
-    })
-    .await
-    .map_err(|error| AppError::Internal(format!("password check task: {error}")))?;
+    }) else {
+        session.flash("Too many failed login attempts. Try again later.", "error");
+        return login_page_response(&state, &session, next_path, StatusCode::TOO_MANY_REQUESTS);
+    };
+    let (matches, reservation) = work
+        .await
+        .map_err(|error| AppError::Internal(format!("password check task: {error}")))?;
 
     if !matches {
         reservation.settle(false);

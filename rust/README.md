@@ -599,7 +599,11 @@ it), else from `git rev-parse HEAD`, else `unknown`, and records the choice in
 The Python/Rust admission contract now reserves before bcrypt and settles on failure,
 success or error (RAII in Rust, `finally` in Python). Pending siblings survive a
 successful login; abandoned reservations expire and a full client table denies new
-addresses. `throttle.json` includes reservation settlement and expiry sequences.
+addresses. A process-wide semaphore admits at most four running plus queued password
+checks before `spawn_blocking`; the blocking closure owns its permit even if the
+HTTP future is canceled. Overload returns the same 429 login page and does not count
+as a password failure. Python uses the same process-wide limit around its verifier.
+`throttle.json` includes reservation settlement and expiry sequences.
 Session lifetimes are validated at settings construction within 1..=86399999999999
 seconds (`settings.json` includes the bounds); Rust exposes a read-only accessor.
 

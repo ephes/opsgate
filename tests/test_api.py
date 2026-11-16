@@ -3258,3 +3258,47 @@ def test_log_view_reads_admitted_handle(
     assert response.status_code == 200
     assert "admitted log" in response.get_data(as_text=True)
     assert "outside secret" not in response.get_data(as_text=True)
+
+
+def test_login_global_password_work_across_clients_and_apps(
+    settings: OpsGateSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Event
+
+    apps = [create_app(settings), create_app(settings)]
+    for app in apps:
+        app.config.update(TESTING=True)
+    entered, release = Barrier(5), Event()
+    calls: list[bool] = []
+
+    def verify(*_args: Any) -> bool:
+        calls.append(True)
+        entered.wait(timeout=5)
+        assert release.wait(5)
+        return False
+
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", verify)
+
+    def attempt(index: int) -> int:
+        with apps[index % 2].test_client() as browser:
+            browser.get("/login")
+            return browser.post(
+                "/login",
+                environ_overrides={"REMOTE_ADDR": f"100.64.0.{index + 1}"},
+                data={"username": settings.ui_username, "password": "wrong",
+                      "csrf_token": session_csrf_token(browser)},
+            ).status_code
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        running = [pool.submit(attempt, index) for index in range(4)]
+        entered.wait(timeout=5)
+        try:
+            refused = pool.submit(attempt, 4)
+            assert refused.result(timeout=2) == 429
+            assert len(calls) == 4
+        finally:
+            release.set()
+        assert [future.result(timeout=5) for future in running] == [302] * 4
+    monkeypatch.setattr("opsgate.app.bcrypt.checkpw", lambda *_args: False)
+    assert attempt(4) == 302

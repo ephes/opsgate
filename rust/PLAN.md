@@ -570,6 +570,11 @@ see D-1).
   Every `Location` goes through Werkzeug's `iri_to_uri` (Flask's response
   headers): a `next` of `/tickets/a b` redirects to `/tickets/a%20b`, a
   backslash becomes `%5C` (S4b: `urls::local_iri_to_uri` in `error::redirect`).
+- Aggregate password admission (Python and Rust): at most four running or queued
+  checks per API process, acquired without waiting before the verifier (before
+  `spawn_blocking` in Rust). Saturation returns the same 429 login page and flash
+  as the per-client throttle, without recording a failure. The blocking job owns
+  capacity through completion/unwind even when its requesting future is canceled.
 - bcrypt parity (fixture `bcrypt.json`): `$2a$`, `$2b$`, `$2y$` (and `$2x$`)
   hashes; passwords longer than 72 bytes are truncated (pyca bcrypt 4.3,
   pinned `<5.0`); passwords with embedded NUL bytes are passed unchanged and

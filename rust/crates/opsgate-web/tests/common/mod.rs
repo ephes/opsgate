@@ -38,6 +38,12 @@ pub const PASSWORD_HASH: &str = "$2b$04$opsgate.web.tests.salezoqvixJbosqEq7QGh7
 /// The hash of `new-password` (a password change).
 pub const NEW_PASSWORD_HASH: &str = "$2b$04$opsgate.web.tests.newuZFOsbS5ob8qvmKyBKxsxkVdivuAWp2S";
 
+// Functional cases host independent apps in one test process. Keep unrelated
+// cases from exhausting their shared password admission; dedicated password
+// tests exercise saturation and canceled callers directly.
+static LOGIN_REQUESTS: tokio::sync::Semaphore =
+    tokio::sync::Semaphore::const_new(opsgate_web::password::LOGIN_PASSWORD_WORK_LIMIT);
+
 /// The security headers every response carries (`EXPECTED_SECURITY_HEADERS`).
 pub const SECURITY_HEADERS: [(&str, &str); 5] = [
     ("x-frame-options", "DENY"),
@@ -190,6 +196,11 @@ impl TestApp {
     /// Sends `call` with the browser's cookie and keeps the cookie the
     /// response sets or deletes.
     pub async fn send(&self, call: Call) -> TestResponse {
+        let _login = if call.method == Method::POST && call.path.starts_with("/login") {
+            Some(LOGIN_REQUESTS.acquire().await.unwrap())
+        } else {
+            None
+        };
         let mut builder = Request::builder().method(call.method).uri(&call.path);
         for (name, value) in &call.headers {
             builder = builder.header(name.as_str(), HeaderValue::from_bytes(value).unwrap());

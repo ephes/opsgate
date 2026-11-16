@@ -342,7 +342,11 @@ back the operation, including predecessor expiry and runner heartbeat changes.
   Excess attempts receive the same `429` login page without counting a password failure.
   Rust acquires capacity before queueing on the blocking pool; canceling a request does not
   release the job's capacity until it finishes. Verifier completion or panic releases capacity.
-  Counters are held in memory and reset when the service restarts.
+  Admission counts tracked clients directly and examines at most 16 other clients per request in round-robin
+  order, plus the requested client's own expiry. Cleanup state holds one position per active client;
+  settlement removes it when the client becomes empty. A full table can briefly deny a new address while
+  incremental cleanup reaches expired entries; repeated requests advance cleanup without evicting active
+  clients. Counters are held in memory and reset when the service restarts.
 
 ### Response headers
 

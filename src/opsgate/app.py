@@ -7,6 +7,7 @@ import re
 import secrets
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import timedelta
 from functools import wraps
@@ -156,6 +157,7 @@ _LOGIN_PASSWORD_WORK = threading.BoundedSemaphore(LOGIN_PASSWORD_WORK_LIMIT)
 LOGIN_FAILURE_LIMIT = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 LOGIN_THROTTLE_MAX_TRACKED_CLIENTS = 10_000
+LOGIN_THROTTLE_EXPIRY_CLIENT_BUDGET = 16
 CSRF_HEADER_NAME = "X-CSRF-Token"
 # Sent with every response. The approval UI must never render inside another page: SameSite=Lax does not
 # stop a same-site sibling origin from framing it and collecting a disguised click on Approve.
@@ -191,7 +193,15 @@ class LoginThrottle:
         self.clock = clock
         self._failures: dict[str, list[float]] = {}
         self._pending: dict[str, dict[object, float]] = {}
+        # One round-robin position per active client, removed on settlement.
+        self._tracked: OrderedDict[str, None] = OrderedDict()
         self._lock = threading.Lock()
+
+    def _sync_tracked(self, key: str) -> None:
+        if key in self._failures or key in self._pending:
+            self._tracked.setdefault(key, None)
+        else:
+            self._tracked.pop(key, None)
 
     def _recent(self, key: str, now: float) -> list[float]:
         cutoff = now - self.window_seconds
@@ -200,7 +210,23 @@ class LoginThrottle:
             self._failures[key] = recent
         else:
             self._failures.pop(key, None)
+        self._sync_tracked(key)
         return recent
+
+    def _expire_client(self, key: str, now: float) -> None:
+        attempts = self._pending.get(key)
+        if attempts is not None:
+            recent = {attempt: stamp for attempt, stamp in attempts.items() if stamp > now - self.window_seconds}
+            if recent:
+                self._pending[key] = recent
+            else:
+                self._pending.pop(key, None)
+        self._recent(key, now)
+
+    def _expire_incrementally(self, now: float) -> None:
+        for _ in range(min(LOGIN_THROTTLE_EXPIRY_CLIENT_BUDGET, len(self._tracked))):
+            key, _ = self._tracked.popitem(last=False)
+            self._expire_client(key, now)
 
     def _prune(self, now: float) -> None:
         for key in list(self._failures):
@@ -211,27 +237,23 @@ class LoginThrottle:
             by_age = sorted(self._failures, key=lambda key: self._failures[key][-1])
             for key in by_age[:overflow]:
                 self._failures.pop(key, None)
+                self._sync_tracked(key)
 
     def reserve(self, key: str) -> object | None:
         """Atomically count work before hashing; abandoned reservations expire."""
         with self._lock:
             now = self.clock()
-            for client, attempts in list(self._pending.items()):
-                recent = {attempt: stamp for attempt, stamp in attempts.items() if stamp > now - self.window_seconds}
-                if recent:
-                    self._pending[client] = recent
-                else:
-                    del self._pending[client]
+            self._expire_incrementally(now)
+            # The requested client's expiry is exact even when the sweep is behind.
+            self._expire_client(key, now)
             failures = self._recent(key, now)
             if len(failures) + len(self._pending.get(key, {})) >= self.limit:
                 return None
-            tracked = self._pending.keys() | self._failures.keys()
-            if key not in tracked and len(tracked) >= self.max_tracked_clients:
-                self._prune(now)
-                if len(self._pending.keys() | self._failures.keys()) >= self.max_tracked_clients:
-                    return None
+            if key not in self._tracked and len(self._tracked) >= self.max_tracked_clients:
+                return None
             attempt = object()
             self._pending.setdefault(key, {})[attempt] = now
+            self._sync_tracked(key)
             return attempt
 
     def settle(self, key: str, attempt: object, *, success: bool | None) -> None:
@@ -241,6 +263,7 @@ class LoginThrottle:
             stamp = pending.pop(attempt, None)
             if not pending:
                 self._pending.pop(key, None)
+            self._sync_tracked(key)
             now = self.clock()
             if stamp is None or stamp <= now - self.window_seconds:
                 return
@@ -249,6 +272,7 @@ class LoginThrottle:
             elif success is False:
                 recent = self._recent(key, now)
                 self._failures[key] = (recent + [now])[-self.limit :]
+            self._sync_tracked(key)
 
     def is_locked(self, key: str) -> bool:
         with self._lock:
@@ -260,12 +284,14 @@ class LoginThrottle:
             recent = self._recent(key, now)
             recent.append(now)
             self._failures[key] = recent[-self.limit :]
+            self._sync_tracked(key)
             if len(self._failures) > self.max_tracked_clients:
                 self._prune(now)
 
     def reset(self, key: str) -> None:
         with self._lock:
             self._failures.pop(key, None)
+            self._sync_tracked(key)
 
 
 def create_app(

@@ -151,6 +151,588 @@
    "window_seconds": 60.0
   },
   {
+   "limit": 1,
+   "max_tracked_clients": 64,
+   "name": "incremental expiry beyond one sweep",
+   "steps": [
+    {
+     "failures": [],
+     "key": "client-0",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-1",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-2",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-3",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-4",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-5",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-6",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-7",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-8",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-9",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-10",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-11",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-12",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-13",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-14",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-15",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-16",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-17",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-18",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-19",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-20",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-21",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-22",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-23",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-24",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-25",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-26",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-27",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-28",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-29",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-30",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-31",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-32",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-33",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-34",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-35",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-36",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-37",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-38",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-39",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-40",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-41",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-42",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-43",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-44",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-45",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-46",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-47",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-48",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-49",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-50",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-51",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-52",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-53",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-54",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-55",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-56",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-57",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-58",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-59",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-60",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-61",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-62",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-63",
+     "now": 0.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "overflow",
+     "now": 0.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "error",
+     "result": null
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "failure",
+     "result": null
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "new-client",
+     "now": 60.0,
+     "op": "reserve",
+     "result": true
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [
+      [
+       "client-63",
+       [
+        60.0
+       ]
+      ]
+     ],
+     "key": "client-63",
+     "now": 60.0,
+     "op": "reserve",
+     "result": false
+    },
+    {
+     "failures": [],
+     "key": "client-63",
+     "now": 120.0,
+     "op": "reserve",
+     "result": true
+    }
+   ],
+   "window_seconds": 60.0
+  },
+  {
    "limit": 5,
    "max_tracked_clients": 10000,
    "name": "defaults: five failures lock for 15 minutes",

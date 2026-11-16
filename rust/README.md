@@ -603,7 +603,12 @@ addresses. A process-wide semaphore admits at most four running plus queued pass
 checks before `spawn_blocking`; the blocking closure owns its permit even if the
 HTTP future is canceled. Overload returns the same 429 login page and does not count
 as a password failure. Python uses the same process-wide limit around its verifier.
-`throttle.json` includes reservation settlement and expiry sequences.
+Production admission counts the active-client union directly and sweeps at most 16
+other clients per request, plus the requested client's exact expiry. A bounded
+round-robin index retains one position per active client and removes settled empty
+clients immediately. A full table may briefly refuse a new address until cleanup
+reaches expired entries; active clients are never evicted for production admission.
+`throttle.json` includes reservation settlement and multi-budget expiry sequences.
 Session lifetimes are validated at settings construction within 1..=86399999999999
 seconds (`settings.json` includes the bounds); Rust exposes a read-only accessor.
 

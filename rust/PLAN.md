@@ -586,7 +586,17 @@ see D-1).
   reproduces that wrapper over the same crate (`password::checkpw`, S4b), so
   malformed hashes (`$2b$4$…` without the leading zero, a salt with non-zero
   trailing bits, an extra character) are refused exactly as in Python.
-- Throttle (fixture `throttle.json`): per key, failures within 15 min; locked
+- Production throttle admission reserves per client before hashing: recent failures
+  plus pending checks cannot exceed five; success clears completed failures only.
+  Reservations expire after the failure window, and late settlement cannot alter
+  replacement attempts. A direct tracked-client index counts the union of pending
+  and failed clients, with one removable round-robin position per active client.
+  Each admission examines at most 16 other clients plus the requested client's own
+  expiry, without whole-table scans or key-union allocation. At 10,000 tracked
+  clients, new addresses receive 429 until cleanup frees capacity; this can take
+  multiple requests when expired entries lie beyond one sweep. Active clients are
+  not evicted. Rust uses a BTreeMap sweep index; Python uses OrderedDict.
+- Legacy failure-counter helpers (fixture `throttle.json`): per key, failures within 15 min; locked
   when ≥ 5 recent failures; a failure keeps the last 5 stamps; success
   resets; at most 10 000 tracked keys — on overflow first expired entries are
   dropped, then the keys whose newest failure is oldest (ties in the order

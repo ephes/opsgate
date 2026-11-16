@@ -2699,6 +2699,17 @@ def build_throttle() -> str:
             ("failure", "a", 61.0), ("reserve", "a", 61.0), ("error", "a", 61.0),
             ("reserve", "b", 62.0),
         ]),
+        _throttle_scenario("incremental expiry beyond one sweep", 1, 60.0, 64, [
+            *[("reserve", f"client-{i}", 0.0) for i in range(64)],
+            ("reserve", "overflow", 0.0),
+            ("reserve", "client-63", 60.0),
+            ("error", "client-63", 60.0),
+            ("failure", "client-63", 60.0),
+            ("reserve", "client-63", 60.0),
+            ("reserve", "new-client", 60.0),
+            *[("reserve", "client-63", 60.0) for _ in range(4)],
+            ("reserve", "client-63", 120.0),
+        ]),
         _throttle_scenario("defaults: five failures lock for 15 minutes", 5, 15 * 60.0, 10_000, [
             *[("fail", "100.64.0.1", 1000.0 + step) for step in range(4)],
             ("locked", "100.64.0.1", 1004.0),

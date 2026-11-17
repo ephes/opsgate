@@ -121,17 +121,31 @@ readable by Rust (JSON columns under the rules of 4.6 including the D-2
 cases, storage classes, `expires_at`, integer durations). It prints the
 result and the counts (tickets per state, audit events, approver rows,
 runner heartbeats) and exits 0, or 1 when anything is wrong or the file is
-not a readable SQLite database. Problems name ticket rowids, audit event ids and fixed column/error categories,
+not a readable SQLite database. Problems name ticket rowids, audit event ids
+and fixed column/error categories,
 never record contents. Stored state and schema labels preserve printable Unicode,
 escape control/format characters (including bidi controls), and retain at most
-128 UTF-8 bytes each, including a truncation marker. It opens the database read-only and never
+128 UTF-8 bytes each, including a truncation marker. It opens the database
+read-only and never
 creates, migrates, checkpoints or writes it; for a WAL database SQLite may
 create the `-wal`/`-shm` side files, as for any reader. Schema, counts and
 row checks share one read transaction, released before report formatting.
 Concurrent WAL commits appear only in a later audit. Row diagnostics retain at
 most 50 messages; all failed checks are counted, including later rows and tables.
-The report gives the exact omitted count and remains failed after the sample fills. This offline retained-data
-checker does not reactivate the retired OpsGate service.
+The report gives the exact omitted count and remains failed after the sample fills.
+
+The audit borrows SQLite text rather than cloning entire ticket rows. Before
+building a JSON tree or canonical copy, each ticket JSON column and audit
+`metadata_json` must fit an inclusive 1 MiB UTF-8 byte limit, 10,000 lexical tokens
+(containers, keys and scalars, including duplicate members), and 64 nested
+object/array levels. String contents do not count as structure. Existing JSON
+syntax and D-2 numeric checks then apply. `expires_at` parsing is limited to 256
+bytes. Over-budget fields are reported as **not safely audited**, count as failed
+checks and cause exit 1; other fields/rows continue to be checked. These are
+per-field Rust hydration limits, not a limit on SQLite's internal allocations,
+database size or complete scan duration. They apply to the audit report; the
+optional data-parity dump below retains its separate export contract.
+This offline retained-data checker does not reactivate the retired OpsGate service.
 
 `--dump <file>` (S3b) also writes the data-parity records of PLAN.md 11.2
 step 1, one JSON line per ticket in `rowid` order: the serialisation as `GET

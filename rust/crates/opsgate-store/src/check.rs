@@ -12,12 +12,10 @@ use std::time::Duration;
 use opsgate_core::json::{canonical_json, parse};
 use opsgate_core::time::parse_iso_datetime;
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OpenFlags};
-use serde_json::Value;
+use rusqlite::{Connection, OpenFlags, Row};
 
 use crate::error::StoreError;
 use crate::schema::{self, SchemaObject, normalize_sql};
-use crate::ticket::{TicketRow, text_column};
 
 /// Problems listed in the report; the rest are counted.
 const MAX_LISTED_PROBLEMS: usize = 50;
@@ -227,12 +225,98 @@ fn schema_problems(connection: &Connection) -> Result<Vec<String>, StoreError> {
     Ok(problems)
 }
 
-/// A decoded JSON value must also be writable again (the checksum and the
-/// stored columns): a float that overflows to infinity is not (D-2).
-fn json_problem(value: &Value) -> Option<String> {
-    canonical_json(value)
-        .err()
-        .map(|error| format!("{error} (D-2)"))
+// Audit-only admission; service/runner JSON contracts are unchanged.
+const MAX_JSON_BYTES: usize = 1024 * 1024;
+const MAX_JSON_TOKENS: usize = 10_000;
+
+/// A non-allocating lexical work bound, not a second JSON parser. Count every
+/// container, key and scalar token (including duplicate members); ignore syntax
+/// inside strings. The existing parser still owns all syntax/number semantics.
+/// Admission completes before either a Value tree or canonical copy is built.
+fn admit_json(text: &str) -> Result<(), &'static str> {
+    if text.len() > MAX_JSON_BYTES {
+        return Err("not safely audited: JSON exceeds 1048576 bytes");
+    }
+    let (mut quoted, mut escaped, mut atom) = (false, false, false);
+    let (mut depth, mut tokens) = (0_usize, 0_usize);
+    for byte in text.bytes() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => {
+                quoted = true;
+                atom = false;
+                tokens += 1;
+            }
+            b'[' | b'{' => {
+                depth += 1;
+                tokens += 1;
+                atom = false;
+                if depth > opsgate_core::json::MAX_DEPTH {
+                    return Err("not safely audited: JSON exceeds 64 container levels");
+                }
+            }
+            b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                atom = false;
+            }
+            b',' | b':' | b' ' | b'\n' | b'\r' | b'\t' => atom = false,
+            _ if !atom => {
+                tokens += 1;
+                atom = true;
+            }
+            _ => {}
+        }
+        if tokens > MAX_JSON_TOKENS {
+            return Err("not safely audited: JSON exceeds 10000 tokens");
+        }
+    }
+    Ok(())
+}
+
+fn json_problem(text: &str) -> Option<String> {
+    if let Err(problem) = admit_json(text) {
+        return Some(problem.to_owned());
+    }
+    match parse(text) {
+        Err(error) => Some(error.to_string()),
+        // A decoded value must also be writable: infinity is not (D-2).
+        Ok(value) => canonical_json(&value)
+            .err()
+            .map(|error| format!("{error} (D-2)")),
+    }
+}
+
+/// Borrow text from SQLite instead of materializing an entire TicketRow or
+/// cloning unrelated prompts, identifiers, metadata and other stored columns.
+fn check_text_column<'row>(
+    row: &'row Row<'_>,
+    table: &str,
+    key: &str,
+    column: &str,
+    required: bool,
+    report: &mut CheckReport,
+) -> Result<Option<&'row str>, StoreError> {
+    let reason = match row.get_ref(column)? {
+        ValueRef::Null if !required => return Ok(None),
+        ValueRef::Null => "NULL in a NOT NULL column",
+        ValueRef::Text(bytes) => match std::str::from_utf8(bytes) {
+            Ok(text) => return Ok(Some(text)),
+            Err(_) => "text is not UTF-8",
+        },
+        ValueRef::Blob(_) => "a BLOB value in a text column",
+        _ => "a numeric value in a text column",
+    };
+    report.row_problem(format_args!("{table} {key}: {column}: {reason}"));
+    Ok(None)
 }
 
 fn check_tickets(
@@ -263,48 +347,59 @@ fn check_tickets(
         connection.prepare("SELECT rowid AS _rowid, * FROM tickets ORDER BY rowid")?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
-        let ticket = match TicketRow::from_row(row) {
-            Ok(ticket) => ticket,
-            Err(mut error) => {
-                // TicketRow's service diagnostics carry a stored ticket id.
-                // Offline audits identify this row by SQLite rowid instead.
-                if let StoreError::Unreadable(unreadable) = &mut error {
-                    unreadable.key = None;
-                }
-                let rowid: i64 = row.get("_rowid")?;
-                report.row_problem(format_args!("tickets rowid {rowid}: {error}"));
-                continue;
-            }
-        };
-        let id = format!("rowid {}", row.get::<_, i64>("_rowid")?);
-        for (column, text) in [
-            ("execution_plan_json", &ticket.execution_plan_json),
-            ("policy_requirements_json", &ticket.policy_requirements_json),
-            ("context_json", &ticket.context_json),
-            ("tmux_sessions_json", &ticket.tmux_sessions_json),
+        let key = format!("rowid {}", row.get::<_, i64>("_rowid")?);
+        for (column, required) in [
+            ("id", true),
+            ("source", true),
+            ("task_ref", false),
+            ("title", true),
+            ("summary", true),
+            ("payload_checksum", true),
+            ("approved_payload_checksum", false),
+            ("state", true),
+            ("created_by", true),
+            ("created_at", true),
+            ("approved_by", false),
+            ("approved_at", false),
+            ("runner_host", false),
+            ("last_heartbeat_at", false),
+            ("started_at", false),
+            ("finished_at", false),
+            ("result", false),
+            ("result_detail", false),
+            ("archived_at", false),
+            ("archived_by", false),
         ] {
-            match parse(text) {
-                Err(error) => report.row_problem(format_args!("tickets {id}: {column}: {error}")),
-                Ok(value) => {
-                    if let Some(problem) = json_problem(&value) {
-                        report.row_problem(format_args!("tickets {id}: {column}: {problem}"));
-                    }
-                }
+            check_text_column(row, "tickets", &key, column, required, report)?;
+        }
+        for column in [
+            "execution_plan_json",
+            "policy_requirements_json",
+            "context_json",
+            "tmux_sessions_json",
+        ] {
+            if let Some(text) = check_text_column(row, "tickets", &key, column, true, report)?
+                && let Some(problem) = json_problem(text)
+            {
+                report.row_problem(format_args!("tickets {key}: {column}: {problem}"));
             }
         }
-        if !matches!(
-            ticket.max_duration_seconds,
-            rusqlite::types::Value::Integer(_)
-        ) {
+        if !matches!(row.get_ref("max_duration_seconds")?, ValueRef::Integer(_)) {
             report.row_problem(format_args!(
-                "tickets {id}: max_duration_seconds: not an integer"
+                "tickets {key}: max_duration_seconds: not an integer"
             ));
         }
-        if let Some(expires_at) = ticket.expires_at.as_deref()
-            && !opsgate_core::pytext::strip(expires_at).is_empty()
-            && let Err(error) = parse_iso_datetime(expires_at)
-        {
-            report.row_problem(format_args!("tickets {id}: expires_at: {error}"));
+        if let Some(text) = check_text_column(row, "tickets", &key, "expires_at", false, report)? {
+            // Bound the timestamp helper's replacement string as well.
+            if text.len() > 256 {
+                report.row_problem(format_args!(
+                    "tickets {key}: expires_at: not safely audited: exceeds 256 bytes"
+                ));
+            } else if !opsgate_core::pytext::strip(text).is_empty()
+                && let Err(error) = parse_iso_datetime(text)
+            {
+                report.row_problem(format_args!("tickets {key}: expires_at: {error}"));
+            }
         }
     }
     Ok(())
@@ -319,38 +414,23 @@ fn check_audit_events(connection: &Connection, report: &mut CheckReport) -> Resu
             ValueRef::Integer(id) => id.to_string(),
             _ => "?".to_owned(),
         };
-        let key = Some(id.as_str());
-        for column in [
-            "ticket_id",
-            "event_type",
-            "actor",
-            "timestamp",
-            "source_ip",
-            "user_agent",
-            "previous_state",
-            "new_state",
+        for (column, required) in [
+            ("ticket_id", true),
+            ("event_type", true),
+            ("actor", true),
+            ("timestamp", true),
+            ("source_ip", false),
+            ("user_agent", false),
+            ("previous_state", false),
+            ("new_state", false),
         ] {
-            if let Err(error) = text_column(row, "audit_events", key, column) {
-                report.row_problem(format_args!("{error}"));
-            }
+            check_text_column(row, "audit_events", &id, column, required, report)?;
         }
-        match text_column(row, "audit_events", key, "metadata_json") {
-            Err(error) => report.row_problem(format_args!("{error}")),
-            Ok(None) => {
-                report.row_problem(format_args!("audit_events {}: metadata_json: NULL", id))
-            }
-            Ok(Some(text)) => {
-                let problem = match parse(&text) {
-                    Err(error) => Some(error.to_string()),
-                    Ok(value) => json_problem(&value),
-                };
-                if let Some(problem) = problem {
-                    report.row_problem(format_args!(
-                        "audit_events {}: metadata_json: {problem}",
-                        id
-                    ));
-                }
-            }
+        if let Some(text) =
+            check_text_column(row, "audit_events", &id, "metadata_json", true, report)?
+            && let Some(problem) = json_problem(text)
+        {
+            report.row_problem(format_args!("audit_events {id}: metadata_json: {problem}"));
         }
     }
     Ok(())
@@ -373,9 +453,7 @@ fn check_rows(
         // printed.
         let key = format!("row {count}");
         for column in text_columns {
-            if let Err(error) = text_column(row, table, Some(&key), column) {
-                report.row_problem(format_args!("{error}"));
-            }
+            check_text_column(row, table, &key, column, false, report)?;
         }
         for column in integer_columns {
             if !matches!(row.get_ref(*column)?, ValueRef::Integer(_)) {
@@ -389,6 +467,19 @@ fn check_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexical_admission_ignores_escaped_string_content() {
+        let text = serde_json::to_string(&"[{},0\\\"".repeat(20_000)).unwrap();
+        assert_eq!(admit_json(&text), Ok(()));
+        assert_eq!(json_problem(&text), None);
+        // Keys, scalar values and nested containers all consume work; keys
+        // later replaced by duplicates still consume the same allowance.
+        assert_eq!(
+            admit_json(&format!("{{{}}}", vec!["\"k\":0"; 5000].join(","))),
+            Err("not safely audited: JSON exceeds 10000 tokens")
+        );
+    }
 
     #[test]
     fn audit_uses_one_snapshot_across_counts_rows_and_tables() {

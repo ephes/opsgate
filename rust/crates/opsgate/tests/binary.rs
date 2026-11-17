@@ -77,6 +77,17 @@ fn check_db_reports_and_exits_0_or_1() {
     );
     assert!(stdout.contains("tickets: 0 ()\n"), "{stdout}");
 
+    // Heavy JSON is explicitly refused by the audit and fails the command.
+    connection.execute(
+        "INSERT INTO audit_events (ticket_id, event_type, actor, timestamp, metadata_json) VALUES ('synthetic', 'test', 'test', 'now', ?)",
+        [format!("\"{}\"", "x".repeat(1024 * 1024))],
+    ).unwrap();
+    let output = opsgate(&["check-db", "--db", db]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    assert!(text(&output.stdout).contains("metadata_json: not safely audited:"));
+    connection.execute("DELETE FROM audit_events", []).unwrap();
+
     connection
         .execute_batch("DROP INDEX idx_tickets_state")
         .unwrap();

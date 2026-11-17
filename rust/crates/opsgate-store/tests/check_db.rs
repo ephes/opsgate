@@ -279,7 +279,7 @@ fn many_problems_are_capped_in_the_report() {
     let directory = tempfile::tempdir().unwrap();
     let path = database_with_tickets(directory.path());
     let connection = Connection::open(&path).unwrap();
-    for index in 0..60 {
+    for index in 0..2000 {
         connection
             .execute(
                 "INSERT INTO audit_events (ticket_id, event_type, actor, timestamp, metadata_json) VALUES ('t', 'e', 'a', 't', ?)",
@@ -288,8 +288,19 @@ fn many_problems_are_capped_in_the_report() {
             .unwrap();
     }
     let report = check_db(&path).unwrap();
-    assert_eq!(report.row_problems.len(), 60);
-    assert!(report.to_string().contains("… and 10 more"));
+    assert_eq!(report.row_problems.len(), 50);
+    assert_eq!(report.row_problem_count, 2000);
+    assert!(!report.is_ok());
+    assert!(report.to_string().contains("… and 1950 more"));
+    // Corruption found in a later table must still be counted after the cap.
+    connection
+        .execute("UPDATE runner_heartbeats SET updated_at = X'00'", [])
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    assert_eq!(report.row_problems.len(), 50);
+    assert!(!report.is_ok());
+    assert_eq!(report.row_problem_count, 2001);
+    assert!(report.to_string().contains("… and 1951 more"));
 }
 
 #[test]
@@ -318,4 +329,135 @@ fn write_protected_database_is_checked() {
     assert!(report.is_ok(), "{report}");
     assert_eq!(report.tickets, 2);
     assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[test]
+fn stored_identifiers_are_bounded_and_terminal_inert() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = database_with_tickets(directory.path());
+    let writer = Connection::open(&path).unwrap();
+    let hostile = format!("Ü😀\u{1b}[31m\n\r\t\u{202e}\u{2066}{}", "界".repeat(4000));
+    writer.execute(
+        "UPDATE tickets SET id = ?, state = ?, context_json = 'invalid', title = 'synthetic-private-content' WHERE task_ref = 'a'",
+        [&hostile, &hostile],
+    ).unwrap();
+    // The TicketRow storage-class error path must not expose the id either.
+    writer
+        .execute(
+            "UPDATE tickets SET id = ?, title = X'00' WHERE task_ref = 'b'",
+            [format!("{hostile}b")],
+        )
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    assert_eq!(report.row_problem_count, 2);
+    for problem in &report.row_problems {
+        assert!(problem.len() < 300, "{} bytes", problem.len());
+        assert!(!problem.contains('界'));
+    }
+    let state = &report.ticket_states.last().unwrap().0;
+    assert!(state.starts_with("Ü😀"), "{state:?}");
+    assert!(state.len() <= 128, "{} bytes", state.len());
+    let text = report.to_string();
+    for control in ['\u{1b}', '\r', '\t', '\u{202e}', '\u{2066}'] {
+        assert!(!text.contains(control));
+    }
+    assert!(!text.contains("synthetic-private-content"));
+    writer
+        .execute_batch(&format!("CREATE VIEW \"{hostile}\" AS SELECT 1"))
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    let problem = &report.schema_problems[0];
+    assert!(problem.len() < 160, "{} bytes", problem.len());
+    assert!(problem.contains("Ü😀"));
+    assert!(problem.contains("\\u{1b}"));
+    assert!(!problem.contains('\n') && !problem.contains('\u{202e}'));
+}
+
+#[test]
+fn json_audit_envelope_refuses_heavy_rows_without_an_ok_verdict() {
+    const BYTES: usize = 1024 * 1024;
+    const TOKENS: usize = 10_000;
+    let directory = tempfile::tempdir().unwrap();
+    let path = database_with_tickets(directory.path());
+    let writer = Connection::open(&path).unwrap();
+    let oversized = format!("\"{}\"", "x".repeat(BYTES - 1));
+    let wide = format!("[{}]", vec!["0"; TOKENS].join(","));
+    let duplicate_keys = format!("{{{}}}", vec!["\"k\":0"; TOKENS / 2].join(","));
+    let deep = format!("{}0{}", "[".repeat(65), "]".repeat(65));
+    for column in [
+        "execution_plan_json",
+        "policy_requirements_json",
+        "context_json",
+        "tmux_sessions_json",
+    ] {
+        let original: String = writer
+            .query_row(
+                &format!("SELECT {column} FROM tickets WHERE task_ref = 'a'"),
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for text in [&oversized, &wide, &duplicate_keys, &deep] {
+            writer
+                .execute(
+                    &format!("UPDATE tickets SET {column} = ? WHERE task_ref = 'a'"),
+                    [text],
+                )
+                .unwrap();
+            let report = check_db(&path).unwrap();
+            assert!(!report.is_ok(), "{column}, {} bytes", text.len());
+            assert_eq!(report.row_problem_count, 1, "{report}");
+            assert!(
+                report.row_problems[0].contains(&format!("{column}: not safely audited:")),
+                "{report}"
+            );
+        }
+        writer
+            .execute(
+                &format!("UPDATE tickets SET {column} = ? WHERE task_ref = 'a'"),
+                [&original],
+            )
+            .unwrap();
+    }
+    for text in [&oversized, &wide, &duplicate_keys, &deep] {
+        writer
+            .execute(
+                "UPDATE audit_events SET metadata_json = ? WHERE id = 1",
+                [text],
+            )
+            .unwrap();
+        let report = check_db(&path).unwrap();
+        assert!(!report.is_ok());
+        assert_eq!(report.row_problem_count, 1);
+        assert!(report.row_problems[0].contains("metadata_json: not safely audited:"));
+    }
+    writer
+        .execute("UPDATE audit_events SET metadata_json = '{}'", [])
+        .unwrap();
+    for text in [
+        format!("\"{}\"", "x".repeat(BYTES - 2)),
+        format!("[{}]", vec!["0"; TOKENS - 1].join(",")),
+        format!("{}0{}", "[".repeat(64), "]".repeat(64)),
+    ] {
+        writer
+            .execute(
+                "UPDATE tickets SET context_json = ? WHERE task_ref = 'a'",
+                [&text],
+            )
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let report = check_db(&path).unwrap();
+        assert!(report.is_ok(), "{report}");
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+    writer
+        .execute(
+            "UPDATE tickets SET expires_at = ? WHERE task_ref = 'a'",
+            ["x".repeat(257)],
+        )
+        .unwrap();
+    let report = check_db(&path).unwrap();
+    assert_eq!(report.row_problem_count, 1);
+    assert!(!report.is_ok());
+    assert!(report.row_problems[0].contains("expires_at: not safely audited:"));
 }

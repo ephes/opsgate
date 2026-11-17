@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- Admit offline audit JSON before hydration/canonicalization with inclusive 1 MiB,
+  10,000-token and 64-level limits. Borrow SQLite text, bound timestamp parsing
+  to 256 bytes, and fail explicitly when a field cannot be safely audited.
+
+- Identify offline audit ticket problems by rowid and bound/escape stored state
+  and schema labels before retaining or displaying them.
+
+- Retain at most 50 offline audit row diagnostics while counting every failed
+  check and reporting the exact number omitted.
+
+- Audit retained databases in one read-only SQLite snapshot across schema, counts
+  and row checks; release it before formatting the report. Offline checker only;
+  no service reactivation or rollout.
+
 - Bound login throttle expiry maintenance to 16 other clients per admission,
   plus exact expiry for the requested client, in Python and Rust. Count tracked
   clients without rebuilding the key union and remove empty cleanup positions.

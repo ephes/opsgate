@@ -1596,6 +1596,11 @@ Baseline (section 1): API 26.0 MiB RSS / 32 MB footprint; runner 23.4 MiB /
 - Target `aarch64-apple-darwin` (studio). `MACOSX_DEPLOYMENT_TARGET=14.0`.
   No dynamic libraries outside `/usr/lib` and `/System/Library` (rustls not
   needed: no TLS in the binary; SQLite bundled).
+
+*Superseded 2026-11-18:* the workflow below is removed; releases are built and
+published locally by `rust/scripts/local_release.py` with the same checks
+(rust/README.md "Release"). Kept as history.
+
 - Workflow `.github/workflows/rust-release.yml`, trigger tag `rs-v<semver>`
   (release) or `workflow_dispatch` (artifact only); runs on `macos-15`
   (arm64); actions pinned to SHAs; no cargo cache; `contents: write` only in

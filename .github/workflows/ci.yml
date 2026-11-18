@@ -17,8 +17,9 @@ name: CI
 # against the Python runner and the Rust release binary (every stack with Rust:
 # cross-implementation recovery and the four mixed API/runner stacks, since
 # slice S8). Both parity diffs run with --complete: no scenario may be skipped
-# on one side. The release pipeline is .github/workflows/rust-release.yml
-# (rust/PLAN.md 9); its checks (rust/scripts/release_checks.py) are tested by
+# on one side. Releases are built and published locally by
+# rust/scripts/local_release.py (rust/README.md "Release", no workflow); the
+# release checks (rust/scripts/release_checks.py) are tested by
 # tests/test_rust_release_checks.py in the Python job and linted in
 # `parity-api`.
 

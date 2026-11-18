@@ -1,0 +1,25 @@
+{
+  "comment": "Local release of the Rust port (rust/README.md \"Release\", rust/scripts/local_release.py). The checks are the old rust-release.yml workflow's fmt, clippy and test steps; the target is the Mac itself. src/ is in the source for the web templates (include_str!) and the Python side of the store round trip.",
+  "github_repository": "ephes/opsgate",
+  "binary": "opsgate",
+  "tag_prefix": "rs-v",
+  "target": "aarch64-apple-darwin",
+  "mode": "macos-native",
+  "commit_env": "OPSGATE_GIT_COMMIT",
+  "max_minos": "14.0",
+  "macho_arch": "arm64",
+  "source_paths": [
+    "rust",
+    "LICENSE",
+    "src"
+  ],
+  "checks": [
+    "cargo fmt --all --check",
+    "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "cargo test --workspace --locked"
+  ],
+  "check_env": {
+    "OPSGATE_REQUIRE_TMUX": "1",
+    "OPSGATE_REQUIRE_PYTHON": "1"
+  }
+}

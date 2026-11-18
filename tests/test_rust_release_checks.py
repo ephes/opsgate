@@ -1,6 +1,6 @@
 """Release checks of the Rust port (rust/PLAN.md section 9).
 
-``rust/scripts/release_checks.py`` gates the release workflow: the tag must
+``rust/scripts/release_checks.py`` gates the local release (``local_release.py``): the tag must
 match the crate version, the Mach-O binary must link only system libraries,
 need at most macOS 14.0, be arm64 only and carry its ad-hoc linker signature,
 ``--version`` must name the version and commit, ``check-config api`` and
@@ -436,38 +436,24 @@ def test_cli_macho_runs_every_tool(tmp_path: Path) -> None:
     assert "requires macOS 14.0, newer than 13.0" in result.stderr
 
 
-def test_release_workflow_runs_every_check() -> None:
-    workflow = (REPO / ".github" / "workflows" / "rust-release.yml").read_text(encoding="utf-8")
-    for needle in (
-        "runs-on: macos-15",
-        "TARGET: aarch64-apple-darwin",
-        'MACOSX_DEPLOYMENT_TARGET: "14.0"',
-        '- "rs-v*"',
-        "workflow_dispatch:",
-        "OPSGATE_GIT_COMMIT: ${{ github.sha }}",
-        "release_checks.py version",
-        "release_checks.py macho",
-        '--max-minos "$MACOSX_DEPLOYMENT_TARGET" --arch arm64',
-        "release_checks.py smoke",
-        "release_checks.py pack",
-        "--license ../LICENSE",
+def test_local_release_runs_every_check() -> None:
+    """rust/local-release.json drives rust/scripts/local_release.py (no CI
+    release workflow): the old workflow's checks, target, minimum macOS,
+    tag, commit variable and the tmux/Python requirements of the tests."""
+    config = json.loads((REPO / "rust" / "local-release.json").read_text(encoding="utf-8"))
+    assert config["github_repository"] == "ephes/opsgate"
+    assert config["tag_prefix"] == "rs-v"
+    assert config["target"] == "aarch64-apple-darwin"
+    assert config["mode"] == "macos-native"
+    assert config["max_minos"] == "14.0"
+    assert config["macho_arch"] == "arm64"
+    assert config["commit_env"] == "OPSGATE_GIT_COMMIT"
+    assert config["checks"] == [
         "cargo fmt --all --check",
         "cargo clippy --workspace --all-targets --locked -- -D warnings",
         "cargo test --workspace --locked",
-        'cargo build --release --locked --target "$TARGET"',
-        'OPSGATE_REQUIRE_TMUX: "1"',
-        "shasum -a 256 --check",
-        "sha256sum --check",
-        "--verify-tag",
-        "--prerelease",
-        "contents: write",
-    ):
-        assert needle in workflow, needle
-    assert "actions/cache" not in workflow
-    # Only the release job may write; every action is pinned to a commit.
-    writes = [number for number, line in enumerate(workflow.splitlines()) if line.strip() == "contents: write"]
-    assert len(writes) == 1
-    assert writes[0] > workflow.splitlines().index("  release:")
-    for line in workflow.splitlines():
-        if "uses:" in line:
-            assert re.search(r"uses: [\w./-]+@[0-9a-f]{40} # v", line), line
+    ]
+    assert config["check_env"] == {"OPSGATE_REQUIRE_TMUX": "1", "OPSGATE_REQUIRE_PYTHON": "1"}
+    # The web templates (include_str!) and the store round trip read src/.
+    assert config["source_paths"] == ["rust", "LICENSE", "src"]
+    assert not (REPO / ".github" / "workflows" / "rust-release.yml").exists()

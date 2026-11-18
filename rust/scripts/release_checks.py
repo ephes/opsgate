@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Release checks for the Rust port (rust/PLAN.md section 9).
 
-Used by `.github/workflows/rust-release.yml` on macOS; stdlib only and Python
+Used by `rust/scripts/local_release.py` on macOS; stdlib only and Python
 3.11 compatible. The pure parts are tested in
 `tests/test_rust_release_checks.py`. Adapted from
 `mailgun-relay:rust/scripts/release_checks.py` for a Mach-O target.

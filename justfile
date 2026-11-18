@@ -49,6 +49,16 @@ rs-fixtures: _sync
 rs-build:
     cd rust && cargo build --release --locked
 
+# Local release build of the current version (rust/README.md "Release"; publishes nothing)
+[positional-arguments]
+rs-release *args:
+    python3 -I rust/scripts/local_release.py build "$@"
+
+# Tag and publish what `just rs-release` built as GitHub release rs-v<version>, then download and compare
+[positional-arguments]
+rs-release-publish *args:
+    python3 -I rust/scripts/local_release.py publish "$@"
+
 # API parity harness (rust/PLAN.md 7.3): scenarios against Python and Rust `serve`, then the record diff
 # (--complete: a scenario recorded by only one run fails, as in CI).
 rs-parity-api *args: _sync

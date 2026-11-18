@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Release process
+
+- Rust releases are built and published locally by
+  `rust/scripts/local_release.py` (configuration `rust/local-release.json`,
+  `just rs-release` and `just rs-release-publish`, rust/README.md "Release")
+  instead of GitHub Actions: natively on an Apple silicon Mac from an extract
+  of the build commit, with the old workflow's checks (rustfmt, clippy, tests
+  with tmux and Python required, Mach-O checks, smoke test, deterministic
+  archive), then tag, GitHub release and a byte-for-byte download comparison.
+  The tag-triggered `.github/workflows/rust-release.yml` is removed. Tag
+  names, archive names and download URLs are unchanged, so ops-control's
+  version and sha256 pins keep working.
+
 ### Fixed
 
 - Admit offline audit JSON before hydration/canonicalization with inclusive 1 MiB,

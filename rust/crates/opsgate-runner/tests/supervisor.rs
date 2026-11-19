@@ -660,6 +660,29 @@ async fn artifact_only_recovery_retries_after_capacity_and_outage() {
     assert_eq!(f.api.gets(), gets);
 }
 
+/// An artifact-only candidate whose detail request reports a missing ticket
+/// (404) is retired; other 4xx responses (403, 429) keep it for later passes.
+#[tokio::test(start_paused = true)]
+async fn artifact_candidate_retired_on_permanent_client_error() {
+    let f = Fixture::new(FakeTmux::default());
+    for id in [A, B, C] {
+        std::fs::create_dir_all(f.exec_dir().join("sessions").join(id)).unwrap();
+    }
+    f.api.on_get(|id| match id {
+        A => Err(outage(404)),
+        B => Err(outage(403)),
+        _ => Err(outage(429)),
+    });
+
+    f.supervisor.recover_inflight_tickets(true).await.unwrap();
+    assert_eq!(f.api.gets(), [A, B, C]);
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets(), [A, B, C, B, C]);
+    for id in [A, B, C] {
+        assert!(!f.state_exists(id));
+    }
+}
+
 // ----- verified cleanup -----------------------------------------------------
 
 /// `test_cleanup_accepts_absent_tmux_server`.

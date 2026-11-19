@@ -1129,7 +1129,8 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   file, start worker (one per ticket).
   Rust skips live owned workers before the ticket GET and state-file update.
   Its later passes retain startup artifact candidates until state publication
-  or verified session cleanup and state removal for a non-running ticket.
+  or verified session cleanup and state removal for a non-running ticket,
+  and retire one whose ticket GET fails with 404 or 410.
 - Worker failure (`_run_worker`): API error ≥ 500 → log
   `Runner API unavailable: status=<s> category=<c>`, keep state; other
   exception → kill and **verify** the ticket's sessions are gone, then post

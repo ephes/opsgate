@@ -436,7 +436,8 @@ where
     /// `max_parallel_jobs` workers run: live owned workers and tickets the API
     /// cannot return are skipped; a ticket that is not `running` has its sessions
     /// killed (verified; else skipped) and its state file removed; a running
-    /// one gets a fresh state file and a worker.
+    /// one gets a fresh state file and a worker. An artifact candidate whose
+    /// detail request fails with 404 or 410 is retired.
     pub async fn recover_inflight_tickets(
         &self,
         include_artifacts: bool,
@@ -469,8 +470,16 @@ where
             if self.workers().is_active(&ticket_id) {
                 continue;
             }
-            let Ok(ticket) = self.inner.api.get_ticket(&ticket_id).await else {
-                continue;
+            let ticket = match self.inner.api.get_ticket(&ticket_id).await {
+                Ok(ticket) => ticket,
+                Err(error) => {
+                    // A missing ticket (404/410) never reappears, so an artifact candidate is retired
+                    // instead of being probed on every later pass.
+                    if is_permanent_client_error(error.status_code) {
+                        self.pending_artifacts().remove(&ticket_id);
+                    }
+                    continue;
+                }
             };
             let state = pytext::py_lower(pytext::strip(&text_or(&ticket, "state", "")));
             // Terminal and other non-running states are handled alike.
@@ -760,6 +769,13 @@ pub fn install_signal_handlers(stop: CancellationToken) -> io::Result<()> {
         }
     });
     Ok(())
+}
+
+/// A ticket-detail response that a retry cannot clear: the ticket does not
+/// exist (404) or is gone (410). Other errors, including 401/403 from a
+/// server-side misconfiguration, keep the candidate for later passes.
+fn is_permanent_client_error(status_code: u16) -> bool {
+    matches!(status_code, 404 | 410)
 }
 
 #[cfg(test)]

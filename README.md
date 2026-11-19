@@ -125,6 +125,8 @@ and returns `tmux command timed out` (`TmuxError::Timeout` in Rust,
 if cleanup cannot verify session absence, runner state and artifacts stay available for recovery.
 Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
 
+Rust recovery skips ticket-detail requests and state-file updates for tickets with live owned workers.
+
 Recovery reads each state file independently; invalid/unreadable files are retained with a bounded diagnostic
 and do not prevent tmux/artifact discovery or other tickets from recovering. A state file must contain a
 string UUID ticket identity matching its filename. Recovery never derives an identity from corrupt content.

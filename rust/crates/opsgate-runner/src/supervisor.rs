@@ -133,6 +133,14 @@ struct Workers {
     cleanup: HashMap<String, bool>,
 }
 
+impl Workers {
+    fn is_active(&self, ticket_id: &str) -> bool {
+        self.handles
+            .get(ticket_id)
+            .is_some_and(|handle| !handle.is_finished())
+    }
+}
+
 struct Inner<A, T, C> {
     settings: Arc<RunnerSettings>,
     api: A,
@@ -316,11 +324,7 @@ where
     /// running for it.
     pub fn start_worker(&self, ticket_id: String, initial_ticket: Option<JsonObject>) {
         let mut workers = self.workers();
-        if workers
-            .handles
-            .get(&ticket_id)
-            .is_some_and(|handle| !handle.is_finished())
-        {
+        if workers.is_active(&ticket_id) {
             return;
         }
         let supervisor = self.clone();
@@ -425,7 +429,7 @@ where
     /// an object or has no matching UUID identity is retained and skipped until changed),
     /// the tickets of tmux sessions named `job-<uuid>-NN-…` and, with `include_artifacts`, the
     /// artifact directories named like a ticket id. In sorted order, until
-    /// `max_parallel_jobs` workers run: a ticket the API cannot return is
+    /// `max_parallel_jobs` workers run: live owned workers are left alone; a ticket the API cannot return is
     /// skipped (its state file stays); one that is not `running` has its
     /// sessions killed (verified; else skipped) and its state file removed;
     /// a running one gets a fresh state file and a worker.
@@ -455,6 +459,9 @@ where
         for ticket_id in candidates {
             if self.active_worker_count() >= max_parallel_jobs {
                 break;
+            }
+            if self.workers().is_active(&ticket_id) {
+                continue;
             }
             let Ok(ticket) = self.inner.api.get_ticket(&ticket_id).await else {
                 continue;

@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Skip Rust recovery ticket probes and state rewrites for live owned workers.
+
 - Admit offline audit JSON before hydration/canonicalization with inclusive 1 MiB,
   10,000-token and 64-level limits. Borrow SQLite text, bound timestamp parsing
   to 256 bytes, and fail explicitly when a field cannot be safely audited.

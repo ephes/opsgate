@@ -508,7 +508,7 @@ async fn recovery_transport_outage_isolated_and_state_retained() {
 }
 
 /// Recovery stops at `max_parallel_jobs` (2) running workers; a ticket with
-/// a live worker gets no second one, and its state file is refreshed.
+/// a live worker gets no second one.
 #[tokio::test(start_paused = true)]
 async fn recovery_respects_worker_limit_and_live_workers() {
     // Live sessions without exit codes: the workers poll until stopped.
@@ -546,6 +546,39 @@ async fn recovery_respects_worker_limit_and_live_workers() {
             .join("steps/01-investigator/session_metadata.json"),
     );
     assert_eq!(metadata["status"], "interrupted");
+}
+
+#[tokio::test(start_paused = true)]
+async fn recovery_skips_probes_and_state_writes_for_owned_live_worker() {
+    let f = Fixture::new(FakeTmux::new(true, None));
+    f.api.insert(running_ticket(A, one_step(), 0, 3600));
+    f.supervisor
+        .start_worker(A.to_owned(), Some(running_ticket(A, one_step(), 0, 3600)));
+    let state_path = f.supervisor.state_path(A);
+    let original_state =
+        json!({"ticket_id": A, "runner_host": "runner-a", "updated_at": "original"});
+    std::fs::write(&state_path, original_state.to_string()).unwrap();
+
+    let recovery_gets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let gets = recovery_gets.clone();
+    f.api.on_get(move |_| {
+        if tokio::task::try_id().is_none() {
+            gets.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    });
+    for _ in 0..2 {
+        assert_eq!(f.supervisor.active_worker_count(), 1);
+        f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    }
+    let retained_state = read_json(&state_path);
+
+    f.stop.cancel();
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(
+        (recovery_gets.load(Ordering::SeqCst), retained_state),
+        (0, original_state)
+    );
 }
 
 /// The first pass also looks at the artifact directories (named like a

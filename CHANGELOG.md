@@ -18,6 +18,7 @@
 ### Fixed
 
 - Skip Rust recovery ticket probes and state rewrites for live owned workers.
+- Retry unresolved Rust runner artifact candidates across polling passes after capacity or API delays.
 
 - Admit offline audit JSON before hydration/canonicalization with inclusive 1 MiB,
   10,000-token and 64-level limits. Borrow SQLite text, bound timestamp parsing

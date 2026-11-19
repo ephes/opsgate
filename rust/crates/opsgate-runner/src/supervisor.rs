@@ -5,7 +5,8 @@
 //! `run_forever` runs one recovery pass that also looks at the artifact
 //! directories, then loops until the stop token is cancelled: reap finished
 //! workers (removing the state files of those marked for cleanup), a recovery
-//! pass over the state files and the tmux sessions, the disable file (sleep,
+//! pass over the state files, tmux sessions and deferred artifact candidates,
+//! the disable file (sleep,
 //! or end with `--once`), claims while fewer than `max_parallel_jobs` workers
 //! run, and a sleep of the poll interval. Afterwards it waits for every
 //! worker (`_wait_for_workers`). Workers are tokio tasks (Python: threads);
@@ -152,6 +153,7 @@ struct Inner<A, T, C> {
     workers: Mutex<Workers>,
     worker_done: Notify,
     artifacts_scanned: AtomicBool,
+    pending_artifacts: Mutex<BTreeSet<String>>,
     rejected_state: Mutex<HashMap<PathBuf, Option<StateStamp>>>,
 }
 
@@ -213,6 +215,7 @@ where
                 workers: Mutex::new(Workers::default()),
                 worker_done: Notify::new(),
                 artifacts_scanned: AtomicBool::new(false),
+                pending_artifacts: Mutex::default(),
                 rejected_state: Mutex::new(HashMap::new()),
             }),
         })
@@ -428,11 +431,12 @@ where
     /// Candidates: the ids of the state files (a file that is not JSON, not
     /// an object or has no matching UUID identity is retained and skipped until changed),
     /// the tickets of tmux sessions named `job-<uuid>-NN-…` and, with `include_artifacts`, the
-    /// artifact directories named like a ticket id. In sorted order, until
-    /// `max_parallel_jobs` workers run: live owned workers are left alone; a ticket the API cannot return is
-    /// skipped (its state file stays); one that is not `running` has its
-    /// sessions killed (verified; else skipped) and its state file removed;
-    /// a running one gets a fresh state file and a worker.
+    /// artifact directories named like a ticket id. Artifact ids remain candidates
+    /// until verified cleanup or state-file publication. In sorted order, until
+    /// `max_parallel_jobs` workers run: live owned workers and tickets the API
+    /// cannot return are skipped; a ticket that is not `running` has its sessions
+    /// killed (verified; else skipped) and its state file removed; a running
+    /// one gets a fresh state file and a worker.
     pub async fn recover_inflight_tickets(
         &self,
         include_artifacts: bool,
@@ -451,8 +455,10 @@ where
         .collect();
         candidates.extend(self.discover_ticket_ids_from_tmux().await?);
         if include_artifacts {
-            candidates.extend(self.discover_ticket_ids_from_artifacts().await?);
+            let discovered = self.discover_ticket_ids_from_artifacts().await?;
+            self.pending_artifacts().extend(discovered);
         }
+        candidates.extend(self.pending_artifacts().iter().cloned());
 
         let max_parallel_jobs =
             usize::try_from(self.inner.settings.max_parallel_jobs).unwrap_or(usize::MAX);
@@ -477,9 +483,11 @@ where
                     continue;
                 }
                 self.remove_state_file(&ticket_id).await?;
+                self.pending_artifacts().remove(&ticket_id);
                 continue;
             }
             self.write_state_file(&ticket_id).await?;
+            self.pending_artifacts().remove(&ticket_id);
             self.start_worker(ticket_id, Some(ticket));
         }
         Ok(())
@@ -646,6 +654,13 @@ where
             () = tokio::time::sleep(duration) => {}
             () = self.inner.stop.cancelled() => {}
         }
+    }
+
+    fn pending_artifacts(&self) -> MutexGuard<'_, BTreeSet<String>> {
+        self.inner
+            .pending_artifacts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn workers(&self) -> MutexGuard<'_, Workers> {

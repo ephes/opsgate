@@ -37,14 +37,19 @@ impl Fixture {
     }
 
     fn with_heartbeat(tmux: FakeTmux, heartbeat: i64) -> Self {
+        Self::with_limits(tmux, heartbeat, 2)
+    }
+
+    fn with_limits(tmux: FakeTmux, heartbeat: i64, capacity: i64) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_owned();
-        let settings = Arc::new(runner_settings(&root, heartbeat));
+        let mut settings = runner_settings(&root, heartbeat);
+        settings.max_parallel_jobs = capacity;
         let api = FleetApi::new();
         let tmux = Arc::new(tmux);
         let stop = CancellationToken::new();
         let supervisor = Supervisor::new(
-            settings,
+            Arc::new(settings),
             api.clone(),
             tmux.clone(),
             TestClock::new(),
@@ -604,6 +609,55 @@ async fn first_recovery_pass_includes_artifact_directories() {
     // A second run of the same supervisor does not scan them again.
     f.supervisor.run_forever(true).await.unwrap();
     assert_eq!(f.api.gets(), [A, C]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn artifact_only_recovery_retries_after_capacity_and_outage() {
+    let f = Fixture::with_limits(FakeTmux::default(), 1, 1);
+    for id in [A, B] {
+        f.api.insert(running_ticket(id, one_step(), 0, 120));
+        let step = f
+            .exec_dir()
+            .join("sessions")
+            .join(id)
+            .join("steps/01-investigator");
+        std::fs::create_dir_all(&step).unwrap();
+        std::fs::write(
+            step.join("session_metadata.json"),
+            json!({"status": "running", "started_at": "2026-01-01T00:00:00Z"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(step.join("exit_code"), "0\n").unwrap();
+    }
+
+    f.supervisor.recover_inflight_tickets(true).await.unwrap();
+    assert_eq!(f.api.gets(), [A]);
+    assert!(f.state_exists(A));
+    assert!(!f.state_exists(B));
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(f.api.state(A), "succeeded");
+    assert!(!f.state_exists(A));
+
+    let mut unavailable = true;
+    f.api.on_get(move |id| {
+        if id == B && std::mem::take(&mut unavailable) {
+            return Err(outage(503));
+        }
+        Ok(())
+    });
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets().last().unwrap(), B);
+    assert!(!f.state_exists(B));
+
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert!(f.state_exists(B));
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(f.api.state(B), "succeeded");
+    assert!(f.tmux.launched().is_empty());
+
+    let gets = f.api.gets();
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets(), gets);
 }
 
 // ----- verified cleanup -----------------------------------------------------

@@ -126,6 +126,9 @@ if cleanup cannot verify session absence, runner state and artifacts stay availa
 Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
 
 Rust recovery skips ticket-detail requests and state-file updates for tickets with live owned workers.
+It carries unresolved artifact candidates from the startup scan into later polling passes, including
+tickets deferred by the worker limit or an unavailable detail request. An artifact candidate is retired
+after publishing runner state or verifying session cleanup and removing state for a non-running ticket.
 
 Recovery reads each state file independently; invalid/unreadable files are retained with a bounded diagnostic
 and do not prevent tmux/artifact discovery or other tickets from recovering. A state file must contain a

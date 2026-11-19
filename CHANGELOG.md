@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Publish Rust ticket dumps only after the complete inventory is written and synced, preserving competing destinations.
+
 - Skip Rust recovery ticket probes and state rewrites for live owned workers.
 - Retry unresolved Rust runner artifact candidates across polling passes after capacity or API delays.
 

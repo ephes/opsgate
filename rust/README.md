@@ -153,13 +153,14 @@ step 1, one JSON line per ticket in `rowid` order: the serialisation as `GET
 /api/v1/tickets/<id>` returns it, the payload checksum approval recomputes
 from the stored fields (or the error code, `unhandled` for a 500), the stored
 `approved_payload_checksum` and whether both match. The file is created new
-with mode 0600 (it holds prompts and contexts; an existing file is never
-overwritten, a failed dump is removed) and only when the schema matches; a
-summary line follows the report. Records and checksum counters describe one SQLite
+only when the schema matches. Records and checksum counters describe one SQLite
 read snapshot; concurrent WAL writers can commit without entering that dump. A
-subsequent dump sees their committed changes. Write and flush errors return no
-success summary; file-level failures remove only the output created by that call,
-preserving existing destinations and the read-only source.
+subsequent dump sees their committed changes. The dump is staged in a sibling file
+with mode 0600 because it holds prompts and contexts. After flushing and syncing
+the staged file, the command publishes it only if the destination is still absent.
+The containing directory is synced before the success summary. A failed directory
+sync can leave a complete dump at the destination. An abrupt stop can leave a hidden
+`.opsgate-dump-*` staging file; remove it once the writer has stopped.
 
 On the database copy of the shadow run:
 

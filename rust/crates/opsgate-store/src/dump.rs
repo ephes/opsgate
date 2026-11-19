@@ -21,10 +21,11 @@
 //!   4.7.3).
 //!
 //! The database is opened read-only as `check-db` opens it; nothing is
-//! written to it. The dump contains prompts and contexts: it is created new
-//! (never overwriting a file) with mode 0600.
+//! written to it. The dump contains prompts and contexts and is staged with
+//! mode 0600 before being published under a new name.
 
-use std::io::Write;
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use rusqlite::types::ValueRef;
@@ -139,24 +140,88 @@ pub fn dump_tickets(path: &Path, out: &mut impl Write) -> Result<DumpSummary, St
     Ok(summary)
 }
 
-/// [`dump_tickets`] into a new file `dump` (mode 0600; an existing file is
-/// an error, never overwritten). A dump that fails is removed again.
+/// [`dump_tickets`] into a private sibling file, then publish it at `dump`
+/// without overwriting. Sync the file before publication and the directory
+/// before returning success.
 pub fn dump_to_file(path: &Path, dump: &Path) -> Result<DumpSummary, StoreError> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    let file = options.open(dump)?;
-    let mut writer = std::io::BufWriter::new(file);
-    let written = dump_tickets(path, &mut writer).and_then(|summary| {
-        writer
-            .into_inner()
-            .map_err(|error| error.into_error())?
-            .sync_all()?;
-        Ok(summary)
-    });
-    if written.is_err() {
-        let _ = std::fs::remove_file(dump);
+    publish_dump(dump, |file| dump_tickets(path, &mut BufWriter::new(file)))
+}
+
+fn publish_dump(
+    dump: &Path,
+    write: impl FnOnce(&mut File) -> Result<DumpSummary, StoreError>,
+) -> Result<DumpSummary, StoreError> {
+    // Fail early for existing destinations, including dangling symlinks.
+    match dump.symlink_metadata() {
+        Ok(_) => return Err(io::Error::from(io::ErrorKind::AlreadyExists).into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
-    written
+    let parent = dump
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let directory = File::open(parent)?;
+    let mut staged = tempfile::Builder::new()
+        .prefix(".opsgate-dump-")
+        .tempfile_in(parent)?;
+    let summary = write(staged.as_file_mut())?;
+    staged.as_file().sync_all()?;
+    staged
+        .persist_noclobber(dump)
+        .map_err(|error| error.error)?;
+    directory.sync_all()?;
+    Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupted_dump_leaves_destination_unpublished() {
+        const CHILD_DESTINATION: &str = "OPSGATE_INTERRUPTED_DUMP_TEST_PATH";
+        if let Some(path) = std::env::var_os(CHILD_DESTINATION) {
+            let _ = publish_dump(Path::new(&path), |file| {
+                file.write_all(b"{\"rowid\":1}\n{\"rowid\":2}\n{\"rowid\":3}\n")
+                    .unwrap();
+                // Exit without running file or staging destructors.
+                std::process::exit(17);
+            });
+            panic!("dump writer did not run");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("dump.jsonl");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "dump::tests::interrupted_dump_leaves_destination_unpublished",
+            ])
+            .env(CHILD_DESTINATION, &destination)
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(17));
+        assert!(
+            !destination.exists(),
+            "interrupted dump exposed incomplete output"
+        );
+        publish_dump(&destination, |_| Ok(DumpSummary::default())).unwrap();
+    }
+
+    #[test]
+    fn dump_promotion_preserves_competing_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("dump.jsonl");
+        let result = publish_dump(&destination, |file| {
+            file.write_all(b"staged output")?;
+            std::fs::File::create_new(&destination)?.write_all(b"competing output")?;
+            Ok(DumpSummary::default())
+        });
+        assert!(
+            matches!(result, Err(StoreError::Io(error)) if error.kind() == std::io::ErrorKind::AlreadyExists)
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"competing output");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 }

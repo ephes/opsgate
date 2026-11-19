@@ -125,6 +125,12 @@ and returns `tmux command timed out` (`TmuxError::Timeout` in Rust,
 if cleanup cannot verify session absence, runner state and artifacts stay available for recovery.
 Inspect them before retrying a ticket; the restart rules above still prevent a second launch.
 
+Rust recovery skips ticket-detail requests and state-file updates for tickets with live owned workers.
+It carries unresolved artifact candidates from the startup scan into later polling passes, including
+tickets deferred by the worker limit or an unavailable detail request. An artifact candidate is retired
+after publishing runner state or verifying session cleanup and removing state for a non-running ticket,
+or when its detail request reports a missing ticket (404 or 410).
+
 Recovery reads each state file independently; invalid/unreadable files are retained with a bounded diagnostic
 and do not prevent tmux/artifact discovery or other tickets from recovering. A state file must contain a
 string UUID ticket identity matching its filename. Recovery never derives an identity from corrupt content.
@@ -220,6 +226,7 @@ Useful keys:
 ### Runner readiness
 
 `GET /api/v1/health` keeps HTTP 200 and `status: "ok"` as control-plane liveness.
+The Rust API reads ticket counters and the latest runner heartbeat and host from one SQLite snapshot.
 Execution-readiness consumers must additionally require `runner_readiness.status == "fresh"`.
 Both APIs return `runner_readiness` with `status` and `freshness_threshold_seconds: 120`:
 no heartbeat is `unavailable`, age over 120 seconds is `stale`, and an invalid timestamp or
@@ -427,5 +434,6 @@ builds for macOS arm64 are built locally and published as GitHub releases `rs-v<
 `rust/scripts/local_release.py` (`just rs-release`, then `just rs-release-publish`).
 See `rust/README.md`. Rust `check-db --dump` exports one SQLite read snapshot,
 even while another connection changes tickets. Its counters describe those same
-records. Write/flush errors return failure; a failed file dump is removed and an
-existing destination is preserved.
+records. It writes to a private sibling file, syncs it and publishes the complete
+dump without replacing an existing destination. It syncs the containing directory
+before reporting success. An abrupt stop can leave a hidden staging file.

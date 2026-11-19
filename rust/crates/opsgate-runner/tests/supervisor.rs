@@ -37,14 +37,19 @@ impl Fixture {
     }
 
     fn with_heartbeat(tmux: FakeTmux, heartbeat: i64) -> Self {
+        Self::with_limits(tmux, heartbeat, 2)
+    }
+
+    fn with_limits(tmux: FakeTmux, heartbeat: i64, capacity: i64) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_owned();
-        let settings = Arc::new(runner_settings(&root, heartbeat));
+        let mut settings = runner_settings(&root, heartbeat);
+        settings.max_parallel_jobs = capacity;
         let api = FleetApi::new();
         let tmux = Arc::new(tmux);
         let stop = CancellationToken::new();
         let supervisor = Supervisor::new(
-            settings,
+            Arc::new(settings),
             api.clone(),
             tmux.clone(),
             TestClock::new(),
@@ -508,7 +513,7 @@ async fn recovery_transport_outage_isolated_and_state_retained() {
 }
 
 /// Recovery stops at `max_parallel_jobs` (2) running workers; a ticket with
-/// a live worker gets no second one, and its state file is refreshed.
+/// a live worker gets no second one.
 #[tokio::test(start_paused = true)]
 async fn recovery_respects_worker_limit_and_live_workers() {
     // Live sessions without exit codes: the workers poll until stopped.
@@ -548,6 +553,39 @@ async fn recovery_respects_worker_limit_and_live_workers() {
     assert_eq!(metadata["status"], "interrupted");
 }
 
+#[tokio::test(start_paused = true)]
+async fn recovery_skips_probes_and_state_writes_for_owned_live_worker() {
+    let f = Fixture::new(FakeTmux::new(true, None));
+    f.api.insert(running_ticket(A, one_step(), 0, 3600));
+    f.supervisor
+        .start_worker(A.to_owned(), Some(running_ticket(A, one_step(), 0, 3600)));
+    let state_path = f.supervisor.state_path(A);
+    let original_state =
+        json!({"ticket_id": A, "runner_host": "runner-a", "updated_at": "original"});
+    std::fs::write(&state_path, original_state.to_string()).unwrap();
+
+    let recovery_gets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let gets = recovery_gets.clone();
+    f.api.on_get(move |_| {
+        if tokio::task::try_id().is_none() {
+            gets.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    });
+    for _ in 0..2 {
+        assert_eq!(f.supervisor.active_worker_count(), 1);
+        f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    }
+    let retained_state = read_json(&state_path);
+
+    f.stop.cancel();
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(
+        (recovery_gets.load(Ordering::SeqCst), retained_state),
+        (0, original_state)
+    );
+}
+
 /// The first pass also looks at the artifact directories (named like a
 /// ticket id, symlinks followed); later passes do not.
 #[tokio::test(start_paused = true)]
@@ -571,6 +609,78 @@ async fn first_recovery_pass_includes_artifact_directories() {
     // A second run of the same supervisor does not scan them again.
     f.supervisor.run_forever(true).await.unwrap();
     assert_eq!(f.api.gets(), [A, C]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn artifact_only_recovery_retries_after_capacity_and_outage() {
+    let f = Fixture::with_limits(FakeTmux::default(), 1, 1);
+    for id in [A, B] {
+        f.api.insert(running_ticket(id, one_step(), 0, 120));
+        let step = f
+            .exec_dir()
+            .join("sessions")
+            .join(id)
+            .join("steps/01-investigator");
+        std::fs::create_dir_all(&step).unwrap();
+        std::fs::write(
+            step.join("session_metadata.json"),
+            json!({"status": "running", "started_at": "2026-01-01T00:00:00Z"}).to_string(),
+        )
+        .unwrap();
+        std::fs::write(step.join("exit_code"), "0\n").unwrap();
+    }
+
+    f.supervisor.recover_inflight_tickets(true).await.unwrap();
+    assert_eq!(f.api.gets(), [A]);
+    assert!(f.state_exists(A));
+    assert!(!f.state_exists(B));
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(f.api.state(A), "succeeded");
+    assert!(!f.state_exists(A));
+
+    let mut unavailable = true;
+    f.api.on_get(move |id| {
+        if id == B && std::mem::take(&mut unavailable) {
+            return Err(outage(503));
+        }
+        Ok(())
+    });
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets().last().unwrap(), B);
+    assert!(!f.state_exists(B));
+
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert!(f.state_exists(B));
+    f.supervisor.wait_for_workers().await.unwrap();
+    assert_eq!(f.api.state(B), "succeeded");
+    assert!(f.tmux.launched().is_empty());
+
+    let gets = f.api.gets();
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets(), gets);
+}
+
+/// An artifact-only candidate whose detail request reports a missing ticket
+/// (404) is retired; other 4xx responses (403, 429) keep it for later passes.
+#[tokio::test(start_paused = true)]
+async fn artifact_candidate_retired_on_permanent_client_error() {
+    let f = Fixture::new(FakeTmux::default());
+    for id in [A, B, C] {
+        std::fs::create_dir_all(f.exec_dir().join("sessions").join(id)).unwrap();
+    }
+    f.api.on_get(|id| match id {
+        A => Err(outage(404)),
+        B => Err(outage(403)),
+        _ => Err(outage(429)),
+    });
+
+    f.supervisor.recover_inflight_tickets(true).await.unwrap();
+    assert_eq!(f.api.gets(), [A, B, C]);
+    f.supervisor.recover_inflight_tickets(false).await.unwrap();
+    assert_eq!(f.api.gets(), [A, B, C, B, C]);
+    for id in [A, B, C] {
+        assert!(!f.state_exists(id));
+    }
 }
 
 // ----- verified cleanup -----------------------------------------------------

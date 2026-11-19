@@ -5,7 +5,8 @@
 //! `run_forever` runs one recovery pass that also looks at the artifact
 //! directories, then loops until the stop token is cancelled: reap finished
 //! workers (removing the state files of those marked for cleanup), a recovery
-//! pass over the state files and the tmux sessions, the disable file (sleep,
+//! pass over the state files, tmux sessions and deferred artifact candidates,
+//! the disable file (sleep,
 //! or end with `--once`), claims while fewer than `max_parallel_jobs` workers
 //! run, and a sleep of the poll interval. Afterwards it waits for every
 //! worker (`_wait_for_workers`). Workers are tokio tasks (Python: threads);
@@ -133,6 +134,14 @@ struct Workers {
     cleanup: HashMap<String, bool>,
 }
 
+impl Workers {
+    fn is_active(&self, ticket_id: &str) -> bool {
+        self.handles
+            .get(ticket_id)
+            .is_some_and(|handle| !handle.is_finished())
+    }
+}
+
 struct Inner<A, T, C> {
     settings: Arc<RunnerSettings>,
     api: A,
@@ -144,6 +153,7 @@ struct Inner<A, T, C> {
     workers: Mutex<Workers>,
     worker_done: Notify,
     artifacts_scanned: AtomicBool,
+    pending_artifacts: Mutex<BTreeSet<String>>,
     rejected_state: Mutex<HashMap<PathBuf, Option<StateStamp>>>,
 }
 
@@ -205,6 +215,7 @@ where
                 workers: Mutex::new(Workers::default()),
                 worker_done: Notify::new(),
                 artifacts_scanned: AtomicBool::new(false),
+                pending_artifacts: Mutex::default(),
                 rejected_state: Mutex::new(HashMap::new()),
             }),
         })
@@ -316,11 +327,7 @@ where
     /// running for it.
     pub fn start_worker(&self, ticket_id: String, initial_ticket: Option<JsonObject>) {
         let mut workers = self.workers();
-        if workers
-            .handles
-            .get(&ticket_id)
-            .is_some_and(|handle| !handle.is_finished())
-        {
+        if workers.is_active(&ticket_id) {
             return;
         }
         let supervisor = self.clone();
@@ -424,11 +431,13 @@ where
     /// Candidates: the ids of the state files (a file that is not JSON, not
     /// an object or has no matching UUID identity is retained and skipped until changed),
     /// the tickets of tmux sessions named `job-<uuid>-NN-…` and, with `include_artifacts`, the
-    /// artifact directories named like a ticket id. In sorted order, until
-    /// `max_parallel_jobs` workers run: a ticket the API cannot return is
-    /// skipped (its state file stays); one that is not `running` has its
-    /// sessions killed (verified; else skipped) and its state file removed;
-    /// a running one gets a fresh state file and a worker.
+    /// artifact directories named like a ticket id. Artifact ids remain candidates
+    /// until verified cleanup or state-file publication. In sorted order, until
+    /// `max_parallel_jobs` workers run: live owned workers and tickets the API
+    /// cannot return are skipped; a ticket that is not `running` has its sessions
+    /// killed (verified; else skipped) and its state file removed; a running
+    /// one gets a fresh state file and a worker. An artifact candidate whose
+    /// detail request fails with 404 or 410 is retired.
     pub async fn recover_inflight_tickets(
         &self,
         include_artifacts: bool,
@@ -447,8 +456,10 @@ where
         .collect();
         candidates.extend(self.discover_ticket_ids_from_tmux().await?);
         if include_artifacts {
-            candidates.extend(self.discover_ticket_ids_from_artifacts().await?);
+            let discovered = self.discover_ticket_ids_from_artifacts().await?;
+            self.pending_artifacts().extend(discovered);
         }
+        candidates.extend(self.pending_artifacts().iter().cloned());
 
         let max_parallel_jobs =
             usize::try_from(self.inner.settings.max_parallel_jobs).unwrap_or(usize::MAX);
@@ -456,8 +467,19 @@ where
             if self.active_worker_count() >= max_parallel_jobs {
                 break;
             }
-            let Ok(ticket) = self.inner.api.get_ticket(&ticket_id).await else {
+            if self.workers().is_active(&ticket_id) {
                 continue;
+            }
+            let ticket = match self.inner.api.get_ticket(&ticket_id).await {
+                Ok(ticket) => ticket,
+                Err(error) => {
+                    // A missing ticket (404/410) never reappears, so an artifact candidate is retired
+                    // instead of being probed on every later pass.
+                    if is_permanent_client_error(error.status_code) {
+                        self.pending_artifacts().remove(&ticket_id);
+                    }
+                    continue;
+                }
             };
             let state = pytext::py_lower(pytext::strip(&text_or(&ticket, "state", "")));
             // Terminal and other non-running states are handled alike.
@@ -470,9 +492,11 @@ where
                     continue;
                 }
                 self.remove_state_file(&ticket_id).await?;
+                self.pending_artifacts().remove(&ticket_id);
                 continue;
             }
             self.write_state_file(&ticket_id).await?;
+            self.pending_artifacts().remove(&ticket_id);
             self.start_worker(ticket_id, Some(ticket));
         }
         Ok(())
@@ -641,6 +665,13 @@ where
         }
     }
 
+    fn pending_artifacts(&self) -> MutexGuard<'_, BTreeSet<String>> {
+        self.inner
+            .pending_artifacts
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn workers(&self) -> MutexGuard<'_, Workers> {
         // A worker never panics while holding the lock (no code in the
         // critical sections can), so the data is consistent either way.
@@ -738,6 +769,13 @@ pub fn install_signal_handlers(stop: CancellationToken) -> io::Result<()> {
         }
     });
     Ok(())
+}
+
+/// A ticket-detail response that a retry cannot clear: the ticket does not
+/// exist (404) or is gone (410). Other errors, including 401/403 from a
+/// server-side misconfiguration, keep the candidate for later passes.
+fn is_permanent_client_error(status_code: u16) -> bool {
+    matches!(status_code, 404 | 410)
 }
 
 #[cfg(test)]

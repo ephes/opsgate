@@ -17,6 +17,14 @@
 
 ### Fixed
 
+- Read Rust health ticket counters and the latest runner heartbeat and host from a single SQLite snapshot.
+
+- Publish Rust ticket dumps only after the complete inventory is written and synced, preserving competing destinations.
+
+- Skip Rust recovery ticket probes and state rewrites for live owned workers.
+- Retry unresolved Rust runner artifact candidates across polling passes after capacity or API delays;
+  retire a candidate whose ticket request reports a missing ticket (404 or 410).
+
 - Admit offline audit JSON before hydration/canonicalization with inclusive 1 MiB,
   10,000-token and 64-level limits. Borrow SQLite text, bound timestamp parsing
   to 256 bytes, and fail explicitly when a field cannot be safely audited.

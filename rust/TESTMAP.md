@@ -340,6 +340,9 @@ relative to `rust/` (Rust) or the repository root (pytest).
 | `parity/runner/` (S8) | the CI job `parity-runner` runs every stack with Rust on Linux and macOS (cross-implementation recovery in both directions and the four mixed API/runner stacks): 38 scenarios, 48 stacks with Rust compared with `--require-rust --complete` locally on macOS, 0 skipped, 0 differences | S8 |
 | `tests/test_rust_release_checks.py` | `rust/scripts/release_checks.py` and `rust/local-release.json` (PLAN.md 9; the workflow was replaced by `rust/scripts/local_release.py`, tested in `tests/test_local_release.py`): the version from `cargo metadata` and the tag, `otool -L` allow-list, `vtool` minos (numerically, one `LC_BUILD_VERSION`, macOS only), `lipo` architectures, the ad-hoc linker signature, the `macho` subcommand calling each tool, `--version` text, `check-config api\|runner` against the role-shaped test env files (exact summary, cleared environment, mode 0600, nothing created), the deterministic archive and its checksum line, the local release configuration | S9 |
 
+`crates/opsgate-store/src/health.rs::tests::health_counts_and_latest_heartbeat_share_a_wal_snapshot`
+commits a claim and heartbeat on a second connection between projections and checks both health snapshots.
+
 ## Round 50 admission and recovery boundaries
 
 | Python coverage | Rust coverage | Shared/parity evidence |

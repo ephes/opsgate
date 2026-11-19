@@ -99,7 +99,8 @@ every write: `schema` (the DDL of `init_db`, verbatim), `Store::open`
 (`init_db` and the session-state sync), the session generation
 (`ui_session_generation`, `revoke_ui_sessions`), ticket creation
 (`create_ticket`, `create_manual_ticket`: validation, lazy expiry, dedupe,
-audit), `get_ticket`, `list_tickets`, `health`, and `check` (`check-db`).
+audit), `get_ticket`, `list_tickets`, `health`, and `check` (`check-db`). Health reads
+ticket counters and the latest runner heartbeat and host in one SQLite read transaction.
 S3b adds the approver's transitions (`approve_ticket`, `reject_ticket`,
 `cancel_ticket`, `archive_ticket`, `unarchive_ticket`: state checks in
 Python's order, compare-and-set on the state read → 409 `state_changed`,

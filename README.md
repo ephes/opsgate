@@ -225,6 +225,7 @@ Useful keys:
 ### Runner readiness
 
 `GET /api/v1/health` keeps HTTP 200 and `status: "ok"` as control-plane liveness.
+The Rust API reads ticket counters and the latest runner heartbeat and host from one SQLite snapshot.
 Execution-readiness consumers must additionally require `runner_readiness.status == "fresh"`.
 Both APIs return `runner_readiness` with `status` and `freshness_threshold_seconds: 120`:
 no heartbeat is `unavailable`, age over 120 seconds is `stale`, and an invalid timestamp or

@@ -671,7 +671,8 @@ Health additionally returns `runner_readiness: {status, freshness_threshold_seco
 both implementations. Status is `unavailable` without heartbeat, `stale` for age > 120 s,
 `clock_invalid` for invalid timestamps or > 5 s future skew, otherwise `fresh`. HTTP 200 and
 control-plane status ok are unchanged; execution-readiness consumers must require `fresh`.
-The new component carries no runner identity.
+The new component carries no runner identity. The Rust store reads ticket counters
+and the latest heartbeat and host in one SQLite read transaction.
 
 ### 4.7 Ticket lifecycle and SQL semantics (`service.py`)
 
@@ -1126,6 +1127,9 @@ artifacts read by Rust and vice versa) is P1 and tested (7.4).
   worker limit is reached; `GET` error → skip; terminal or not running → kill
   that ticket's sessions (verified), delete state file; running → write state
   file, start worker (one per ticket).
+  Rust skips live owned workers before the ticket GET and state-file update.
+  Its later passes retain startup artifact candidates until state publication
+  or verified session cleanup and state removal for a non-running ticket.
 - Worker failure (`_run_worker`): API error ≥ 500 → log
   `Runner API unavailable: status=<s> category=<c>`, keep state; other
   exception → kill and **verify** the ticket's sessions are gone, then post
@@ -1754,7 +1758,9 @@ About 2 h, root SSH session in tmux, no production unit touched:
    `control_service_user`: `parity/shadow/serialize_python.py` (imports the
    deployed venv's `opsgate.service`) and `opsgate check-db --db <copy> --dump
    <file>` write every ticket's serialisation, recomputed checksum and
-   `approved_payload_checksum` comparison (JSON lines, files created 0600);
+   `approved_payload_checksum` comparison (JSON lines, files created 0600).
+   Rust stages and syncs the file before create-only publication, then syncs
+   the containing directory before reporting success.
    `parity/shadow/compare_dump.py` (stdlib) compares them; the comparison must
    show zero differences and every `approved_payload_checksum` that matched in
    Python matches in Rust. The role's rsync excludes `rust/` (S1o), so the

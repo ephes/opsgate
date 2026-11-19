@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- Read Rust health ticket counters and the latest runner heartbeat and host from a single SQLite snapshot.
+
 - Publish Rust ticket dumps only after the complete inventory is written and synced, preserving competing destinations.
 
 - Skip Rust recovery ticket probes and state rewrites for live owned workers.
